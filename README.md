@@ -54,22 +54,30 @@ Then a pod drains. Replication lag spikes to 300 ms. Your retry logic hammers th
 
 You've been in this room before. Toxiproxy didn't catch it — it's TCP-blind, it never sees `HikariPool.getConnection()` blocking. Your unit tests didn't catch it — they mocked the Redis client. Your integration tests didn't catch it — Testcontainers gave you a perfect Redis. The last game day was three months ago.
 
-**Add eight lines to your test suite. Catch it on the next PR.**
+**Add one test class to your suite. Catch it on the next PR.**
 
 ```java
 @ChaosTest
-void retryLogicSurvivesReplicationLag(ChaosControlPlane chaos) {
-    chaos.activate(ChaosScenario.builder("replica-lag-300ms")
-        .selector(ChaosSelector.network(
-            Set.of(OperationType.SOCKET_READ),
-            NamePattern.prefix("redis-replica.")))
-        .effect(ChaosEffect.delay(Duration.ofMillis(300)))
-        .activationPolicy(ActivationPolicy.always())
-        .build());
+class ReplicationLagTest {
 
-    assertThat(service.read1000Keys().latencyP99()).isLessThan(BUDGET);
+    @Autowired ReadService service;
+
+    @Test
+    void retryLogicSurvivesReplicationLag(ChaosControlPlane chaos) {
+        chaos.activate(ChaosScenario.builder("replica-lag-300ms")
+            .selector(ChaosSelector.network(
+                Set.of(OperationType.SOCKET_READ),
+                NamePattern.prefix("redis-replica.")))
+            .effect(ChaosEffect.delay(Duration.ofMillis(300)))
+            .activationPolicy(ActivationPolicy.always())
+            .build());
+
+        assertThat(service.read1000Keys().latencyP99()).isLessThan(BUDGET);
+    }
 }
 ```
+
+`@ChaosTest` (Spring Boot 3 and 4 test starters) goes on the test class; Micronaut has `@MicronautChaosTest` and Quarkus `@QuarkusChaosTest`.
 
 No sidecar. No mocks. No application code changes. The bytecode of `java.net.Socket` reads is rewritten the moment a scenario needs it; chaos applies surgically inside the JVM that's already running your production code paths. **92 operation types** auto-wired across DNS, SSL, JDBC, HTTP, NIO, sockets, virtual threads, monitors, scheduler, GC, class loading, file I/O, ThreadLocal, JNDI, JMX, serialization, native libraries, queues, executors, async completion, and more. One annotation. Zero `--add-opens` flags. The agent self-grants every JDK module open it needs at install time.
 
@@ -217,7 +225,7 @@ The evaluation pipeline gate by gate, the class-loader bridge and its reentrancy
 
 ## Selectors
 
-A selector names the operations a scenario applies to (`Set<OperationType>`; an empty set accepts every operation the selector understands) and narrows them with optional filters, given as `NamePattern`s (`NamePattern.prefix(...)`, `NamePattern.regex(...)`, `NamePattern.any()`) or as peer address, port, path or size bounds. Every selector, its factory, its operations and its filters are listed in [docs/configuration-reference.md §13.3](docs/configuration-reference.md#133-selector-reference).
+A selector names the operations a scenario applies to (`Set<OperationType>`; it must not be empty, and an operation the selector does not support is refused) and narrows them with optional filters, given as `NamePattern`s (`NamePattern.prefix(...)`, `NamePattern.regex(...)`, `NamePattern.any()`) or as peer address, port, path or size bounds. Every selector, its factory, its operations and its filters are listed in [docs/configuration-reference.md §13.3](docs/configuration-reference.md#133-selector-reference).
 
 ---
 
@@ -325,6 +333,7 @@ All guards compose as AND. Fields may be `null` (Long / Duration / RateLimit / L
 ## Session Isolation
 
 ```java
+// delayScenario and rejectScenario are SESSION-scoped (.scope(ChaosScenario.ScenarioScope.SESSION))
 @Test void testA(ChaosSession sessionA) {
     sessionA.activate(delayScenario);
     try (var b = sessionA.bind()) {
@@ -351,6 +360,7 @@ Three worked examples showing how selectors, effects, and activation policy comp
 
 ```java
 var flakyDownstream = ChaosScenario.builder("flaky-payments-api")
+    .scope(ChaosScenario.ScenarioScope.SESSION)             // session.activate takes SESSION scenarios only
     .selector(ChaosSelector.httpClient(
         Set.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC),
         NamePattern.prefix("https://payments.internal/")))
@@ -365,6 +375,7 @@ var flakyDownstream = ChaosScenario.builder("flaky-payments-api")
     .build();
 
 var slowDownstream = ChaosScenario.builder("slow-payments-api")
+    .scope(ChaosScenario.ScenarioScope.SESSION)
     .selector(ChaosSelector.httpClient(
         Set.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC),
         NamePattern.prefix("https://payments.internal/")))
@@ -373,8 +384,11 @@ var slowDownstream = ChaosScenario.builder("slow-payments-api")
 
 session.activate(flakyDownstream);
 session.activate(slowDownstream);
-// 100 % of calls experience jitter; 30 % of calls additionally fail.
-// The retry policy under test sees a realistic mixed-failure signal.
+try (ChaosSession.ScopeBinding scope = session.bind()) {
+    // 100 % of calls from this thread experience jitter; 30 % of them additionally fail.
+    // The retry policy under test sees a realistic mixed-failure signal.
+    paymentsClient.charge(order);
+}
 ```
 
 **What this exercises.** Delays accumulate across matching scenarios, but terminal actions resolve by precedence — the `reject` (precedence=10) wins over the default `delay`, so the 30 % of calls that win the probability roll see `reject` *after* the latency jitter is applied. `randomSeed=42L` makes the pattern reproducible across runs — same input produces same failure sequence, so a failing test bisects cleanly.
@@ -385,10 +399,9 @@ session.activate(slowDownstream);
 
 ```java
 var sustainedFailure = ChaosScenario.builder("circuit-breaker-trigger")
+    .scope(ChaosScenario.ScenarioScope.SESSION)
     .selector(ChaosSelector.jdbc(OperationType.JDBC_STATEMENT_EXECUTE))
-    .effect(ChaosEffect.injectException(
-        "java.sql.SQLTransientConnectionException",
-        "chaos: pool exhausted"))
+    .effect(ChaosEffect.reject("chaos: pool exhausted"))   // the driver's own SQLException
     .activationPolicy(new ActivationPolicy(
         ActivationPolicy.StartMode.AUTOMATIC,
         1.0,                                                // 100 % — every call fails
@@ -400,14 +413,18 @@ var sustainedFailure = ChaosScenario.builder("circuit-breaker-trigger")
 
 session.activate(sustainedFailure);
 
-// Drive 25 calls through the circuit breaker.
-// Calls 1-20: fail with SQLTransientConnectionException — circuit breaker counts failures.
+// Drive 25 calls through the circuit breaker, on a thread bound to the session.
+// Calls 1-20: fail with SQLException (a DataAccessException through JdbcTemplate) — circuit breaker counts failures.
 // Calls 21-25: fail with CallNotPermittedException — circuit breaker is now OPEN, fast-rejecting.
-for (int i = 0; i < 25; i++) {
-    try {
-        circuitBreaker.executeCallable(() -> jdbcTemplate.queryForList("SELECT 1"));
-    } catch (CallNotPermittedException e) {
-        // assert: transition happened after exactly 20 failures
+try (ChaosSession.ScopeBinding scope = session.bind()) {
+    for (int i = 0; i < 25; i++) {
+        try {
+            circuitBreaker.executeCallable(() -> jdbcTemplate.queryForList("SELECT 1"));
+        } catch (CallNotPermittedException e) {
+            // assert: transition happened after exactly 20 failures
+        } catch (Exception e) {
+            // calls 1-20: the injected failure
+        }
     }
 }
 ```
@@ -431,7 +448,8 @@ var heapSoak = ChaosScenario.builder("heap-pressure-soak")
         null, null, false))
     .build();
 
-try (var handle = session.activate(heapSoak)) {
+// A stressor loads the whole JVM, so it is JVM-scoped and activated on the control plane.
+try (var handle = controlPlane.activate(heapSoak)) {
     // Run your soak test here. The stressor holds 512 MiB for up to 30 s,
     // then self-releases. If your test finishes sooner, the try-with-resources
     // closes the handle and the heap is freed immediately.
@@ -597,7 +615,7 @@ The depth shown in this project — JVMTI re-entrancy debugging on JDK 25, `@Int
 Concrete artifacts a reviewer can read:
 
 - **92 `OperationType` values over 77 interception handles** across modern JDK internals — including JDK 25 changes most chaos tools haven't caught up to (`Socket$SocketInputStream` rename, `sun.nio.ch.NioSocketImpl` as default `SocketImpl`, `jdk.internal.loader.NativeLibraries.load` going `native`)
-- **Single-annotation `@ChaosTest` integration** working on Spring Boot 3, Spring Boot 4, Micronaut, and Quarkus — four frameworks with four different test-context conventions, one annotation
+- **Single-annotation test integration** on Spring Boot 3 and 4 (`@ChaosTest`), Micronaut (`@MicronautChaosTest`) and Quarkus (`@QuarkusChaosTest`) — four frameworks with four different test-context conventions, one annotation each
 - **Honest documentation** of what *cannot* work and why — `SYSTEM_CLOCK_MILLIS` documented with the actual JVM constraints (native `@IntrinsicCandidate`, compiled into a direct call to the VM clock), not papered over
 - **Cross-libc and cross-arch validation** in the sister C repo — `glibc + musl × amd64 + arm64`, 100 % line coverage on shipped sources, Docker runtime validation as a quality gate
 - **Apache 2.0 throughout** — usable in production, in commercial products, no lock-in
