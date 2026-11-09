@@ -140,6 +140,9 @@ public final class RuntimeDispatch {
    */
   public void beforeReflectionInvoke(final @Nullable Object method, final @Nullable Object target)
       throws Throwable {
+    if (engine.idle(OperationType.REFLECTION_INVOKE) || JdkOwnUse.isSerializationHook(method)) {
+      return; // idle, or the object streams calling a class's serialization hook (L3a)
+    }
     final String methodName;
     final String declaringClass;
     if (method instanceof java.lang.reflect.Method reflectMethod) {
@@ -153,18 +156,16 @@ public final class RuntimeDispatch {
       declaringClass = method == null ? "java.lang.reflect.Method" : method.getClass().getName();
     }
     engine.applyPreDecision(
-        (engine.idle(OperationType.REFLECTION_INVOKE)
-            ? RuntimeDecision.none()
-            : engine.evaluate(
-                new InvocationContext(
-                    OperationType.REFLECTION_INVOKE,
-                    declaringClass,
-                    target == null ? null : target.getClass().getName(),
-                    methodName,
-                    false,
-                    null,
-                    null,
-                    engine.scopeContext.currentSessionId()))));
+        engine.evaluate(
+            new InvocationContext(
+                OperationType.REFLECTION_INVOKE,
+                declaringClass,
+                target == null ? null : target.getClass().getName(),
+                methodName,
+                false,
+                null,
+                null,
+                engine.scopeContext.currentSessionId())));
   }
 
   /**
@@ -352,7 +353,8 @@ public final class RuntimeDispatch {
   }
 
   /**
-   * Called before {@code MBeanServer.invoke(...)} to apply JMX invoke scenarios.
+   * Called before {@code MBeanServer.invoke(...)} to apply JMX invoke scenarios. The agent's own
+   * MBeans ({@code com.macstab.chaos.jvm}) are never a target (L3).
    *
    * @param server the {@code MBeanServer} receiving the invocation
    * @param objectName the target MBean {@code ObjectName}
@@ -362,13 +364,13 @@ public final class RuntimeDispatch {
   public void beforeJmxInvoke(
       final Object server, final Object objectName, final String operationName) throws Throwable {
     engine.applyPreDecision(
-        (engine.idle(OperationType.JMX_INVOKE)
+        (engine.idle(OperationType.JMX_INVOKE) || JdkOwnUse.isAgentMBean(objectName)
             ? RuntimeDecision.none()
             : engine.evaluate(
                 new InvocationContext(
                     OperationType.JMX_INVOKE,
                     server == null ? "javax.management.MBeanServer" : server.getClass().getName(),
-                    null,
+                    String.valueOf(objectName),
                     operationName,
                     false,
                     null,
@@ -377,23 +379,26 @@ public final class RuntimeDispatch {
   }
 
   /**
-   * Called before {@code MBeanServer.getAttribute(...)} to apply JMX attribute-read scenarios.
+   * Called before {@code MBeanServer.getAttribute(...)} and {@code getAttributes(...)} to apply JMX
+   * attribute-read scenarios. The agent's own MBeans ({@code com.macstab.chaos.jvm}) are never a
+   * target (L3).
    *
    * @param server the {@code MBeanServer} receiving the attribute read
    * @param objectName the target MBean {@code ObjectName}
-   * @param attribute the attribute name being read
+   * @param attribute the attribute name being read; the names of a {@code getAttributes} read,
+   *     comma-separated
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeJmxGetAttr(final Object server, final Object objectName, final String attribute)
       throws Throwable {
     engine.applyPreDecision(
-        (engine.idle(OperationType.JMX_GET_ATTR)
+        (engine.idle(OperationType.JMX_GET_ATTR) || JdkOwnUse.isAgentMBean(objectName)
             ? RuntimeDecision.none()
             : engine.evaluate(
                 new InvocationContext(
                     OperationType.JMX_GET_ATTR,
                     server == null ? "javax.management.MBeanServer" : server.getClass().getName(),
-                    null,
+                    String.valueOf(objectName),
                     attribute,
                     false,
                     null,

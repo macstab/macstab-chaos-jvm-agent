@@ -46,6 +46,15 @@ class HookCoverageIntegrationTest {
           "SocketAdvice",
           "ThreadAdvice");
 
+  /**
+   * Advice whose only target type exists on some JDKs only, with that type: on a JDK without it the
+   * advice is absent, not unmatched.
+   */
+  private static final java.util.Map<String, String> VERSION_SPECIFIC =
+      java.util.Map.of(
+          "ScheduledExecutorAdvice.JdkTimerDelayAdvice",
+          "java.util.concurrent.CompletableFuture$Delayer");
+
   @TempDir Path tempDir;
 
   @Test
@@ -83,7 +92,21 @@ class HookCoverageIntegrationTest {
             .collect(Collectors.toCollection(TreeSet::new));
     final Set<String> missing = new TreeSet<>(adviceClasses());
     missing.removeAll(matched);
+    missing.removeIf(advice -> absentOnThisJdk(VERSION_SPECIFIC.get(advice)));
     assertThat(missing).as("advice that matched no method on JDK %s", runtime).isEmpty();
+  }
+
+  /** Whether {@code type} (a version-specific target, or {@code null}) is absent on this JDK. */
+  private static boolean absentOnThisJdk(final String type) {
+    if (type == null) {
+      return false;
+    }
+    try {
+      Class.forName(type, false, null);
+      return false;
+    } catch (final ClassNotFoundException absent) {
+      return true;
+    }
   }
 
   /** {@code Holder.Advice} of every nested class with an enter or exit advice method. */

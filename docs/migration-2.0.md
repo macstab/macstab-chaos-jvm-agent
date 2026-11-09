@@ -49,6 +49,7 @@
 | 30 | `ChaosEvent.Type.INACTIVE`; lifecycle events once per transition | a `switch` over `ChaosEvent.Type` has no `default`; a listener counts `STOPPED` per `stop()` / `close()` call, or waits for `STOPPED` to learn that a scenario expired or used up `maxApplications` | add `case INACTIVE`; count one `STOPPED` per scenario; wait for `INACTIVE` (§30) |
 | 31 | Apache HttpClient is evaluated at `doExecute`, with one URL rule | a scenario counts Apache HttpClient calls made from a response handler, a `urlPattern` matches the path-only URL of `executeOpen(null, …)` or the doubled URL of HC4 `execute(host, absoluteRequest)`, or you subclass `CloseableHttpClient` yourself | expect one more evaluation per request a handler sends; match the full URL; hook your own client differently (§31) |
 | 32 | Client rejects fail through the library's own failure channel | a test expects a rejected asynchronous client call (a gRPC future or async stub, a Kafka send, a Lettuce async command, a JDK `sendAsync`, an OkHttp `enqueue`, a Reactor Netty request, an R2DBC `execute()`) to throw from the call that starts it, or counts gRPC `RPC_CALL` evaluations at `ClientCall.start` | expect the failure in the future, observer, callback or publisher (§32) |
+| 33 | The JDK's own use of a general primitive is not a target (L3a) | a scenario with an unnarrowed selector expects to hit class loading, the `CompletableFuture` timers, `/dev/urandom`, the JDK `HttpClient`'s selector, JDK-private ThreadLocals, the serialization hooks, a pool worker's lock, or the agent's MBean; a test counts those evaluations | target your own code's calls; name `/dev/urandom` in a path pattern or a JDK `ThreadLocal` / `ThreadPoolExecutor$Worker` class in the pattern to reach it (§33) |
 
 ---
 
@@ -393,6 +394,15 @@ A reject on a client-library call fails it the way the library itself fails it, 
 - **Reactor Netty / `WebClient` (`HTTP_CLIENT_SEND_ASYNC`)**: evaluated once per subscription of the request (`HttpClientConnect$MonoHttpConnect.subscribe`), no longer once at `HttpClientConnect.connect()`: a request retried twice is three evaluations, and a `uri(Mono)` is matched on its resolved URL. A reject is an error signal to the subscriber instead of a throw while the request is assembled, so `retry` and `onErrorResume` see it.
 - **R2DBC (`R2DBC_STATEMENT_EXECUTE`)**: a reject returns a publisher that signals `R2dbcTransientResourceException` (`Mono.error`, or `Flux.error` where the driver declares a `Flux`) instead of throwing from `execute()`; a driver whose class loader cannot see Reactor still gets the throw. The AWS SDK's asynchronous clients already turned the throw into a failed future and are unchanged.
 - Evaluation counts: a gRPC call is still evaluated once; a Lettuce batch counts one evaluation.
+
+## 33. The JDK's own use of a general primitive is not a target
+
+A scenario on a general primitive (file reads, ZIP inflation, direct buffers, GC requests, scheduling, completions, ThreadLocals, reflection, monitors, NIO selects) used to hit the JDK's own internal use of it: a `FILE_IO_READ` or `ZIP_INFLATE` reject broke class loading and `UUID.randomUUID()`, an `ASYNC_COMPLETE*` or `SCHEDULE_*` suppress stopped every `orTimeout`, a `NIO_SELECTOR_SELECT` reject killed every JDK `HttpClient`, a `THREAD_LOCAL_GET` suppress broke `ReentrantReadWriteLock`, a `REFLECTION_INVOKE` reject broke serialization, and a `SYSTEM_GC_REQUEST` suppress made direct buffers run out. The enumerated list in [semantics L3a](semantics.md) is no longer a target.
+
+- Evaluation counts drop by those calls; a test that counted them counts the application's own calls only.
+- To reach a listed use on purpose, name it: a path pattern matching `/dev/urandom`, a `ThreadLocalSelector` or `MonitorSelector` pattern naming the JDK class. The other entries (class loading, the timers, the `HttpClient` selector, `jdk.internal.*` futures, the serialization hooks) cannot be targeted.
+- `CompletableFuture.delayedExecutor` stays evaluated. On JDK 25 its tasks run on the pool's `DelayScheduler` thread, so a `FORK_JOIN_TASK_RUN` delay on them also delays the pool's `orTimeout` timers.
+- The agent's own MBeans (`com.macstab.chaos.jvm`) are never a JMX target. A JMX event's subject is the `ObjectName`, `MBeanServer.getAttributes(ObjectName, String[])` is a `JMX_GET_ATTR` too, and an `ASYNC_*` event names the future's class instead of `CompletableFuture`.
 
 ---
 

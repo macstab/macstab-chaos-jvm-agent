@@ -9,7 +9,7 @@
 
 # 0002 — Hook groups are woven on the first activation that needs them
 
-**Status:** Accepted (2.0; supersedes the 1.x weave-everything-at-start); amended (2.0): opening a session weaves the executor hook groups, but a session alters no call until it has a registered scenario — only then is a pool task wrapped to carry it (L1)
+**Status:** Accepted (2.0; supersedes the 1.x weave-everything-at-start); amended (2.0): opening a session weaves the executor hook groups, but a session alters no call until it has a registered scenario — only then is a pool task wrapped to carry it (L1); amended (2.0): the L3a brackets add weave targets to existing groups — `sun.nio.ch.Util.getTemporaryDirectBuffer` / `getTemporaryAlignedDirectBuffer` (DIRECT_BUFFER), `java.nio.Bits.reserveMemory` and `sun.nio.ch.FileChannelImpl.mapInternal` (RUNTIME_LIFECYCLE), `CompletableFuture$Delayer.delay` on JDK 21 (SCHEDULED_EXECUTOR), `CompletableFuture$Timeout.run` / `$DelayedCompleter.run` (COMPLETABLE_FUTURE), `MBeanServer.getAttributes` (JNDI_JMX) — and the internal group `JDK_INTERNAL_CLASS_LOAD` (`ClassLoader.loadClass`), which raises no operation and is woven with the FILE_IO and ZIP groups only
 
 ## Context
 

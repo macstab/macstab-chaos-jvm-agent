@@ -48,6 +48,35 @@ final class ScheduledExecutorAdvice {
     }
   }
 
+  /**
+   * JDK 21: a scope-only bracket of {@code CompletableFuture$Delayer.delay(Runnable, long,
+   * TimeUnit)} when it schedules a JDK timer ({@code $Timeout}, {@code $DelayedCompleter}): that
+   * {@code SCHEDULE_SUBMIT} is the JDK's own ({@link BootstrapDispatcher#SCOPE_JDK_INTERNAL}). A
+   * {@code delayedExecutor} task ({@code $TaskSubmitter}) stays evaluated.
+   */
+  static final class JdkTimerDelayAdvice {
+    @Advice.OnMethodEnter
+    static boolean enter(@Advice.Argument(0) final Runnable command) {
+      if (command == null) {
+        return false;
+      }
+      final String name = command.getClass().getName();
+      if (name.equals("java.util.concurrent.CompletableFuture$Timeout")
+          || name.equals("java.util.concurrent.CompletableFuture$DelayedCompleter")) {
+        BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDK_INTERNAL);
+        return true;
+      }
+      return false;
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(@Advice.Enter final boolean entered) {
+      if (entered) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDK_INTERNAL);
+      }
+    }
+  }
+
   static final class PeriodicAdvice {
     @Advice.OnMethodEnter
     static void enter(

@@ -80,6 +80,7 @@ val agentManifest = mapOf(
         "java.base/jdk.internal.misc",           // named reflectively by the shaded ByteBuddy (ClassInjector.UsingUnsafe)
         "java.base/sun.nio.ch",                  // DirectBuffer.cleaner() reflection (DirectBufferPressureStressor)
         "java.base/jdk.internal.ref",            // Modern Cleaner mechanism (Java 9+ replacement for sun.misc.Cleaner)
+        "java.base/java.util.concurrent",        // DelayScheduler$ScheduledForkJoinTask.runnable (ExecutorDispatch, JDK 25)
     ).joinToString(" "),
 )
 

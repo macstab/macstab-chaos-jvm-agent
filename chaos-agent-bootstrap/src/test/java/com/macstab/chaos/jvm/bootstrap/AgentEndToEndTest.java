@@ -21,6 +21,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnJre;
+import org.junit.jupiter.api.condition.JRE;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -2705,6 +2707,170 @@ class AgentEndToEndTest {
       final ChildJvmProbe.ProbeResult result =
           probe.runWithoutPlan(DefectProbeMain.class, "session-thread-local-suppress");
       assertThat(result.value("sessionVisible")).isEqualTo("true");
+    }
+  }
+
+  @Nested
+  @DisplayName("the JDK's own use of a primitive is not a target (L3a)")
+  class JdkOwnUse {
+
+    private ChildJvmProbe.ProbeResult run(final String mode, final String... jvmArgs)
+        throws Exception {
+      return probe.runWithoutPlan(JdkOwnUseProbeMain.class, mode, jvmArgs);
+    }
+
+    @Test
+    @DisplayName(
+        "file-read-reject-loads-classes: classes load and UUIDs are drawn, a user read fails")
+    void fileReadRejectLoadsClasses() throws Exception {
+      final ChildJvmProbe.ProbeResult result = run("file-read-reject");
+      assertSoftly(
+          softly -> {
+            softly.assertThat(result.value("classLoaded")).isEqualTo("true");
+            softly.assertThat(result.value("uuid")).isEqualTo("36");
+            softly.assertThat(result.value("userRead")).endsWith("Exception");
+          });
+    }
+
+    @Test
+    @DisplayName("zip-inflate-reject-loads-classes: a deflated jar class loads, a user GZIP fails")
+    void zipInflateRejectLoadsClasses() throws Exception {
+      final ChildJvmProbe.ProbeResult result = run("zip-inflate-reject");
+      assertSoftly(
+          softly -> {
+            softly.assertThat(result.value("classLoaded")).isEqualTo("true");
+            softly.assertThat(result.value("gzip")).isEqualTo("java.util.zip.ZipException");
+          });
+    }
+
+    @Test
+    @DisplayName("nio-select-reject-httpclient: the HttpClient selector runs, a user select fails")
+    void nioSelectRejectSparesTheHttpClient() throws Exception {
+      final ChildJvmProbe.ProbeResult result = run("nio-select-reject");
+      assertSoftly(
+          softly -> {
+            softly.assertThat(result.value("httpClient")).isEqualTo("200");
+            softly.assertThat(result.value("userSelect")).isEqualTo("java.io.IOException");
+          });
+    }
+
+    @Test
+    @DisplayName("async-suppress-or-timeout: orTimeout still times out")
+    void asyncSuppressKeepsOrTimeout() throws Exception {
+      assertThat(run("async-suppress-or-timeout").value("orTimeout"))
+          .isEqualTo("java.util.concurrent.TimeoutException");
+    }
+
+    @Test
+    @EnabledOnJre(JRE.JAVA_21)
+    @DisplayName("schedule-suppress-or-timeout: a SCHEDULE_SUBMIT suppress keeps orTimeout")
+    void scheduleSuppressKeepsOrTimeout() throws Exception {
+      assertThat(run("schedule-suppress-or-timeout").value("orTimeout"))
+          .isEqualTo("java.util.concurrent.TimeoutException");
+    }
+
+    @Test
+    @EnabledOnJre(JRE.JAVA_21)
+    @DisplayName("schedule-tick-suppress-or-timeout: a SCHEDULE_TICK suppress keeps orTimeout")
+    void scheduleTickSuppressKeepsOrTimeout() throws Exception {
+      assertThat(run("schedule-tick-suppress-or-timeout").value("orTimeout"))
+          .isEqualTo("java.util.concurrent.TimeoutException");
+    }
+
+    @Test
+    @DisplayName(
+        "delayed-executor-still-evaluated: delayedExecutor is evaluated once, the orTimeout timer"
+            + " not")
+    void delayedExecutorStaysEvaluated() throws Exception {
+      final ChildJvmProbe.ProbeResult result = run("delayed-executor");
+      assertSoftly(
+          softly -> {
+            softly
+                .assertThat(result.value("orTimeout"))
+                .isEqualTo("java.util.concurrent.TimeoutException");
+            softly.assertThat(result.value("delayedRan")).isEqualTo("true");
+            // 21: SCHEDULE_SUBMIT of the Delayer; 25: the FORK_JOIN_TASK_RUN of its timer task.
+            softly
+                .assertThat(result.longValue("matched.sched") + result.longValue("matched.fj"))
+                .isEqualTo(1L);
+          });
+    }
+
+    @Test
+    @DisplayName(
+        "timeout-marker-cleared: a JDK timer on a done future leaves no marker for the next"
+            + " completion")
+    void timeoutMarkerIsCleared() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          run("timeout-marker-cleared", "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED");
+      assertThat(result.value("userComplete")).isEqualTo("true");
+      assertThat(result.longValue("matched")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("jmx-reject-agent-mbean: the agent's MBean answers, the platform's do not")
+    void jmxRejectSparesTheAgentMBean() throws Exception {
+      final ChildJvmProbe.ProbeResult result = run("jmx-reject");
+      assertSoftly(
+          softly -> {
+            softly.assertThat(result.value("agentInvoke")).isEqualTo("true");
+            softly.assertThat(result.value("userGetAttribute")).endsWith("Exception");
+            softly
+                .assertThat(result.value("userGetAttributes"))
+                .as("getAttributes(ObjectName, String[]) is JMX_GET_ATTR too")
+                .endsWith("Exception");
+          });
+    }
+
+    @Test
+    @DisplayName("thread-local-suppress-rrwl: a read-write lock read by two threads keeps working")
+    void threadLocalSuppressSparesTheReadWriteLock() throws Exception {
+      final ChildJvmProbe.ProbeResult result = run("thread-local-suppress");
+      assertThat(result.value("rrwl")).isEqualTo("ok");
+      assertThat(result.value("plain")).isEqualTo("null");
+    }
+
+    @Test
+    @DisplayName("thread-local-with-initial-still-evaluated: ThreadLocal.withInitial is suppressed")
+    void threadLocalWithInitialStaysEvaluated() throws Exception {
+      assertThat(run("thread-local-suppress").value("withInitial")).isEqualTo("null");
+    }
+
+    @Test
+    @DisplayName("reflection-reject-serialization: writeObject runs, a user Method.invoke fails")
+    void reflectionRejectSparesSerialization() throws Exception {
+      final ChildJvmProbe.ProbeResult result = run("reflection-reject-serialization");
+      assertThat(result.value("serialize")).isEqualTo("true");
+      assertThat(result.value("userInvoke"))
+          .isEqualTo("java.lang.reflect.InvocationTargetException");
+    }
+
+    @Test
+    @EnabledOnJre(JRE.JAVA_21)
+    @DisplayName("direct-buffer-reject-socket-read: a socket read still gets its temporary buffer")
+    void directBufferRejectSparesSocketReads() throws Exception {
+      final ChildJvmProbe.ProbeResult result = run("direct-buffer-reject-socket-read");
+      assertThat(result.value("socketRead")).isEqualTo("4");
+      assertThat(result.value("userAllocate")).isEqualTo("java.lang.OutOfMemoryError");
+    }
+
+    @Test
+    @DisplayName("gc-suppress-bits: direct memory is reclaimed, a user System.gc() is evaluated")
+    void gcSuppressSparesDirectMemoryReservation() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          run("gc-suppress-bits", "-XX:MaxDirectMemorySize=16m");
+      assertThat(result.value("allocations")).isEqualTo("64");
+      assertThat(result.longValue("matched")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("the class-loading bracket is woven with FILE_IO and ZIP only (ADR 0002)")
+    void classLoadingBracketIsWovenOnDemand() throws Exception {
+      final ChildJvmProbe.ProbeResult fileIo = run("woven-after-file-io");
+      assertThat(fileIo.value("woven")).contains("FILE_IO").contains("JDK_INTERNAL_CLASS_LOAD");
+      final ChildJvmProbe.ProbeResult threadLocal = run("woven-after-thread-local");
+      assertThat(threadLocal.value("woven")).isEqualTo("THREAD_LOCAL");
+      assertThat(threadLocal.value("matchedHooks")).doesNotContain("JdkInternalScopeAdvice");
     }
   }
 

@@ -42,6 +42,26 @@ final class JvmRuntimeHooks {
                                 .and(ElementMatchers.takesArguments(String.class)))));
   }
 
+  /**
+   * The L3a class-loading bracket ({@code SCOPE_JDK_INTERNAL} around {@code ClassLoader.loadClass},
+   * both overloads): the files and archives a loader reads are not FILE_IO or ZIP_INFLATE targets.
+   * A loader that overrides {@code loadClass(String)} itself (Tomcat's {@code
+   * WebappClassLoaderBase}) bypasses it.
+   */
+  static AgentBuilder applyJdkInternalClassLoadTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.lang.ClassLoader"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    advise(
+                        JvmRuntimeAdvice.JdkInternalScopeAdvice.class,
+                        ElementMatchers.named("loadClass")
+                            .and(
+                                ElementMatchers.takesArguments(String.class, boolean.class)
+                                    .or(ElementMatchers.takesArguments(String.class))))));
+  }
+
   /** {@code ClassLoader.defineClass} interception (CLASS_DEFINE). */
   static AgentBuilder applyClassDefineTransformations(final AgentBuilder builder) {
     return builder
@@ -76,7 +96,26 @@ final class JvmRuntimeHooks {
                     advise(
                         JvmRuntimeAdvice.ExitRequestAdvice.class,
                         ElementMatchers.namedOneOf("exit", "halt")
-                            .and(ElementMatchers.takesArguments(int.class)))));
+                            .and(ElementMatchers.takesArguments(int.class)))))
+        // L3a: the collections the JDK requests itself while reserving direct memory or mapping
+        // a file (Bits.reserveMemory, FileChannelImpl.mapInternal) are not SYSTEM_GC_REQUEST
+        // targets.
+        .type(ElementMatchers.named("java.nio.Bits"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    advise(
+                        JvmRuntimeAdvice.JdkInternalScopeAdvice.class,
+                        ElementMatchers.named("reserveMemory"))))
+        .type(ElementMatchers.named("sun.nio.ch.FileChannelImpl"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    advise(
+                        JvmRuntimeAdvice.JdkInternalScopeAdvice.class,
+                        // map's own body: map itself is the FILE_IO_MAP hook, which stays
+                        // evaluated.
+                        ElementMatchers.named("mapInternal"))));
   }
 
   /** {@code Method.invoke} interception (REFLECTION_INVOKE). */
@@ -102,7 +141,17 @@ final class JvmRuntimeHooks {
                     advise(
                         JvmRuntimeAdvice.DirectBufferAllocateAdvice.class,
                         ElementMatchers.named("allocateDirect")
-                            .and(ElementMatchers.takesArguments(int.class)))));
+                            .and(ElementMatchers.takesArguments(int.class)))))
+        // L3a: the temporary direct buffers of the JDK's own channel I/O (JDK 21 allocates them
+        // through allocateDirect) are not DIRECT_BUFFER_ALLOCATE targets.
+        .type(ElementMatchers.named("sun.nio.ch.Util"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    advise(
+                        JvmRuntimeAdvice.JdkInternalScopeAdvice.class,
+                        ElementMatchers.namedOneOf(
+                            "getTemporaryDirectBuffer", "getTemporaryAlignedDirectBuffer"))));
   }
 
   /** {@code ObjectInputStream.readObject} / {@code ObjectOutputStream.writeObject} interception. */

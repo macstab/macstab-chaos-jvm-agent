@@ -419,6 +419,54 @@ final class JvmRuntimeAdvice {
     }
   }
 
+  /**
+   * Intercepts {@code MBeanServer.getAttributes(ObjectName, String[])}: one JMX attribute read of
+   * the named attributes, comma-separated.
+   */
+  static final class JmxGetAttrsAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object server,
+        @Advice.Argument(0) final Object objectName,
+        @Advice.Argument(1) final String[] attributes)
+        throws Throwable {
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JMX)) {
+        try {
+          BootstrapDispatcher.beforeJmxGetAttr(
+              server, objectName, attributes == null ? "" : String.join(",", attributes));
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JMX);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JMX);
+    }
+  }
+
+  // ── L3a: the JDK's own use of a general primitive ────────────────────────
+
+  /**
+   * Scope-only bracket of the JDK's own use of a general primitive ({@link
+   * BootstrapDispatcher#SCOPE_JDK_INTERNAL}): class loading, the temporary direct buffers of {@code
+   * sun.nio.ch.Util}, {@code Bits.reserveMemory} and {@code FileChannelImpl.mapInternal}. Evaluates
+   * nothing.
+   */
+  static final class JdkInternalScopeAdvice {
+    @Advice.OnMethodEnter
+    static void enter() {
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDK_INTERNAL);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDK_INTERNAL);
+    }
+  }
+
   // ── B14: Thread.sleep ─────────────────────────────────────────────────────
 
   /**

@@ -210,6 +210,9 @@ public final class ExecutorDispatch {
     if (CARRIER_THREAD != null && CARRIER_THREAD.isInstance(Thread.currentThread())) {
       return; // a virtual thread mounting on its carrier: the JDK's scheduling, not a user task
     }
+    if (JdkOwnUse.isForkJoinTimerTask(task)) {
+      return; // JDK 25: a CompletableFuture timer on its DelayScheduler (L3a)
+    }
     engine.applyPreDecision(
         engine.evaluate(
             new InvocationContext(
@@ -326,6 +329,10 @@ public final class ExecutorDispatch {
     if (engine.idle(indexedOp)) {
       return null;
     }
+    final String futureClass = future.getClass().getName();
+    if (JdkOwnUse.isJdkInternalFuture(futureClass)) {
+      return null; // a JDK-internal future (L3a): no selector can name it
+    }
     if (COMPLETING.get() == future) {
       // The agent's own completeExceptionally below, re-entering through the hook: it passes
       // unevaluated, once (idle first: an idle nested call never reaches this read).
@@ -336,7 +343,7 @@ public final class ExecutorDispatch {
         engine.evaluate(
             new InvocationContext(
                 indexedOp,
-                CompletableFuture.class.getName(),
+                futureClass,
                 payload == null ? null : payload.getClass().getName(),
                 null,
                 false,
@@ -468,19 +475,21 @@ public final class ExecutorDispatch {
   public boolean beforeScheduledTick(
       final @Nullable Object executor, final @Nullable Object task, final boolean periodic)
       throws Throwable {
+    if (engine.idle(OperationType.SCHEDULE_TICK)
+        || JdkOwnUse.isCompletableFutureTimer(ScopeContext.unwrap(task))) {
+      return true; // idle, or a JDK 21 CompletableFuture timer's tick (L3a)
+    }
     final RuntimeDecision decision =
-        (engine.idle(OperationType.SCHEDULE_TICK)
-            ? RuntimeDecision.none()
-            : engine.evaluate(
-                new InvocationContext(
-                    OperationType.SCHEDULE_TICK,
-                    executor == null ? "unknown" : executor.getClass().getName(),
-                    DispatchEngine.taskClassName(ScopeContext.unwrap(task)),
-                    null,
-                    periodic,
-                    null,
-                    null,
-                    engine.taskSession(task))));
+        engine.evaluate(
+            new InvocationContext(
+                OperationType.SCHEDULE_TICK,
+                executor == null ? "unknown" : executor.getClass().getName(),
+                DispatchEngine.taskClassName(ScopeContext.unwrap(task)),
+                null,
+                periodic,
+                null,
+                null,
+                engine.taskSession(task)));
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       if (decision.terminalAction() instanceof TerminalAction.Throw thrown) {
@@ -504,15 +513,17 @@ public final class ExecutorDispatch {
    *     execution
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public boolean beforeAsyncCancel(final Object future, final boolean mayInterruptIfRunning)
-      throws Throwable {
+  public boolean beforeAsyncCancel(
+      final @Nullable Object future, final boolean mayInterruptIfRunning) throws Throwable {
+    final String futureClass =
+        future == null ? CompletableFuture.class.getName() : future.getClass().getName();
     final RuntimeDecision decision =
-        (engine.idle(OperationType.ASYNC_CANCEL)
+        (engine.idle(OperationType.ASYNC_CANCEL) || JdkOwnUse.isJdkInternalFuture(futureClass)
             ? RuntimeDecision.none()
             : engine.evaluate(
                 new InvocationContext(
                     OperationType.ASYNC_CANCEL,
-                    CompletableFuture.class.getName(),
+                    futureClass,
                     null,
                     null,
                     false,

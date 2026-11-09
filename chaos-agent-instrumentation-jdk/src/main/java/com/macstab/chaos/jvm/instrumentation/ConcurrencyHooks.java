@@ -177,7 +177,20 @@ final class ConcurrencyHooks {
                                         Runnable.class,
                                         long.class,
                                         long.class,
-                                        java.util.concurrent.TimeUnit.class)))));
+                                        java.util.concurrent.TimeUnit.class)))))
+        // L3a, JDK 21 only (absent on 25): the CompletableFuture timers' own submission.
+        .type(ElementMatchers.named("java.util.concurrent.CompletableFuture$Delayer"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    advise(
+                        ScheduledExecutorAdvice.JdkTimerDelayAdvice.class,
+                        ElementMatchers.named("delay")
+                            .and(
+                                ElementMatchers.takesArguments(
+                                    Runnable.class,
+                                    long.class,
+                                    java.util.concurrent.TimeUnit.class)))));
   }
 
   /** ForkJoinTask.doExec instrumentation. */
@@ -251,7 +264,18 @@ final class ConcurrencyHooks {
                         advise(
                             CompletableFutureAdvice.CompleteExceptionallyAdvice.class,
                             ElementMatchers.named("completeExceptionally")
-                                .and(ElementMatchers.takesArguments(Throwable.class)))));
+                                .and(ElementMatchers.takesArguments(Throwable.class)))))
+        // L3a: the completion a JDK timer makes ($DelayedCompleter exists on JDK 21 only).
+        .type(
+            ElementMatchers.namedOneOf(
+                "java.util.concurrent.CompletableFuture$Timeout",
+                "java.util.concurrent.CompletableFuture$DelayedCompleter"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    advise(
+                        CompletableFutureAdvice.JdkTimerRunAdvice.class,
+                        ElementMatchers.named("run").and(ElementMatchers.takesArguments(0)))));
   }
 
   /** CompletableFuture.cancel instrumentation. */

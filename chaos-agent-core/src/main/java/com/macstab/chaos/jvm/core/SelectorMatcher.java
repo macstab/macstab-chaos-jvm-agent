@@ -77,7 +77,9 @@ final class SelectorMatcher {
                   || methodSelector.signaturePattern().matches(context.signature()));
       case ChaosSelector.MonitorSelector monitorSelector ->
           monitorSelector.operations().contains(context.operationType())
-              && monitorSelector.monitorClassPattern().matches(context.targetClassName());
+              && monitorSelector.monitorClassPattern().matches(context.targetClassName())
+              && !(isAny(monitorSelector.monitorClassPattern())
+                  && JdkOwnUse.isPoolWorkerLock(context.targetClassName()));
       case ChaosSelector.JvmRuntimeSelector jvmRuntimeSelector ->
           jvmRuntimeSelector.operations().contains(context.operationType());
       case ChaosSelector.NioSelector nioSelector ->
@@ -95,7 +97,9 @@ final class SelectorMatcher {
                   networkSelector.minBytes(), networkSelector.maxBytes(), context.byteCount());
       case ChaosSelector.ThreadLocalSelector threadLocalSelector ->
           threadLocalSelector.operations().contains(context.operationType())
-              && threadLocalSelector.threadLocalClassPattern().matches(context.targetClassName());
+              && threadLocalSelector.threadLocalClassPattern().matches(context.targetClassName())
+              && !(isAny(threadLocalSelector.threadLocalClassPattern())
+                  && JdkOwnUse.isJdkThreadLocal(context.targetClassName()));
       case ChaosSelector.HttpClientSelector httpClientSelector ->
           httpClientSelector.operations().contains(context.operationType())
               && httpClientSelector.urlPattern().matches(context.targetName());
@@ -110,7 +114,8 @@ final class SelectorMatcher {
       case ChaosSelector.FileIoSelector fileIoSelector ->
           fileIoSelector.operations().contains(context.operationType())
               && (fileIoSelector.pathPattern() == null
-                  || fileIoSelector.pathPattern().matches(context.path()))
+                  ? !JdkOwnUse.isRandomDevice(context.path())
+                  : fileIoSelector.pathPattern().matches(context.path()))
               && inSizeRange(
                   fileIoSelector.minBytes(), fileIoSelector.maxBytes(), context.byteCount());
       case ChaosSelector.MessagingSelector messagingSelector ->
@@ -139,6 +144,14 @@ final class SelectorMatcher {
       case ChaosSelector.StressSelector stressSelector ->
           context.operationType() == OperationType.LIFECYCLE && stressSelector.target() != null;
     };
+  }
+
+  /**
+   * Whether {@code pattern} matches every name: the JDK's own uses that L3a lists by class ({@link
+   * JdkOwnUse}) are reached only by a pattern that names them.
+   */
+  private static boolean isAny(final NamePattern pattern) {
+    return pattern.mode() == NamePattern.MatchMode.ANY;
   }
 
   /**

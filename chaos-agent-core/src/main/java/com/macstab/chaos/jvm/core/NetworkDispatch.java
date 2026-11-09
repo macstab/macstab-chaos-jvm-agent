@@ -33,8 +33,8 @@ public final class NetworkDispatch {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public boolean beforeNioSelect(final Object selector, final long timeoutMillis) throws Throwable {
-    if (engine.idle(OperationType.NIO_SELECTOR_SELECT)) {
-      return false;
+    if (engine.idle(OperationType.NIO_SELECTOR_SELECT) || JdkOwnUse.onHttpClientSelectorThread()) {
+      return false; // idle, or the JDK HttpClient's own selector loop (L3a)
     }
     final RuntimeDecision decision =
         engine.evaluate(

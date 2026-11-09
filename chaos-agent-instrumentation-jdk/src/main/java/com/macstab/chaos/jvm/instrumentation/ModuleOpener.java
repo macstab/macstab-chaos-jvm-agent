@@ -63,7 +63,9 @@ final class ModuleOpener {
             // Named reflectively by the shaded ByteBuddy (ClassInjector.UsingUnsafe).
             new String[] {"java.base", "jdk.internal.misc"},
             new String[] {"java.base", "sun.nio.ch"},
-            new String[] {"java.base", "jdk.internal.ref"});
+            new String[] {"java.base", "jdk.internal.ref"},
+            // DelayScheduler$ScheduledForkJoinTask.runnable, read by ExecutorDispatch (JDK 25).
+            new String[] {"java.base", "java.util.concurrent"});
 
     for (final String[] entry : opens) {
       final String moduleName = entry[0];

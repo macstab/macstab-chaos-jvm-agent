@@ -209,8 +209,28 @@ public final class BootstrapDispatcher {
    */
   public static final int SCOPE_HTTP_SYNC_CALL = 28;
 
+  /**
+   * Scope of the JDK's own use of a general primitive (L3a, scope-only): {@code
+   * ClassLoader.loadClass}, {@code sun.nio.ch.Util.getTemporaryDirectBuffer} / {@code
+   * getTemporaryAlignedDirectBuffer}, {@code java.nio.Bits.reserveMemory}, {@code
+   * FileChannelImpl.mapInternal} and, on JDK 21, a {@code CompletableFuture$Delayer.delay} of a JDK
+   * timer. Inside it the file, ZIP, direct-buffer, GC-request and {@code SCHEDULE_SUBMIT} dispatch
+   * returns its fallback; every other operation is evaluated as usual.
+   */
+  public static final int SCOPE_JDK_INTERNAL = 29;
+
+  /**
+   * A one-shot consumable marker, not a call depth: set when a JDK timer starts ({@code
+   * CompletableFuture$Timeout.run}, and {@code $DelayedCompleter.run} on JDK 21), consumed by the
+   * first completion the timer makes ({@link #consumeScope(int)}), which is not evaluated, and
+   * cleared by the timer's exit advice on every path: a timer that completes nothing (its future is
+   * already done) leaves no marker for the next completion on its thread. A dependent completed
+   * inside the timer's completion is evaluated.
+   */
+  public static final int SCOPE_JDK_COMPLETION = 30;
+
   /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
-  static final int SCOPE_COUNT = 29;
+  static final int SCOPE_COUNT = 31;
 
   /**
    * Enters a call-depth scope on the current thread.
@@ -237,6 +257,22 @@ public final class BootstrapDispatcher {
    */
   public static boolean inScope(final int scope) {
     return DEPTH.get()[scope] > 0;
+  }
+
+  /**
+   * Consumes a one-shot marker ({@link #SCOPE_JDK_COMPLETION}): clears it and reports whether it
+   * was set. Also the way the marker's owner clears it on exit.
+   *
+   * @param scope one of the {@code SCOPE_*} constants used as a marker
+   * @return {@code true} when the marker was set on the current thread
+   */
+  public static boolean consumeScope(final int scope) {
+    final int[] counters = DEPTH.get();
+    if (counters[scope] == 0) {
+      return false;
+    }
+    counters[scope] = 0;
+    return true;
   }
 
   /**
@@ -637,7 +673,7 @@ public final class BootstrapDispatcher {
       final String operation, final @Nullable Object executor, final Runnable task)
       throws Throwable {
     final int[] depth = DEPTH.get();
-    if (depth[0] > 0) {
+    if (depth[0] > 0 || jdkTimerSubmission(depth, operation)) {
       return task;
     }
     depth[0]++;
@@ -670,7 +706,7 @@ public final class BootstrapDispatcher {
       final String operation, final @Nullable Object executor, final Callable<T> task)
       throws Throwable {
     final int[] depth = DEPTH.get();
-    if (depth[0] > 0) {
+    if (depth[0] > 0 || jdkTimerSubmission(depth, operation)) {
       return task;
     }
     depth[0]++;
@@ -688,6 +724,11 @@ public final class BootstrapDispatcher {
     } finally {
       depth[0]--;
     }
+  }
+
+  /** A {@code SCHEDULE_SUBMIT} of the JDK's own timer ({@link #SCOPE_JDK_INTERNAL}). */
+  private static boolean jdkTimerSubmission(final int[] depth, final String operation) {
+    return depth[SCOPE_JDK_INTERNAL] > 0 && OperationTags.SCHEDULE_SUBMIT.equals(operation);
   }
 
   /**
@@ -1356,7 +1397,7 @@ public final class BootstrapDispatcher {
    */
   public static boolean beforeGcRequest() throws Throwable {
     final int[] depth = DEPTH.get();
-    if (depth[0] > 0) {
+    if (depth[0] > 0 || depth[SCOPE_JDK_INTERNAL] > 0) {
       return false;
     }
     depth[0]++;
@@ -1437,7 +1478,7 @@ public final class BootstrapDispatcher {
    */
   public static void beforeDirectBufferAllocate(final int capacity) throws Throwable {
     final int[] depth = DEPTH.get();
-    if (depth[0] > 0) {
+    if (depth[0] > 0 || depth[SCOPE_JDK_INTERNAL] > 0) {
       return;
     }
     depth[0]++;
@@ -2015,7 +2056,7 @@ public final class BootstrapDispatcher {
    */
   public static void beforeZipInflate() throws Throwable {
     final int[] depth = DEPTH.get();
-    if (depth[0] > 0) {
+    if (depth[0] > 0 || depth[SCOPE_JDK_INTERNAL] > 0) {
       return;
     }
     depth[0]++;
@@ -2041,7 +2082,7 @@ public final class BootstrapDispatcher {
    */
   public static void beforeZipDeflate() throws Throwable {
     final int[] depth = DEPTH.get();
-    if (depth[0] > 0) {
+    if (depth[0] > 0 || depth[SCOPE_JDK_INTERNAL] > 0) {
       return;
     }
     depth[0]++;
@@ -2508,7 +2549,7 @@ public final class BootstrapDispatcher {
       final int byteCount)
       throws Throwable {
     final int[] depth = DEPTH.get();
-    if (depth[0] > 0 || depth[SCOPE_FILE_TRANSFER] > 0) {
+    if (depth[0] > 0 || depth[SCOPE_FILE_TRANSFER] > 0 || depth[SCOPE_JDK_INTERNAL] > 0) {
       return byteCount;
     }
     depth[0]++;

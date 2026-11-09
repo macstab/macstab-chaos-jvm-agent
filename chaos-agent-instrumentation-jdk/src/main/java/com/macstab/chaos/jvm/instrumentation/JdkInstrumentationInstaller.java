@@ -294,6 +294,24 @@ public final class JdkInstrumentationInstaller {
         OperationType.CLASS_LOAD,
         OperationType.RESOURCE_LOAD),
     CLASS_DEFINE(JvmRuntimeHooks::applyClassDefineTransformations, OperationType.CLASS_DEFINE),
+    /**
+     * The L3a class-loading bracket: raises no operation of its own, and is woven with the
+     * operations whose JDK use it hides (FILE_IO and ZIP).
+     */
+    JDK_INTERNAL_CLASS_LOAD(
+        JvmRuntimeHooks::applyJdkInternalClassLoadTransformations,
+        OperationType.FILE_IO_READ,
+        OperationType.FILE_IO_WRITE,
+        OperationType.FILE_IO_SYNC,
+        OperationType.FILE_IO_TRUNCATE,
+        OperationType.FILE_IO_DELETE,
+        OperationType.FILE_IO_MOVE,
+        OperationType.FILE_IO_OPEN,
+        OperationType.FILE_IO_MAP,
+        OperationType.FILE_IO_CLOSE,
+        OperationType.FILE_IO_MOVE_TARGET,
+        OperationType.ZIP_INFLATE,
+        OperationType.ZIP_DEFLATE),
     RUNTIME_LIFECYCLE(
         JvmRuntimeHooks::applyRuntimeLifecycleTransformations,
         OperationType.SYSTEM_GC_REQUEST,
@@ -790,6 +808,15 @@ public final class JdkInstrumentationInstaller {
     "java.net.Socket",
     "java.net.ServerSocket",
     "sun.nio.ch.NioSocketImpl",
+    // CompletableFuture's nested timer classes load while CompletableFuture itself is
+    // retransformed, so they escape the L3a timer hooks of the same groups. Retransforming the
+    // JDK 21 Delayer resolves its ScheduledThreadPoolExecutor: the pool types are loaded first,
+    // here, so they do not load (and escape) inside that retransformation.
+    "java.util.concurrent.ThreadPoolExecutor",
+    "java.util.concurrent.ScheduledThreadPoolExecutor",
+    "java.util.concurrent.CompletableFuture$Timeout",
+    "java.util.concurrent.CompletableFuture$Delayer",
+    "java.util.concurrent.CompletableFuture$DelayedCompleter",
   };
 
   /**
@@ -1159,7 +1186,14 @@ public final class JdkInstrumentationInstaller {
                         advise(
                             JvmRuntimeAdvice.JmxGetAttrAdvice.class,
                             ElementMatchers.named("getAttribute")
-                                .and(ElementMatchers.takesArguments(2)))));
+                                .and(ElementMatchers.takesArguments(2))))
+                    .visit(
+                        advise(
+                            JvmRuntimeAdvice.JmxGetAttrsAdvice.class,
+                            ElementMatchers.named("getAttributes")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        javax.management.ObjectName.class, String[].class)))));
   }
 
   /**
