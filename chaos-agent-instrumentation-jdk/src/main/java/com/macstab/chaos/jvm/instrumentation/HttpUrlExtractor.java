@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.instrumentation;
 
+import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import java.lang.reflect.Method;
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -54,7 +55,71 @@ public final class HttpUrlExtractor {
     }
   }
 
+  /** OkHttp 4's end of a call: {@code RealCall.noMoreExchanges$okhttp(IOException)}. */
+  private static final String OKHTTP_NO_MORE_EXCHANGES = "noMoreExchanges$okhttp";
+
   private HttpUrlExtractor() {}
+
+  /**
+   * Ends an OkHttp call the agent rejected the way OkHttp ends a call whose network failed. {@code
+   * getResponseWithInterceptorChain} throws what {@code noMoreExchanges(e)} returns for an {@link
+   * java.io.IOException} its chain threw: that releases the call, exits its timeout (an expired
+   * call timeout turns the failure into an {@code InterruptedIOException}) and reports {@code
+   * EventListener.callFailed}. For any other failure its {@code finally} calls {@code
+   * noMoreExchanges(null)}, which reports {@code callEnd}. The reject is thrown from the advice
+   * before that body runs, so the advice runs this same step.
+   *
+   * @param call the {@code RealCall}
+   * @param rejected what the dispatch threw
+   * @return what to throw: {@code noMoreExchanges}' answer for an {@code IOException}, else {@code
+   *     rejected}; also {@code rejected} when the call has no such method (OkHttp 3) or it cannot
+   *     be called, and the listener's own failure when it throws, as OkHttp lets it propagate
+   */
+  public static Throwable okHttpCallFailed(final Object call, final Throwable rejected) {
+    final @Nullable Method end;
+    BootstrapDispatcher.beginInternalCall();
+    try {
+      end = okHttpNoMoreExchanges(call.getClass());
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
+    if (end == null) {
+      return rejected;
+    }
+    final java.io.@Nullable IOException failure =
+        rejected instanceof java.io.IOException io ? io : null;
+    try {
+      final Object thrown = end.invoke(call, failure);
+      return failure != null && thrown instanceof Throwable replacement ? replacement : rejected;
+    } catch (final java.lang.reflect.InvocationTargetException listenerFailed) {
+      final Throwable cause = listenerFailed.getCause();
+      return cause == null ? rejected : cause;
+    } catch (final ReflectiveOperationException | RuntimeException uncallable) {
+      return rejected;
+    }
+  }
+
+  private static @Nullable Method okHttpNoMoreExchanges(final Class<?> callType) {
+    final ConcurrentHashMap<String, Method> perClass = METHOD_CACHE.get(callType);
+    Method method = perClass.get(OKHTTP_NO_MORE_EXCHANGES);
+    if (method == null) {
+      try {
+        method = callType.getDeclaredMethod(OKHTTP_NO_MORE_EXCHANGES, java.io.IOException.class);
+        try {
+          method.setAccessible(true);
+        } catch (final RuntimeException encapsulated) {
+          // public: callable without it when its package is exported
+        }
+      } catch (final NoSuchMethodException | RuntimeException absent) {
+        method = NEGATIVE_CACHE_MARKER;
+      }
+      final Method existing = perClass.putIfAbsent(OKHTTP_NO_MORE_EXCHANGES, method);
+      if (existing != null) {
+        method = existing;
+      }
+    }
+    return isNegativeMarker(method) ? null : method;
+  }
 
   /**
    * Extracts the URL from an {@code okhttp3.Call} by calling {@code request().url().toString()}.

@@ -212,8 +212,10 @@ final class HttpClientAdvice {
    * runs it once, an {@code execute()} on the caller's thread ({@code HTTP_CLIENT_SEND}), an {@code
    * enqueue}d call on OkHttp's dispatcher thread ({@code HTTP_CLIENT_SEND_ASYNC}). A reject throws
    * the {@link java.io.IOException} where OkHttp's own network failures are thrown: {@code
-   * execute()} throws it, an enqueued call hands it to {@code Callback.onFailure}. A request an
-   * interceptor sends is a call of its own and is evaluated too.
+   * execute()} throws it, an enqueued call hands it to {@code Callback.onFailure}. It is thrown
+   * before the method's body, so the advice first ends the call as that body ends a failed one
+   * ({@link HttpUrlExtractor#okHttpCallFailed}: {@code callFailed}, the timeout's exit). A request
+   * an interceptor sends is a call of its own and is evaluated too.
    */
   static final class OkHttpChainAdvice {
     @Advice.OnMethodEnter
@@ -230,10 +232,14 @@ final class HttpClientAdvice {
       } finally {
         BootstrapDispatcher.endInternalCall();
       }
-      if (sync) {
-        BootstrapDispatcher.beforeHttpSend(url);
-      } else {
-        BootstrapDispatcher.beforeHttpSendAsync(url);
+      try {
+        if (sync) {
+          BootstrapDispatcher.beforeHttpSend(url);
+        } else {
+          BootstrapDispatcher.beforeHttpSendAsync(url);
+        }
+      } catch (final Throwable rejected) {
+        throw HttpUrlExtractor.okHttpCallFailed(call, rejected);
       }
     }
   }

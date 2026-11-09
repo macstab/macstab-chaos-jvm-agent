@@ -676,7 +676,9 @@ class AgentEndToEndTest {
     }
 
     @Test
-    @DisplayName("OkHttp 4 Call.execute() is intercepted")
+    @DisplayName(
+        "OkHttp 4 Call.execute() is intercepted; a reject ends the call as a network failure does"
+            + " (EventListener.callFailed)")
     void okHttp4Execute() throws Exception {
       final ChildJvmProbe.ProbeResult result =
           probe.run(
@@ -689,13 +691,16 @@ class AgentEndToEndTest {
               "okhttp-execute",
               httpClasspath);
       assertThat(result.value("rejected")).isEqualTo("java.io.IOException");
+      assertThat(result.value("events"))
+          .as("OkHttp's noMoreExchanges ran: the listener saw the failure")
+          .isEqualTo("callStart,callFailed");
       assertThat(result.longValue("matched.okhttp")).isEqualTo(1L);
     }
 
     @Test
     @DisplayName(
         "OkHttp enqueue: a reject reaches Callback.onFailure on OkHttp's dispatcher thread, enqueue"
-            + " does not throw")
+            + " does not throw, and EventListener.callFailed runs")
     void okHttpEnqueueReject() throws Exception {
       final ChildJvmProbe.ProbeResult result =
           probe.run(
@@ -712,6 +717,7 @@ class AgentEndToEndTest {
       assertThat(result.value("callback.type")).isEqualTo("java.io.IOException");
       assertThat(result.value("callback.message")).isEqualTo("service down");
       assertThat(result.value("callback.thread")).startsWith("OkHttp");
+      assertThat(result.value("events")).isEqualTo("callStart,callFailed");
       assertThat(result.longValue("matched.okhttp-async")).isEqualTo(1L);
     }
 

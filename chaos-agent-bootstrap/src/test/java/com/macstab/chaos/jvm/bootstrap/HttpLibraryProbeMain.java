@@ -39,21 +39,47 @@ public final class HttpLibraryProbeMain {
   }
 
   private static void okHttpExecute(final String url) throws Exception {
-    final okhttp3.OkHttpClient client = new okhttp3.OkHttpClient();
+    final java.util.List<String> events = new java.util.concurrent.CopyOnWriteArrayList<>();
+    final okhttp3.OkHttpClient client = recordingClient(events);
     try (okhttp3.Response response =
         client.newCall(new okhttp3.Request.Builder().url(url).build()).execute()) {
       System.out.println("status=" + response.code());
     } catch (final java.io.IOException rejected) {
       System.out.println("rejected=" + rejected.getClass().getName());
     } finally {
+      System.out.println("events=" + String.join(",", events));
       client.dispatcher().executorService().shutdown();
       client.connectionPool().evictAll();
     }
   }
 
+  /** A client whose {@code EventListener} records the call's start and how it ended. */
+  private static okhttp3.OkHttpClient recordingClient(final java.util.List<String> events) {
+    return new okhttp3.OkHttpClient.Builder()
+        .eventListener(
+            new okhttp3.EventListener() {
+              @Override
+              public void callStart(final okhttp3.Call call) {
+                events.add("callStart");
+              }
+
+              @Override
+              public void callEnd(final okhttp3.Call call) {
+                events.add("callEnd");
+              }
+
+              @Override
+              public void callFailed(final okhttp3.Call call, final java.io.IOException failure) {
+                events.add("callFailed");
+              }
+            })
+        .build();
+  }
+
   /** An enqueued call: whether {@code enqueue} threw, and what its callback received where. */
   private static void okHttpEnqueueReject(final String url) throws Exception {
-    final okhttp3.OkHttpClient client = new okhttp3.OkHttpClient();
+    final java.util.List<String> events = new java.util.concurrent.CopyOnWriteArrayList<>();
+    final okhttp3.OkHttpClient client = recordingClient(events);
     final java.util.concurrent.CompletableFuture<String> outcome =
         new java.util.concurrent.CompletableFuture<>();
     try {
@@ -76,6 +102,7 @@ public final class HttpLibraryProbeMain {
                 }
               });
       System.out.println("callback=" + outcome.get(10, java.util.concurrent.TimeUnit.SECONDS));
+      System.out.println("events=" + String.join(",", events));
     } catch (final Exception failure) {
       System.out.println("call.type=" + failure.getClass().getName());
     } finally {

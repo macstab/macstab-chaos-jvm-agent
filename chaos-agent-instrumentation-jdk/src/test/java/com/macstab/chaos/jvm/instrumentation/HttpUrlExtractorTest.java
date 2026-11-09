@@ -2,8 +2,12 @@ package com.macstab.chaos.jvm.instrumentation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.net.URI;
 import java.net.http.HttpRequest;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -73,6 +77,82 @@ class HttpUrlExtractorTest {
       assertThat(HttpUrlExtractor.fromOkHttpCall(new OkCall(null))).isNull();
       assertThat(HttpUrlExtractor.fromOkHttpCall(new OkCall(new OkRequest(null)))).isNull();
       assertThat(HttpUrlExtractor.fromOkHttpCall(new OkCall(new OkRequest(new Broken())))).isNull();
+    }
+  }
+
+  @Nested
+  @DisplayName("OkHttp call failed")
+  class OkHttpCallFailed {
+
+    /**
+     * Shaped like OkHttp 4's {@code RealCall}: {@code noMoreExchanges} records what ended the call
+     * and answers the failure, as an {@code InterruptedIOException} when the call timed out.
+     */
+    public static final class EndingCall {
+      final List<String> ended = new ArrayList<>();
+      private final boolean timedOut;
+      private final RuntimeException listenerFailure;
+
+      EndingCall(final boolean timedOut, final RuntimeException listenerFailure) {
+        this.timedOut = timedOut;
+        this.listenerFailure = listenerFailure;
+      }
+
+      public IOException noMoreExchanges$okhttp(final IOException failure) {
+        ended.add(failure == null ? "callEnd" : "callFailed " + failure.getMessage());
+        if (listenerFailure != null) {
+          throw listenerFailure;
+        }
+        if (failure == null || !timedOut) {
+          return failure;
+        }
+        final InterruptedIOException timeout = new InterruptedIOException("timeout");
+        timeout.initCause(failure);
+        return timeout;
+      }
+    }
+
+    @Test
+    @DisplayName("an IOException ends the call as failed, and noMoreExchanges' answer is thrown")
+    void ioExceptionFailsTheCall() {
+      final IOException rejected = new IOException("service down");
+      final EndingCall call = new EndingCall(false, null);
+      assertThat(HttpUrlExtractor.okHttpCallFailed(call, rejected)).isSameAs(rejected);
+      assertThat(call.ended).containsExactly("callFailed service down");
+
+      final EndingCall timedOut = new EndingCall(true, null);
+      assertThat(HttpUrlExtractor.okHttpCallFailed(timedOut, rejected))
+          .isInstanceOf(InterruptedIOException.class)
+          .hasCause(rejected);
+    }
+
+    @Test
+    @DisplayName("another failure ends the call (callEnd) and is thrown as it is")
+    void otherFailureEndsTheCall() {
+      final IllegalStateException rejected = new IllegalStateException("injected");
+      final EndingCall call = new EndingCall(false, null);
+      assertThat(HttpUrlExtractor.okHttpCallFailed(call, rejected)).isSameAs(rejected);
+      assertThat(call.ended).containsExactly("callEnd");
+    }
+
+    @Test
+    @DisplayName("a listener's own failure is thrown in place of the reject, as OkHttp does")
+    void listenerFailurePropagates() {
+      final IllegalStateException listener = new IllegalStateException("listener");
+      assertThat(
+              HttpUrlExtractor.okHttpCallFailed(
+                  new EndingCall(false, listener), new IOException("service down")))
+          .isSameAs(listener);
+    }
+
+    @Test
+    @DisplayName("a call without noMoreExchanges (OkHttp 3) gets the reject as it is")
+    void noSuchMethod() {
+      final IOException rejected = new IOException("service down");
+      assertThat(HttpUrlExtractor.okHttpCallFailed(new Object(), rejected)).isSameAs(rejected);
+      assertThat(HttpUrlExtractor.okHttpCallFailed(new Object(), rejected))
+          .as("the absence is cached")
+          .isSameAs(rejected);
     }
   }
 
