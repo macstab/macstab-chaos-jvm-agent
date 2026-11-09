@@ -2654,7 +2654,8 @@ public final class BootstrapDispatcher {
   }
 
   /**
-   * Called before {@code DatagramSocket.send(DatagramPacket)}.
+   * Called before {@code DatagramSocket.send(DatagramPacket)}. The idle check comes first: the
+   * packet's {@code getSocketAddress()} builds a new address on every call.
    *
    * @param channel the datagram channel behind the socket
    * @param packet the datagram
@@ -2663,6 +2664,9 @@ public final class BootstrapDispatcher {
    */
   public static boolean dropDatagramPacket(
       final Object channel, final java.net.DatagramPacket packet) throws Throwable {
+    if (idle(OperationTags.DATAGRAM_SEND)) {
+      return false;
+    }
     return datagram(
             OperationTags.DATAGRAM_SEND,
             channel,

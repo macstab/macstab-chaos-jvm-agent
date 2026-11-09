@@ -475,6 +475,41 @@ class BootstrapDispatcherTest {
       assertThat(BootstrapDispatcher.corruptDatagramPacket(executor, null)).isTrue();
     }
 
+    @Test
+    @DisplayName("an idle datagram send allocates nothing: the idle check runs before the address")
+    void idleDatagramSendDoesNotAllocate() throws Throwable {
+      final MethodHandle[] handles = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
+      handles[BootstrapDispatcher.IDLE] = answering(BootstrapDispatcher.IDLE, true);
+      handles[BootstrapDispatcher.BEFORE_DATAGRAM] =
+          answering(BootstrapDispatcher.BEFORE_DATAGRAM, 4);
+      BootstrapDispatcher.install(new Object(), handles);
+      final java.net.DatagramPacket packet =
+          new java.net.DatagramPacket(
+              new byte[4], 4, new java.net.InetSocketAddress("127.0.0.1", 9));
+      final int calls = 10_000;
+      final com.sun.management.ThreadMXBean threads =
+          (com.sun.management.ThreadMXBean)
+              java.lang.management.ManagementFactory.getThreadMXBean();
+      final long threadId = Thread.currentThread().threadId();
+      // The first round warms up the method-handle adaptation, which allocates once.
+      for (int i = 0; i < calls; i++) {
+        BootstrapDispatcher.dropDatagramPacket(executor, packet);
+      }
+
+      int dropped = 0;
+      final long before = threads.getThreadAllocatedBytes(threadId);
+      for (int i = 0; i < calls; i++) {
+        if (BootstrapDispatcher.dropDatagramPacket(executor, packet)) {
+          dropped++;
+        }
+      }
+      final long allocated = threads.getThreadAllocatedBytes(threadId) - before;
+
+      assertThat(dropped).isZero();
+      // The packet's InetSocketAddress costs 40 bytes per call, i.e. 400 KB over 10,000 calls.
+      assertThat(allocated).as("bytes allocated by idle datagram sends").isLessThan(calls);
+    }
+
     /** A handle of the delegate's shape for {@code slot} that returns {@code answer}. */
     private MethodHandle answering(final int slot, final Object answer) throws Exception {
       final MethodType type =
