@@ -362,17 +362,17 @@ subprojects {
             onlyIf("a release, not a snapshot") { !snapshot }
         }
 
-        // Maven Central takes signed releases only: an unsigned release is refused here, before
-        // anything is uploaded.
+        // A release is published signed or not at all: an unsigned release is refused here for every
+        // repository (Maven Central, GitHub Packages, the staging directory the release attests),
+        // before anything is uploaded. A missing or empty signing key is no key. Snapshots and
+        // publishToMavenLocal are not refused.
         tasks.withType<PublishToMavenRepository>().configureEach {
-            if (name.endsWith("ToOSSRHRepository")) {
-                doFirst {
-                    if (!snapshot && !signed) {
-                        throw GradleException(
-                            "A release to Maven Central must be signed: set signingKey and signingPassword, " +
-                                "or signing.keyId, signing.password and signing.secretKeyRingFile (RELEASE.md).",
-                        )
-                    }
+            doFirst {
+                if (!snapshot && !signed) {
+                    throw GradleException(
+                        "Release $version must be signed: set signingKey and signingPassword, " +
+                            "or signing.keyId, signing.password and signing.secretKeyRingFile (RELEASE.md).",
+                    )
                 }
             }
         }

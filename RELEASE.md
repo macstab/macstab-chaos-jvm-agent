@@ -38,8 +38,10 @@ projects, Central Portal inherits that verification automatically.
    signingKey=<ASCII-armoured secret key>
    signingPassword=<gpg-passphrase>
    ```
-   A release (a version without `-SNAPSHOT`) published to Maven Central must be signed: the
-   build refuses the upload when neither is configured. Snapshots are never signed.
+   A release (a version without `-SNAPSHOT`) must be signed, whatever the repository (Maven
+   Central, GitHub Packages, the `build/staging-deploy` directory the release attests): every
+   publish task fails before uploading anything when neither is configured, or the key is empty.
+   Snapshots are never signed.
 
 ## Required GitHub secrets
 
