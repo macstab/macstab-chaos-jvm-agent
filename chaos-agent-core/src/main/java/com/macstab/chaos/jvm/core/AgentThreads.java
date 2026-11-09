@@ -5,6 +5,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
@@ -12,7 +13,9 @@ import java.util.stream.Collectors;
  * Starts and stops the agent's own threads (stressor and expiry threads), so no scenario is ever
  * evaluated for them (L3): each body runs, and each thread is started and stopped, with the
  * dispatch depth raised. A thread started with the depth raised still begins its own depth at zero,
- * so the body has to raise it too.
+ * so the body has to raise it too. A stressor thread's body reports its failure (a {@link
+ * Throwable} escaping it) to an end callback, so its scenario ends instead of staying {@code
+ * ACTIVE} without load (L17).
  */
 final class AgentThreads {
 
@@ -41,8 +44,44 @@ final class AgentThreads {
   }
 
   /**
+   * Returns {@code body} wrapped so it runs with the dispatch depth raised and reports its own
+   * failure: a {@link Throwable} that escapes the body is logged once and {@code onFailure} runs on
+   * the failing thread (a stressor ends its scenario through it). A failure of {@code onFailure}
+   * itself is logged once and swallowed.
+   *
+   * @param body the thread's work
+   * @param onFailure runs when the body fails
+   * @return the wrapped body
+   */
+  static Runnable owned(final Runnable body, final Runnable onFailure) {
+    return owned(
+        () -> {
+          try {
+            body.run();
+          } catch (final Throwable failure) {
+            LOGGER.log(
+                Level.WARNING,
+                failure,
+                () -> "chaos-agent: agent thread " + Thread.currentThread().getName() + " failed");
+            try {
+              onFailure.run();
+            } catch (final Throwable endFailure) {
+              LOGGER.log(
+                  Level.WARNING,
+                  endFailure,
+                  () ->
+                      "chaos-agent: agent thread "
+                          + Thread.currentThread().getName()
+                          + " could not report its failure");
+            }
+          }
+        });
+  }
+
+  /**
    * Returns an unstarted platform thread whose body runs with the dispatch depth raised; start it
-   * with {@link #startAll(List)}.
+   * with {@link #startAll(List)}. For the expiry thread, whose executor handles its tasks'
+   * failures.
    *
    * @param name the thread name
    * @param daemon whether the thread is a daemon
@@ -50,37 +89,63 @@ final class AgentThreads {
    * @return the unstarted thread
    */
   static Thread platform(final String name, final boolean daemon, final Runnable body) {
-    return platform(Thread::new, name, daemon, body);
+    return named(new Thread(owned(body)), name, daemon);
   }
 
   /**
-   * As {@link #platform(String, boolean, Runnable)}, with the thread made by {@code threads} (a
-   * stressor thread factory, test seam U-72 c3).
+   * Returns an unstarted platform thread whose body runs {@link #owned(Runnable, Runnable) owned},
+   * reporting its failure to {@code onFailure}; start it with {@link #startAll(List)}.
+   *
+   * @param name the thread name
+   * @param daemon whether the thread is a daemon
+   * @param body the thread's work
+   * @param onFailure runs when the body fails
+   * @return the unstarted thread
+   */
+  static Thread platform(
+      final String name, final boolean daemon, final Runnable body, final Runnable onFailure) {
+    return platform(Thread::new, name, daemon, body, onFailure);
+  }
+
+  /**
+   * As {@link #platform(String, boolean, Runnable, Runnable)}, with the thread made by {@code
+   * threads} (a stressor thread factory, test seam U-72 c3).
    *
    * @param threads makes the thread for the owned body
    * @param name the thread name
    * @param daemon whether the thread is a daemon
    * @param body the thread's work
+   * @param onFailure runs when the body fails
    * @return the unstarted thread
    */
   static Thread platform(
-      final ThreadFactory threads, final String name, final boolean daemon, final Runnable body) {
-    final Thread thread = threads.newThread(owned(body));
+      final ThreadFactory threads,
+      final String name,
+      final boolean daemon,
+      final Runnable body,
+      final Runnable onFailure) {
+    return named(threads.newThread(owned(body, onFailure)), name, daemon);
+  }
+
+  private static Thread named(final Thread thread, final String name, final boolean daemon) {
     thread.setName(name);
     thread.setDaemon(daemon);
     return thread;
   }
 
   /**
-   * Creates and starts one agent-owned platform thread.
+   * Creates and starts one agent-owned platform thread whose body reports its failure to {@code
+   * onFailure}.
    *
    * @param name the thread name
    * @param daemon whether the thread is a daemon
    * @param body the thread's work
+   * @param onFailure runs when the body fails
    * @return the started thread
    */
-  static Thread start(final String name, final boolean daemon, final Runnable body) {
-    return startAll(List.of(platform(name, daemon, body))).get(0);
+  static Thread start(
+      final String name, final boolean daemon, final Runnable body, final Runnable onFailure) {
+    return startAll(List.of(platform(name, daemon, body, onFailure))).get(0);
   }
 
   /**

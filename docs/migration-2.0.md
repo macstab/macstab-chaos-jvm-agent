@@ -53,6 +53,7 @@
 | 34 | Method hooks never weave JDK classes; match-all method selectors are refused | a `MethodSelector` names a JDK class (`java.*`, `jdk.*`, `sun.*`, a platform-loader module), or pairs two match-all patterns such as `glob("*")` and `regex(".*")` | target your own classes; narrow the class or the method pattern (§34) |
 | 35 | `EXECUTOR_SUBMIT` covers scheduled and virtual-thread executors | a scenario counts or delays `EXECUTOR_SUBMIT` expecting only `ThreadPoolExecutor`, matches an STPE's `execute` / `submit` as `SCHEDULE_SUBMIT` | narrow by `executorClassPattern`; select the STPE submission as `EXECUTOR_SUBMIT` (§35) |
 | 36 | Injected exceptions are JDK classes, resolved at activation | an `ExceptionInjectionEffect` names a `jakarta.` or agent class, or a class that is abstract, not public, not a `Throwable` or has no public `(String)` / no-argument constructor | name a public JDK exception class (§36) |
+| 37 | Stressors without load are refused; a stressor that stops ends its scenario | a plan runs a `safepointStorm` with `retransformClassCount = 0` on a JVM with `-XX:+DisableExplicitGC`, or a `finalizerBacklog` with `--finalization=disabled`; a test expects a `gcPressure` or `threadLeak` scenario to stay `ACTIVE` after its `duration` / `lifespan` | set `retransformClassCount` above 0 or drop the stressor on that JVM; expect `INACTIVE` (§37) |
 
 ---
 
@@ -423,6 +424,12 @@ A scenario on a general primitive (file reads, ZIP inflation, direct buffers, GC
 
 - `ExceptionInjectionEffect` accepts `java.` and `javax.` class names only. A `jakarta.` or `com.macstab.chaos.jvm.` name is refused when the effect is built (`IllegalArgumentException`; `ConfigLoadException` when a plan is read). Inject the JDK exception the application handles (`java.io.IOException`, `java.sql.SQLException`, `java.lang.IllegalStateException`, …).
 - The class is resolved when the scenario is activated, not on the first intercepted call: a class the agent's class loader cannot find, a class that is not a `Throwable`, a non-public or abstract class (`java.lang.VirtualMachineError`) or one without a public `(String)` or no-argument constructor (`java.util.concurrent.CompletionException`) fails the activation with `ChaosValidationException`. 1.x threw an `IllegalArgumentException` or `RuntimeException` from the woven method instead.
+
+## 37. Stressors without load are refused, and a stressor that stops ends its scenario
+
+- A `safepointStorm` with `retransformClassCount = 0` on a JVM started with `-XX:+DisableExplicitGC`, and a `finalizerBacklog` on a JVM started with `--finalization=disabled`, are refused at activation with `ChaosUnsupportedFeatureException` (`UNSUPPORTED_RUNTIME`; over HTTP and JMX the outcome is `rejected`). 1.x accepted them, and they produced no safepoint and no finalizer backlog. Give the safepoint storm a `retransformClassCount` above 0 (retransforms reach a safepoint under every flag), or leave the stressor out of the plan on such a JVM.
+- Not refused: every stressor under ZGC, Shenandoah or `-XX:+ExplicitGCInvokesConcurrent` (the pauses are shorter), and `referenceQueueFlood` under `-XX:+DisableExplicitGC` (only the application's own collections enqueue its references).
+- A stressor scenario no longer stays `ACTIVE` once its load has stopped: when a `gcPressure` `duration` or a `threadLeak` `lifespan` elapses, or a stressor thread fails, the scenario becomes `INACTIVE` with reason `duration elapsed`, `lifespan elapsed` or `stressor failed: <type>`, and publishes `INACTIVE`. A test that asserted `ACTIVE` afterwards asserts `INACTIVE`.
 
 ---
 

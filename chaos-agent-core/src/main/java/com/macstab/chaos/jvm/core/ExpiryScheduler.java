@@ -7,7 +7,10 @@ import java.util.concurrent.TimeUnit;
 /**
  * The agent's one expiry thread: it ends time-bounded scenarios when their bounds pass, also
  * without any call (semantics L19). One daemon thread for the whole JVM, however many scenarios are
- * time-bounded; each schedules one check and cancels it when it stops.
+ * time-bounded; each schedules one check and cancels it when it stops. It also ends a scenario
+ * whose stressor stopped producing load on its own (L17): the stressor's thread hands the end over
+ * instead of ending the scenario itself, because a concurrent stop joins that thread while it holds
+ * the scenario's monitor.
  *
  * <p>Agent-owned (L3): the thread's body runs with the dispatch depth raised ({@link
  * AgentThreads#platform}), and every call that may start the thread or enqueue a check raises it
@@ -37,6 +40,20 @@ final class ExpiryScheduler {
     ChaosDispatcher.incrementDispatchDepth();
     try {
       EXECUTOR.prestartCoreThread();
+    } finally {
+      ChaosDispatcher.decrementDispatchDepth();
+    }
+  }
+
+  /**
+   * Runs {@code end} on the expiry thread as soon as it is free; never cancelled.
+   *
+   * @param end the end of a scenario
+   */
+  static void execute(final Runnable end) {
+    ChaosDispatcher.incrementDispatchDepth();
+    try {
+      EXECUTOR.execute(end);
     } finally {
       ChaosDispatcher.decrementDispatchDepth();
     }

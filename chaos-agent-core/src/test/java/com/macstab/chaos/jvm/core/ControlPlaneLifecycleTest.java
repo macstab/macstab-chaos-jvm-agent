@@ -676,14 +676,16 @@ class ControlPlaneLifecycleTest {
               new StressorFactory(java.util.Optional::empty) {
                 @Override
                 ManagedStressor createIfNeeded(
-                    final ChaosEffect effect, final boolean allowDestructiveEffects) {
+                    final ChaosEffect effect,
+                    final boolean allowDestructiveEffects,
+                    final java.util.function.Consumer<String> onEnd) {
                   if (calls.getAndIncrement() == 0) {
                     if (failure instanceof Error error) {
                       throw error;
                     }
                     throw (RuntimeException) failure;
                   }
-                  return super.createIfNeeded(effect, allowDestructiveEffects);
+                  return super.createIfNeeded(effect, allowDestructiveEffects, onEnd);
                 }
               });
       plane.addEventListener(planeEvents::add);

@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
 
 /**
@@ -29,6 +30,16 @@ final class DeadlockStressor implements ManagedStressor {
   private final List<Thread> participants;
 
   DeadlockStressor(final ChaosEffect.DeadlockEffect effect) {
+    this(effect, NO_END);
+  }
+
+  /**
+   * Creates and starts the participants, which end the scenario through {@code onEnd} if one fails.
+   *
+   * @param effect the effect parameters
+   * @param onEnd the scenario's end callback, told when a stressor thread fails
+   */
+  DeadlockStressor(final ChaosEffect.DeadlockEffect effect, final Consumer<String> onEnd) {
     final int participantCount = effect.participantCount();
     final long acquisitionDelayMs = effect.acquisitionDelay().toMillis();
 
@@ -81,7 +92,8 @@ final class DeadlockStressor implements ManagedStressor {
                   Thread.currentThread().interrupt();
                   LOGGER.fine(() -> "chaos deadlock thread interrupted: " + name);
                 }
-              }));
+              },
+              ManagedStressor.failure(onEnd, "Deadlock")));
     }
     this.participants = AgentThreads.startAll(threads);
   }

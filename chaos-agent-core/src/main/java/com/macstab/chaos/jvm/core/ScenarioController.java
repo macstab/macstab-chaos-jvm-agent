@@ -116,6 +116,10 @@ final class ScenarioController {
   private volatile @Nullable String reason;
   private volatile @Nullable Instant startedAt;
   private volatile @Nullable ManagedStressor stressor;
+
+  /** Why the stressor stopped producing load on its own; {@code null} while it runs. */
+  private volatile @Nullable String stressorEnd;
+
   private volatile @Nullable ClockSkewState clockSkewState;
   private volatile long rateWindowStartMillis;
   private volatile long rateWindowPermits;
@@ -335,7 +339,9 @@ final class ScenarioController {
    *       one (e.g., heap pressure, deadlock, thread leak). A stressor that cannot get its
    *       resources ({@link OutOfMemoryError}, also a thread the JVM cannot start) fails the start
    *       with {@link ChaosUnsupportedFeatureException}, and the controller stays {@code
-   *       REGISTERED}.
+   *       REGISTERED}. A stressor that later stops producing load on its own (its thread failed,
+   *       its duration or lifespan elapsed) ends the scenario {@code INACTIVE} with that reason,
+   *       through the agent's expiry thread (L17).
    *   <li>Initialises {@link ClockSkewState} if the effect is a {@link
    *       com.macstab.chaos.jvm.api.ChaosEffect.ClockSkewEffect}.
    *   <li>Schedules the end of a time-bounded scenario ({@code activeFor}, {@code activeUntil}) on
@@ -376,7 +382,9 @@ final class ScenarioController {
     try {
       newStressor =
           stressorFactory.createIfNeeded(
-              scenario.effect(), scenario.activationPolicy().allowDestructiveEffects());
+              scenario.effect(),
+              scenario.activationPolicy().allowDestructiveEffects(),
+              this::stressorEnded);
     } catch (final OutOfMemoryError exhausted) {
       // The stressor could not get its resources: heap, direct memory, or a native thread (the
       // JVM reports a thread it cannot start as an OutOfMemoryError). The runtime cannot run it,
@@ -385,8 +393,9 @@ final class ScenarioController {
     } finally {
       ChaosDispatcher.decrementDispatchDepth();
     }
-    if (timeBounded()) {
-      // A time-bounded scenario needs the expiry thread to end: without it the start fails and
+    if (timeBounded() || newStressor != null) {
+      // A time-bounded scenario needs the expiry thread to end, and so does a stressor that stops
+      // on its own (stressorEnded hands its end to that thread): without it the start fails and
       // the controller stays REGISTERED.
       try {
         ExpiryScheduler.ensureStarted();
@@ -464,6 +473,35 @@ final class ScenarioController {
       // Under the monitor: a stop() that runs once start() has left it then finds the check and
       // cancels it. Scheduled after STARTED, so INACTIVE never precedes it.
       scheduleExpiry();
+      // A stressor that ended before the started flag was set: its own hand-off found the
+      // scenario not yet started, so it is ended now, after STARTED.
+      final String ended = stressorEnd;
+      if (ended != null) {
+        ExpiryScheduler.execute(() -> endAfterStressor(ended));
+      }
+    }
+  }
+
+  /**
+   * The stressor's end callback: its thread failed, or its duration or lifespan elapsed (L17). Runs
+   * on the stressor's thread, so it only hands the end to the expiry thread: ending here would take
+   * the monitor that a concurrent {@link #stop()} holds while it joins this very thread.
+   */
+  private void stressorEnded(final String newReason) {
+    if (stressorEnd == null) {
+      stressorEnd = newReason;
+      ExpiryScheduler.execute(() -> endAfterStressor(newReason));
+    }
+  }
+
+  /**
+   * Ends the scenario ({@code INACTIVE} with the stressor's reason, and its event) once it has
+   * started; on the expiry thread, holding no lock. Before the started flag is set it does nothing,
+   * and phase 2 of {@link #start()} schedules it again.
+   */
+  private void endAfterStressor(final String newReason) {
+    if (started.get()) {
+      endOnItsOwn(newReason);
     }
   }
 

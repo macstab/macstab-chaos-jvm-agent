@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
  * {@link ManagedStressor} that keeps a daemon thread alive for the lifetime of the associated chaos
@@ -39,6 +40,17 @@ final class KeepAliveStressor implements ManagedStressor {
    *     heartbeat interval
    */
   KeepAliveStressor(final ChaosEffect.KeepAliveEffect effect) {
+    this(effect, NO_END);
+  }
+
+  /**
+   * Creates and starts the keep-alive thread, which ends the scenario through {@code onEnd} if it
+   * fails.
+   *
+   * @param effect the keep-alive effect configuration
+   * @param onEnd the scenario's end callback, told when a stressor thread fails
+   */
+  KeepAliveStressor(final ChaosEffect.KeepAliveEffect effect, final Consumer<String> onEnd) {
     this.thread =
         AgentThreads.start(
             effect.threadName(),
@@ -52,7 +64,8 @@ final class KeepAliveStressor implements ManagedStressor {
                   return;
                 }
               }
-            });
+            },
+            ManagedStressor.failure(onEnd, "KeepAlive"));
   }
 
   /**

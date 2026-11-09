@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
 
 /**
@@ -34,6 +35,18 @@ final class MonitorContentionStressor implements ManagedStressor {
   private final AtomicBoolean stopped = new AtomicBoolean(false);
 
   MonitorContentionStressor(final ChaosEffect.MonitorContentionEffect effect) {
+    this(effect, NO_END);
+  }
+
+  /**
+   * Creates and starts the contending threads, which end the scenario through {@code onEnd} if one
+   * fails.
+   *
+   * @param effect the effect parameters
+   * @param onEnd the scenario's end callback, told when a stressor thread fails
+   */
+  MonitorContentionStressor(
+      final ChaosEffect.MonitorContentionEffect effect, final Consumer<String> onEnd) {
     final ReentrantLock lock = new ReentrantLock(!effect.unfair()); // fair=true unless unfair
     final long holdNanos = ManagedStressor.nanos(effect.lockHoldDuration());
     final int count = effect.contendingThreadCount();
@@ -84,7 +97,8 @@ final class MonitorContentionStressor implements ManagedStressor {
                   }
                 }
                 LOGGER.fine(() -> "chaos monitor-contention thread terminated: " + name);
-              }));
+              },
+              ManagedStressor.failure(onEnd, "MonitorContention")));
     }
     this.contentionThreads = AgentThreads.startAll(threads);
   }

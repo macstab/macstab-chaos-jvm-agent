@@ -23,6 +23,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
@@ -397,7 +398,8 @@ class StressorEdgeBehaviourTest {
       assertThat(
               factory.createIfNeeded(
                   new ChaosEffect.VirtualThreadCarrierPinningEffect(1, Duration.ofMillis(10)),
-                  false))
+                  false,
+                  ManagedStressor.NO_END))
           .isNull();
     }
 
@@ -741,6 +743,7 @@ class StressorEdgeBehaviourTest {
               () ->
                   new ThreadLeakStressor(
                       new ChaosEffect.ThreadLeakEffect(5, "edge-partial-", true, null),
+                      ManagedStressor.NO_END,
                       failingThird))
           .isInstanceOf(OutOfMemoryError.class);
 
@@ -767,6 +770,77 @@ class StressorEdgeBehaviourTest {
             .contains(
                 "chaos finalizer-backlog stressor created 1 objects with 3 ms finalizer delay");
       }
+    }
+  }
+
+  @Nested
+  @DisplayName("AgentThreads end callback")
+  class EndCallback {
+
+    @Test
+    @DisplayName(
+        "a failing body is logged once and reported; the thread ends without an uncaught throw")
+    void failingBodyIsReported() throws InterruptedException {
+      final AtomicInteger reports = new AtomicInteger();
+      final AtomicReference<@Nullable Throwable> uncaught = new AtomicReference<>();
+      try (LogCapture log = LogCapture.agent()) {
+        final Thread thread =
+            AgentThreads.platform(
+                "edge-failing-body",
+                true,
+                () -> {
+                  throw new IllegalStateException("body failed");
+                },
+                reports::incrementAndGet);
+        thread.setUncaughtExceptionHandler((failed, throwable) -> uncaught.set(throwable));
+        AgentThreads.startAll(List.of(thread));
+        thread.join(5_000L);
+
+        assertThat(reports).hasValue(1);
+        assertThat(uncaught.get()).isNull();
+        assertThat(log.records())
+            .filteredOn(record -> record.getLevel() == java.util.logging.Level.WARNING)
+            .singleElement()
+            .satisfies(record -> assertThat(record.getThrown()).hasMessage("body failed"));
+      }
+    }
+
+    @Test
+    @DisplayName("a report that fails is logged once and swallowed")
+    void failingReportIsSwallowed() throws InterruptedException {
+      final AtomicReference<@Nullable Throwable> uncaught = new AtomicReference<>();
+      try (LogCapture log = LogCapture.agent()) {
+        final Thread thread =
+            AgentThreads.platform(
+                "edge-failing-report",
+                true,
+                () -> {
+                  throw new IllegalStateException("body failed");
+                },
+                () -> {
+                  throw new OutOfMemoryError("report failed");
+                });
+        thread.setUncaughtExceptionHandler((failed, throwable) -> uncaught.set(throwable));
+        AgentThreads.startAll(List.of(thread));
+        thread.join(5_000L);
+
+        assertThat(uncaught.get()).isNull();
+        assertThat(log.records())
+            .filteredOn(record -> record.getLevel() == java.util.logging.Level.WARNING)
+            .extracting(record -> record.getThrown().getMessage())
+            .containsExactly("body failed", "report failed");
+      }
+    }
+
+    @Test
+    @DisplayName("a body that returns reports nothing")
+    void returningBodyReportsNothing() throws InterruptedException {
+      final AtomicInteger reports = new AtomicInteger();
+      final Thread thread =
+          AgentThreads.start("edge-returning-body", true, () -> {}, reports::incrementAndGet);
+      thread.join(5_000L);
+
+      assertThat(reports).hasValue(0);
     }
   }
 }

@@ -5,6 +5,7 @@ import java.lang.instrument.Instrumentation;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
 
 /**
@@ -38,6 +39,20 @@ final class SafepointStormStressor implements ManagedStressor {
   SafepointStormStressor(
       final ChaosEffect.SafepointStormEffect effect,
       final Optional<Instrumentation> instrumentation) {
+    this(effect, instrumentation, NO_END);
+  }
+
+  /**
+   * Creates and starts the storm thread, which ends the scenario through {@code onEnd} if it fails.
+   *
+   * @param effect the effect parameters
+   * @param instrumentation the agent's instrumentation, for the retransforms
+   * @param onEnd the scenario's end callback, told when a stressor thread fails
+   */
+  SafepointStormStressor(
+      final ChaosEffect.SafepointStormEffect effect,
+      final Optional<Instrumentation> instrumentation,
+      final Consumer<String> onEnd) {
     final long intervalMillis = effect.gcInterval().toMillis();
     final int retransformCount = effect.retransformClassCount();
 
@@ -62,7 +77,8 @@ final class SafepointStormStressor implements ManagedStressor {
                   break;
                 }
               }
-            });
+            },
+            ManagedStressor.failure(onEnd, "SafepointStorm"));
     LOGGER.fine(
         "SafepointStormStressor started; gcInterval="
             + intervalMillis

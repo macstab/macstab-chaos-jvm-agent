@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
@@ -49,7 +50,19 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
   private final AtomicBoolean stopped = new AtomicBoolean(false);
 
   VirtualThreadCarrierPinningStressor(final ChaosEffect.VirtualThreadCarrierPinningEffect effect) {
-    this(effect, Runtime.version().feature() < MONITORS_UNPIN_FROM_FEATURE);
+    this(effect, NO_END);
+  }
+
+  /**
+   * Creates the stressor with the holding strategy of this JDK; its threads end the scenario
+   * through {@code onEnd} if one fails.
+   *
+   * @param effect the effect parameters
+   * @param onEnd the scenario's end callback, told when a stressor thread fails
+   */
+  VirtualThreadCarrierPinningStressor(
+      final ChaosEffect.VirtualThreadCarrierPinningEffect effect, final Consumer<String> onEnd) {
+    this(effect, Runtime.version().feature() < MONITORS_UNPIN_FROM_FEATURE, onEnd);
   }
 
   /**
@@ -61,6 +74,13 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
    */
   VirtualThreadCarrierPinningStressor(
       final ChaosEffect.VirtualThreadCarrierPinningEffect effect, final boolean pinWithMonitor) {
+    this(effect, pinWithMonitor, NO_END);
+  }
+
+  private VirtualThreadCarrierPinningStressor(
+      final ChaosEffect.VirtualThreadCarrierPinningEffect effect,
+      final boolean pinWithMonitor,
+      final Consumer<String> onEnd) {
     final long pinNanos = ManagedStressor.nanos(effect.pinDuration());
     final int count = effect.pinnedThreadCount();
     final CountDownLatch ready = new CountDownLatch(count);
@@ -78,7 +98,8 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
                         ready.countDown();
                         body.run();
                         LOGGER.fine(() -> "chaos carrier-pin thread terminated: " + name);
-                      })));
+                      },
+                      ManagedStressor.failure(onEnd, "VirtualThreadCarrierPinning"))));
     }
     this.pinningThreads = AgentThreads.startAll(threads);
   }

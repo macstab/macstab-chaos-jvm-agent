@@ -1737,7 +1737,7 @@ The classes are defined by their own class loader, without `sun.misc.Unsafe`, so
 | `promoteToOldGen`              | boolean  | —            | `true` = objects held long enough to reach old generation (triggers major GC) |
 | `duration`                     | Duration | positive     | Total duration of the allocation workload                                     |
 
-The rate is held over time, not rounded per batch: every 50 ms the stressor allocates the whole objects the rate owes since its start, so 1,000 B/s in 1 KiB objects allocates one object about every second. A `duration` too large for nanoseconds (about 292 years) lasts until the scenario stops.
+The rate is held over time, not rounded per batch: every 50 ms the stressor allocates the whole objects the rate owes since its start, so 1,000 B/s in 1 KiB objects allocates one object about every second. When `duration` elapses the allocation stops and the scenario ends `INACTIVE` with reason `duration elapsed`. A `duration` too large for nanoseconds (about 292 years) lasts until the scenario stops.
 
 ---
 
@@ -1753,6 +1753,8 @@ The rate is held over time, not rounded per batch: every 50 ms the stressor allo
 |------------------|----------|-------------------|--------------------------------------------------|
 | `objectCount`    | int      | > 0, ≤ 50,000,000 | Number of finalizable objects to allocate        |
 | `finalizerDelay` | Duration | ≥ 0               | How long each finalizer sleeps before completing |
+
+**Refused** with `ChaosUnsupportedFeatureException` (`UNSUPPORTED_RUNTIME`; HTTP/JMX `rejected`) on a JVM started with `--finalization=disabled`, where no finalizer runs.
 
 ---
 
@@ -1790,6 +1792,7 @@ The rate is held over time, not rounded per batch: every 50 ms the stressor allo
 | `lifespan`    | Duration | positive or null | Maximum lifetime per thread; `null` = no limit |
 
 **Requires:** `ActivationPolicy.allowDestructiveEffects = true` when `daemon=false` and `lifespan=null`.
+When `lifespan` elapses the threads end and the scenario ends `INACTIVE` with reason `lifespan elapsed`.
 
 ---
 
@@ -1858,6 +1861,8 @@ Like `metaspacePressure`, the classes are defined without `sun.misc.Unsafe`.
 | `gcInterval`            | Duration | ≥ 1 ms     | Interval between forced `System.gc()` calls                              |
 | `retransformClassCount` | int      | ≥ 0        | Number of classes to retransform per cycle (additional safepoint source) |
 
+**Refused** with `ChaosUnsupportedFeatureException` (`UNSUPPORTED_RUNTIME`; HTTP/JMX `rejected`) when `retransformClassCount` is `0` on a JVM started with `-XX:+DisableExplicitGC`: `System.gc()` does nothing there, so no safepoint is reached. Retransforms reach a safepoint under every flag, so a count above `0` is accepted. Under ZGC, Shenandoah or `-XX:+ExplicitGCInvokesConcurrent` the stressor runs; its pauses are shorter (a concurrent cycle pauses only for its marking and relocation start and end).
+
 ---
 
 #### `stringInternPressure` — StringInternPressureEffect
@@ -1889,6 +1894,8 @@ String `i` is `i` written in base 256, so the strings are distinct; a count, len
 |------------------|----------|------------|----------------------------------------|
 | `referenceCount` | int      | > 0        | WeakReferences created per flood cycle |
 | `floodInterval`  | Duration | ≥ 1 ms     | Interval between flood cycles          |
+
+Under `-XX:+DisableExplicitGC` the stressor's `System.gc()` does nothing: only the collections the application causes enqueue its references, so far fewer are processed (in a probe, 75,613 instead of 2,000,000 over 200 cycles). It is accepted, because the load it produces is real.
 
 ---
 

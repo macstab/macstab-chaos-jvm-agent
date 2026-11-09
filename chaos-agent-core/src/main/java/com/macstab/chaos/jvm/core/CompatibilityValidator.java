@@ -66,6 +66,9 @@ final class CompatibilityValidator {
    *       paired with its corresponding {@link ChaosEffect} subtype.
    *   <li><b>Direct memory limit</b> — direct-buffer pressure must fit under {@code
    *       -XX:MaxDirectMemorySize} ({@link ChaosUnsupportedFeatureException}).
+   *   <li><b>Runtime flags</b> — a safepoint storm without retransforms under {@code
+   *       -XX:+DisableExplicitGC} and a finalizer backlog under {@code --finalization=disabled}
+   *       produce no load ({@link ChaosUnsupportedFeatureException}).
    *   <li><b>Stressor limits</b> — heap pressure must fit in the free heap ({@link
    *       ChaosUnsupportedFeatureException}); interned strings must be distinct and within their
    *       caps; stressor intervals must be at least one millisecond.
@@ -80,7 +83,8 @@ final class CompatibilityValidator {
    * @throws com.macstab.chaos.jvm.api.ChaosValidationException if any structural or semantic
    *     constraint is violated
    * @throws com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException if the scenario needs more
-   *     than the runtime provides (direct-buffer pressure above the direct memory limit)
+   *     than the runtime provides (direct-buffer pressure above the direct memory limit, heap
+   *     pressure above the free heap, a stressor this JVM's flags leave without load)
    */
   static void validate(final ChaosScenario scenario, final FeatureSet featureSet) {
     if (scenario.scope() == ChaosScenario.ScenarioScope.SESSION) {
@@ -101,6 +105,7 @@ final class CompatibilityValidator {
       validateStressBinding(stressSelector.target(), scenario.effect());
       validateStressActivationPolicy(scenario.activationPolicy());
       validateDirectMemoryLimit(scenario.effect(), featureSet);
+      validateRuntimeFlags(scenario.effect(), featureSet);
       validateStressorLimits(scenario.effect());
     }
     if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect) {
@@ -126,6 +131,38 @@ final class CompatibilityValidator {
                 + limit
                 + " bytes (-XX:MaxDirectMemorySize)");
       }
+    }
+  }
+
+  /**
+   * Refuses a stressor that this JVM's flags leave without any load (U-36, L17), each refusal a
+   * {@link ChaosUnsupportedFeatureException}:
+   *
+   * <ul>
+   *   <li>a safepoint storm without class retransforms ({@code retransformClassCount = 0}) under
+   *       {@code -XX:+DisableExplicitGC}: {@code System.gc()} does nothing, so no safepoint is
+   *       reached (retransforms reach one under every flag);
+   *   <li>a finalizer backlog under {@code --finalization=disabled}: the JVM runs no finalizer.
+   * </ul>
+   *
+   * <p>Not refused, because the load is real though smaller: a reference-queue flood under {@code
+   * -XX:+DisableExplicitGC} (only the collections the application causes enqueue its references),
+   * and every stressor under ZGC, Shenandoah or {@code -XX:+ExplicitGCInvokesConcurrent} (shorter
+   * pauses). The flags are read only for the stressors in the table, at their first validation.
+   */
+  private static void validateRuntimeFlags(final ChaosEffect effect, final FeatureSet featureSet) {
+    if (effect instanceof ChaosEffect.SafepointStormEffect storm
+        && storm.retransformClassCount() == 0
+        && !featureSet.explicitGc()) {
+      throw new ChaosUnsupportedFeatureException(
+          "a safepoint storm without class retransforms (retransformClassCount=0) reaches no"
+              + " safepoint under -XX:+DisableExplicitGC, where System.gc() does nothing; set"
+              + " retransformClassCount above 0");
+    }
+    if (effect instanceof ChaosEffect.FinalizerBacklogEffect && !featureSet.finalization()) {
+      throw new ChaosUnsupportedFeatureException(
+          "a finalizer backlog cannot build up under --finalization=disabled, where the JVM runs"
+              + " no finalizer");
     }
   }
 

@@ -1439,7 +1439,8 @@ class CompatibilityValidatorTest {
       assertThatThrownBy(
               () ->
                   CompatibilityValidator.validate(
-                      directBuffer(64 * MIB), new FeatureSet(21, true, 8 * MIB)))
+                      directBuffer(64 * MIB),
+                      new FeatureSet(21, true, true, FeatureSet.UNKNOWN_GC, true, 8 * MIB)))
           .isInstanceOf(ChaosUnsupportedFeatureException.class)
           .hasMessageContaining("MaxDirectMemorySize");
     }
@@ -1450,7 +1451,8 @@ class CompatibilityValidatorTest {
       assertThatCode(
               () ->
                   CompatibilityValidator.validate(
-                      directBuffer(8 * MIB), new FeatureSet(21, true, 8 * MIB)))
+                      directBuffer(8 * MIB),
+                      new FeatureSet(21, true, true, FeatureSet.UNKNOWN_GC, true, 8 * MIB)))
           .doesNotThrowAnyException();
     }
 
@@ -1460,7 +1462,8 @@ class CompatibilityValidatorTest {
       assertThatCode(
               () ->
                   CompatibilityValidator.validate(
-                      directBuffer(64 * MIB), new FeatureSet(21, true, -1L)))
+                      directBuffer(64 * MIB),
+                      new FeatureSet(21, true, true, FeatureSet.UNKNOWN_GC, true, -1L)))
           .doesNotThrowAnyException();
     }
 
@@ -1469,6 +1472,176 @@ class CompatibilityValidatorTest {
     void defaultLimitIsTheMaximumHeap() {
       org.assertj.core.api.Assertions.assertThat(new FeatureSet().directMemoryLimit())
           .isEqualTo(Runtime.getRuntime().maxMemory());
+    }
+  }
+
+  @Nested
+  @DisplayName("stressors this JVM's flags leave without load (U-36)")
+  class RuntimeFlagRefusals {
+
+    private FeatureSet features(final boolean explicitGc, final boolean finalization) {
+      return new FeatureSet(21, true, explicitGc, "G1", finalization, -1L);
+    }
+
+    private ChaosScenario stress(
+        final ChaosSelector.StressTarget target, final ChaosEffect effect) {
+      return ChaosScenario.builder("flags")
+          .selector(ChaosSelector.stress(target))
+          .effect(effect)
+          .activationPolicy(ActivationPolicy.always())
+          .build();
+    }
+
+    private ChaosScenario safepointStorm(final int retransformClassCount) {
+      return stress(
+          ChaosSelector.StressTarget.SAFEPOINT_STORM,
+          new ChaosEffect.SafepointStormEffect(Duration.ofMillis(100), retransformClassCount));
+    }
+
+    @Test
+    @DisplayName("SafepointStorm without retransforms under DisableExplicitGC is refused")
+    void safepointStormWithoutRetransformsIsRefused() {
+      assertThatThrownBy(
+              () -> CompatibilityValidator.validate(safepointStorm(0), features(false, true)))
+          .isInstanceOf(ChaosUnsupportedFeatureException.class)
+          .hasMessageContaining("DisableExplicitGC")
+          .hasMessageContaining("retransformClassCount");
+    }
+
+    @Test
+    @DisplayName("SafepointStorm with retransforms under DisableExplicitGC is accepted")
+    void safepointStormWithRetransformsIsAccepted() {
+      assertThatCode(
+              () -> CompatibilityValidator.validate(safepointStorm(5), features(false, true)))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("SafepointStorm without retransforms is accepted where System.gc() collects")
+    void safepointStormWithExplicitGcIsAccepted() {
+      assertThatCode(() -> CompatibilityValidator.validate(safepointStorm(0), features(true, true)))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("FinalizerBacklog under --finalization=disabled is refused")
+    void finalizerBacklogWithoutFinalizationIsRefused() {
+      assertThatThrownBy(
+              () ->
+                  CompatibilityValidator.validate(
+                      stress(
+                          ChaosSelector.StressTarget.FINALIZER_BACKLOG,
+                          new ChaosEffect.FinalizerBacklogEffect(10, Duration.ofMillis(1))),
+                      features(true, false)))
+          .isInstanceOf(ChaosUnsupportedFeatureException.class)
+          .hasMessageContaining("--finalization=disabled");
+    }
+
+    @Test
+    @DisplayName("FinalizerBacklog with finalization enabled is accepted")
+    void finalizerBacklogWithFinalizationIsAccepted() {
+      assertThatCode(
+              () ->
+                  CompatibilityValidator.validate(
+                      stress(
+                          ChaosSelector.StressTarget.FINALIZER_BACKLOG,
+                          new ChaosEffect.FinalizerBacklogEffect(10, Duration.ofMillis(1))),
+                      features(true, true)))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("ReferenceQueueFlood under DisableExplicitGC is accepted (degraded, OPEN-1)")
+    void referenceQueueFloodUnderDisableExplicitGcIsAccepted() {
+      assertThatCode(
+              () ->
+                  CompatibilityValidator.validate(
+                      stress(
+                          ChaosSelector.StressTarget.REFERENCE_QUEUE_FLOOD,
+                          new ChaosEffect.ReferenceQueueFloodEffect(10, Duration.ofMillis(10))),
+                      features(false, false)))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName(
+        "a JVM run with -XX:+DisableExplicitGC and --finalization=disabled refuses SafepointStorm"
+            + " without retransforms and FinalizerBacklog, and accepts SafepointStorm with them")
+    void childJvmRefusesUnderItsFlags() throws Exception {
+      final String output = runProbe("-XX:+DisableExplicitGC", "--finalization=disabled");
+
+      assertThat(output)
+          .contains("storm-no-retransform=refused")
+          .contains("storm-retransform=activated")
+          .contains("finalizer-backlog=refused");
+    }
+
+    @Test
+    @DisplayName("a JVM run without those flags accepts all three")
+    void childJvmWithoutTheFlagsAccepts() throws Exception {
+      final String output = runProbe("-XX:-DisableExplicitGC", "--finalization=enabled");
+
+      assertThat(output)
+          .contains("storm-no-retransform=activated")
+          .contains("storm-retransform=activated")
+          .contains("finalizer-backlog=activated");
+    }
+
+    private String runProbe(final String... flags) throws Exception {
+      final List<String> command = new java.util.ArrayList<>();
+      command.add(java.nio.file.Path.of(System.getProperty("java.home"), "bin", "java").toString());
+      command.addAll(List.of(flags));
+      command.addAll(
+          List.of(
+              "-cp", System.getProperty("java.class.path"), RuntimeFlagsProbeMain.class.getName()));
+      final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+      try {
+        final String output =
+            new String(
+                process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        return output;
+      } finally {
+        process.destroyForcibly();
+      }
+    }
+
+    @Test
+    @DisplayName("--finalization: the last option wins; without one finalization is enabled")
+    void finalizationOption() {
+      assertThat(FeatureSet.finalizationEnabled(List.of("-Xmx1g"))).isTrue();
+      assertThat(FeatureSet.finalizationEnabled(List.of("--finalization=disabled"))).isFalse();
+      assertThat(
+              FeatureSet.finalizationEnabled(
+                  List.of("--finalization=disabled", "-Xss1m", "--finalization=enabled")))
+          .isTrue();
+    }
+
+    @Test
+    @DisplayName(
+        "the collector is the one whose Use…GC flag is set; a flag the JVM lacks is skipped")
+    void collectorName() {
+      assertThat(
+              FeatureSet.gcName(
+                  flag -> {
+                    if (flag.equals("UseShenandoahGC")) {
+                      throw new IllegalArgumentException("VM option does not exist");
+                    }
+                    return String.valueOf(flag.equals("UseEpsilonGC"));
+                  }))
+          .isEqualTo("Epsilon");
+      assertThat(FeatureSet.gcName(flag -> String.valueOf(flag.equals("UseZGC")))).isEqualTo("ZGC");
+      assertThat(FeatureSet.gcName(flag -> "false")).isEqualTo(FeatureSet.UNKNOWN_GC);
+    }
+
+    @Test
+    @DisplayName(
+        "this JVM's own probes: System.gc() collects, finalization runs, a known collector")
+    void ownProbes() {
+      final FeatureSet probed = new FeatureSet();
+      assertThat(probed.explicitGc()).isTrue();
+      assertThat(probed.finalization()).isTrue();
+      assertThat(probed.gcName()).isNotEqualTo(FeatureSet.UNKNOWN_GC);
     }
   }
 }

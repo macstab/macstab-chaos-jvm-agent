@@ -20,6 +20,7 @@ class GcPressureStressorTest {
     final GcPressureStressor stressor =
         new GcPressureStressor(
             new ChaosEffect.GcPressureEffect(1_000L, 1024, false, Duration.ofSeconds(10)),
+            ManagedStressor.NO_END,
             now::get,
             now::addAndGet);
     try {
@@ -38,6 +39,7 @@ class GcPressureStressorTest {
     final GcPressureStressor stressor =
         new GcPressureStressor(
             new ChaosEffect.GcPressureEffect(Long.MAX_VALUE, 1, false, Duration.ofSeconds(10)),
+            ManagedStressor.NO_END,
             now::get,
             now::addAndGet);
     try {

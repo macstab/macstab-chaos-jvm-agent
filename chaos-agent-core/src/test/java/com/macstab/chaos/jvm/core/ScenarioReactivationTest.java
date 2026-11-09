@@ -227,9 +227,11 @@ class ScenarioReactivationTest {
           new StressorFactory(Optional::empty) {
             @Override
             @Nullable ManagedStressor createIfNeeded(
-                final ChaosEffect effect, final boolean allowDestructiveEffects) {
+                final ChaosEffect effect,
+                final boolean allowDestructiveEffects,
+                final java.util.function.Consumer<String> onEnd) {
               built.incrementAndGet();
-              return super.createIfNeeded(effect, allowDestructiveEffects);
+              return super.createIfNeeded(effect, allowDestructiveEffects, onEnd);
             }
           };
       final ScenarioController controller =
@@ -277,7 +279,9 @@ class ScenarioReactivationTest {
           new StressorFactory(Optional::empty) {
             @Override
             @Nullable ManagedStressor createIfNeeded(
-                final ChaosEffect effect, final boolean allowDestructiveEffects) {
+                final ChaosEffect effect,
+                final boolean allowDestructiveEffects,
+                final java.util.function.Consumer<String> onEnd) {
               target.get().stop();
               return closed::incrementAndGet;
             }

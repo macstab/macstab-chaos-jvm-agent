@@ -655,7 +655,7 @@ public interface ChaosDiagnostics {
 | Category | Recorded when | Thrown |
 |----------|---------------|--------|
 | `INVALID_CONFIGURATION` | the scenario breaks a rule of the validator, or a stressor fails to start for another reason | `ChaosValidationException`, `ChaosActivationException`, or the stressor's `RuntimeException` |
-| `UNSUPPORTED_RUNTIME` | the runtime cannot run the scenario: a missing JVM feature, direct-buffer pressure above `-XX:MaxDirectMemorySize` (refused before anything is allocated; the default limit `0` is the maximum heap), or a stressor that could not get its resources at start (an `OutOfMemoryError`, which is also how the JVM reports a thread it cannot start) | `ChaosUnsupportedFeatureException` |
+| `UNSUPPORTED_RUNTIME` | the runtime cannot run the scenario: a missing JVM feature, direct-buffer pressure above `-XX:MaxDirectMemorySize` (refused before anything is allocated; the default limit `0` is the maximum heap), a stressor this JVM's flags leave without load (`safepointStorm` without retransforms under `-XX:+DisableExplicitGC`, `finalizerBacklog` under `--finalization=disabled`), or a stressor that could not get its resources at start (an `OutOfMemoryError`, which is also how the JVM reports a thread it cannot start) | `ChaosUnsupportedFeatureException` |
 | `INSTRUMENTATION_FAILURE` | the hooks the selector needs could not be woven | `ChaosInstrumentationException` |
 | `ACTIVATION_CONFLICT` | a running scenario already has the id | `ChaosActivationConflictException` |
 | `INTERNAL_ERROR` | any other `Error` while the scenario registers or starts (a `LinkageError`, for instance) | the `Error` itself |

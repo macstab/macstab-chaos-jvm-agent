@@ -46,7 +46,7 @@ class StressorFactoryTest {
   @MethodSource("effects")
   @DisplayName("each stressor effect starts its own stressor")
   void startsTheStressor(final ChaosEffect effect, final Class<?> expected) {
-    final ManagedStressor stressor = factory.createIfNeeded(effect, true);
+    final ManagedStressor stressor = factory.createIfNeeded(effect, true, ManagedStressor.NO_END);
     try {
       assertThat(stressor).isInstanceOf(expected);
     } finally {
@@ -59,6 +59,7 @@ class StressorFactoryTest {
   @Test
   @DisplayName("an effect without background load starts no stressor")
   void noStressorForACallEffect() {
-    assertThat(factory.createIfNeeded(ChaosEffect.suppress(), true)).isNull();
+    assertThat(factory.createIfNeeded(ChaosEffect.suppress(), true, ManagedStressor.NO_END))
+        .isNull();
   }
 }

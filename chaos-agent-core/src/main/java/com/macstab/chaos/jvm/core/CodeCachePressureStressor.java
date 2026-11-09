@@ -6,6 +6,7 @@ import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
 import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.dynamic.DynamicType;
@@ -45,6 +46,18 @@ final class CodeCachePressureStressor implements ManagedStressor {
   private static final long COMPILER_JOIN_TIMEOUT_MILLIS = 1_000L;
 
   CodeCachePressureStressor(final ChaosEffect.CodeCachePressureEffect effect) {
+    this(effect, NO_END);
+  }
+
+  /**
+   * Loads the classes and starts the compiler thread, which ends the scenario through {@code onEnd}
+   * if it fails.
+   *
+   * @param effect the effect parameters
+   * @param onEnd the scenario's end callback, told when a stressor thread fails
+   */
+  CodeCachePressureStressor(
+      final ChaosEffect.CodeCachePressureEffect effect, final Consumer<String> onEnd) {
     final CompilationMXBean compilationBean = ManagementFactory.getCompilationMXBean();
     final long compilationTimeBefore =
         compilationBean != null && compilationBean.isCompilationTimeMonitoringSupported()
@@ -82,7 +95,8 @@ final class CodeCachePressureStressor implements ManagedStressor {
                   }
                   triggerCompilation(loadedClass, methodsPerClass);
                 }
-              });
+              },
+              ManagedStressor.failure(onEnd, "CodeCachePressure"));
     }
 
     if (compilationBean != null && compilationBean.isCompilationTimeMonitoringSupported()) {

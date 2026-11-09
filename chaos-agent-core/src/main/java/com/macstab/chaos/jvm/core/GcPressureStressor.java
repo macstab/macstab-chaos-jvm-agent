@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
@@ -20,7 +21,8 @@ import org.jspecify.annotations.Nullable;
  * <p>The rate is held over time: every 50 ms the thread allocates the whole objects the rate owes
  * since the start, so the fraction of an object a batch cannot allocate carries over to the next
  * one, and the time spent allocating counts. The stressor stops allocating once the configured
- * {@link ChaosEffect.GcPressureEffect#duration()} has elapsed.
+ * {@link ChaosEffect.GcPressureEffect#duration()} has elapsed, and its scenario ends ({@code
+ * INACTIVE}, reason {@code "duration elapsed"}).
  *
  * <p>{@link #close()} interrupts the allocation thread and nulls the ring buffer, making retained
  * objects eligible for collection.
@@ -52,18 +54,33 @@ final class GcPressureStressor implements ManagedStressor {
   }
 
   GcPressureStressor(final ChaosEffect.GcPressureEffect effect) {
-    this(effect, System::nanoTime, nanos -> Thread.sleep(java.time.Duration.ofNanos(nanos)));
+    this(effect, NO_END);
+  }
+
+  /**
+   * Creates the stressor; it ends the scenario through {@code onEnd} when its duration elapses or
+   * its thread fails.
+   *
+   * @param effect the effect
+   * @param onEnd the scenario's end callback
+   */
+  GcPressureStressor(final ChaosEffect.GcPressureEffect effect, final Consumer<String> onEnd) {
+    this(effect, onEnd, System::nanoTime, nanos -> Thread.sleep(java.time.Duration.ofNanos(nanos)));
   }
 
   /**
    * Test seam: the clock that paces the allocation and the pause between batches.
    *
    * @param effect the effect
+   * @param onEnd the scenario's end callback
    * @param nanoClock a monotonic clock in nanoseconds
    * @param pause the wait between batches
    */
   GcPressureStressor(
-      final ChaosEffect.GcPressureEffect effect, final LongSupplier nanoClock, final Pause pause) {
+      final ChaosEffect.GcPressureEffect effect,
+      final Consumer<String> onEnd,
+      final LongSupplier nanoClock,
+      final Pause pause) {
     this.nanoClock = nanoClock;
     this.pause = pause;
     if (effect.promoteToOldGen()) {
@@ -78,7 +95,9 @@ final class GcPressureStressor implements ManagedStressor {
                 effect.allocationRateBytesPerSecond(),
                 effect.objectSizeBytes(),
                 effect.promoteToOldGen(),
-                ManagedStressor.nanos(effect.duration())));
+                ManagedStressor.nanos(effect.duration()),
+                onEnd),
+            ManagedStressor.failure(onEnd, "GcPressure"));
   }
 
   /**
@@ -91,13 +110,15 @@ final class GcPressureStressor implements ManagedStressor {
 
   /**
    * Body of the allocation daemon thread: sustains the configured allocation rate until the
-   * duration elapses or {@link #close()} sets {@code running=false}.
+   * duration elapses, which it reports to {@code onEnd}, or {@link #close()} sets {@code
+   * running=false}.
    */
   private Runnable allocationLoop(
       final long bytesPerSecond,
       final int objectSizeBytes,
       final boolean promote,
-      final long durationNanos) {
+      final long durationNanos,
+      final Consumer<String> onEnd) {
     return () -> {
       final long start = nanoClock.getAsLong();
       // long — not int — because a stressor running at 1M allocations/sec
@@ -134,7 +155,11 @@ final class GcPressureStressor implements ManagedStressor {
           // else: short-lived — chunk is immediately unreachable
         }
         if (elapsed >= durationNanos) {
-          break;
+          running.set(false);
+          LOGGER.fine(() -> "chaos-gc-pressure stressor completed");
+          // The load ends with the duration, and so does the scenario (L17).
+          onEnd.accept("duration elapsed");
+          return;
         }
         try {
           pause.pause(Math.min(BATCH_INTERVAL_NANOS, durationNanos - elapsed));

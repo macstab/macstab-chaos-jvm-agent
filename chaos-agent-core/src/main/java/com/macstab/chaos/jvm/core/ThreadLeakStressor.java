@@ -4,6 +4,7 @@ import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
 
 /**
@@ -17,7 +18,8 @@ import java.util.logging.Logger;
  * the leaked threads prevent a clean JVM exit until {@link #close()} is called.
  *
  * <p>When a lifespan is configured each thread terminates after that duration regardless of whether
- * {@link #close()} has been called.
+ * {@link #close()} has been called, and the scenario ends ({@code INACTIVE}, reason {@code
+ * "lifespan elapsed"}).
  *
  * <p>{@link #close()} interrupts all leaked threads and waits briefly for them to terminate.
  */
@@ -29,17 +31,30 @@ final class ThreadLeakStressor implements ManagedStressor {
   private final AtomicBoolean stopped = new AtomicBoolean(false);
 
   ThreadLeakStressor(final ChaosEffect.ThreadLeakEffect effect) {
-    this(effect, Thread::new);
+    this(effect, NO_END);
+  }
+
+  /**
+   * Creates the stressor; it ends the scenario through {@code onEnd} when its lifespan elapses or a
+   * leaked thread fails.
+   *
+   * @param effect the effect parameters
+   * @param onEnd the scenario's end callback
+   */
+  ThreadLeakStressor(final ChaosEffect.ThreadLeakEffect effect, final Consumer<String> onEnd) {
+    this(effect, onEnd, Thread::new);
   }
 
   /**
    * Creates the stressor with its threads made by {@code threadFactory} (test seam, U-72 c3).
    *
    * @param effect the effect parameters
+   * @param onEnd the scenario's end callback
    * @param threadFactory makes each leaked thread
    */
   ThreadLeakStressor(
       final ChaosEffect.ThreadLeakEffect effect,
+      final Consumer<String> onEnd,
       final java.util.concurrent.ThreadFactory threadFactory) {
     final List<Thread> threads = new ArrayList<>(effect.threadCount());
     // Elapsed time against a saturated lifespan: a deadline sum overflows for a huge lifespan.
@@ -58,11 +73,17 @@ final class ThreadLeakStressor implements ManagedStressor {
                 while (!stopped.get() && System.nanoTime() - start < lifespanNanos) {
                   java.util.concurrent.locks.LockSupport.parkNanos(50_000_000L /* 50 ms */);
                   if (Thread.interrupted()) {
-                    break;
+                    return;
                   }
                 }
                 LOGGER.fine(() -> "chaos thread-leak thread terminated: " + name);
-              }));
+                if (!stopped.get()) {
+                  // The leak ends with the lifespan, and so does the scenario (L17); the first
+                  // thread to end reports it.
+                  onEnd.accept("lifespan elapsed");
+                }
+              },
+              ManagedStressor.failure(onEnd, "ThreadLeak")));
     }
     this.leakedThreads = AgentThreads.startAll(threads);
   }

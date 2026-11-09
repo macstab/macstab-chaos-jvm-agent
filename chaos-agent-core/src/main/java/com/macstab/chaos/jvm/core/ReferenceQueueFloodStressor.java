@@ -7,7 +7,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Floods the JVM's {@code ReferenceHandler} thread by creating a large batch of {@link
@@ -40,8 +42,41 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
   private final Thread floodThread;
 
   ReferenceQueueFloodStressor(final ChaosEffect.ReferenceQueueFloodEffect effect) {
+    this(effect, NO_END);
+  }
+
+  /**
+   * Creates and starts the flood thread, which ends the scenario through {@code onEnd} if it fails.
+   *
+   * @param effect the effect parameters
+   * @param onEnd the scenario's end callback, told when the flood thread fails
+   */
+  ReferenceQueueFloodStressor(
+      final ChaosEffect.ReferenceQueueFloodEffect effect, final Consumer<String> onEnd) {
+    this(effect, onEnd, null);
+  }
+
+  /**
+   * Creates the stressor with {@code cycle} run in place of each flood cycle (test seam, U-72 c8):
+   * a cycle that throws stands for one that runs out of memory.
+   *
+   * @param effect the effect parameters
+   * @param onEnd the scenario's end callback, told when the flood thread fails
+   * @param cycle runs in place of a flood and drain; {@code null} floods and drains
+   */
+  ReferenceQueueFloodStressor(
+      final ChaosEffect.ReferenceQueueFloodEffect effect,
+      final Consumer<String> onEnd,
+      final @Nullable Runnable cycle) {
     final int referenceCount = effect.referenceCount();
     final long intervalMillis = effect.floodInterval().toMillis();
+    final Runnable floodCycle =
+        cycle != null
+            ? cycle
+            : () -> {
+              flood(referenceCount);
+              drain();
+            };
 
     floodThread =
         AgentThreads.start(
@@ -49,8 +84,7 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
             true,
             () -> {
               while (running.get()) {
-                flood(referenceCount);
-                drain();
+                floodCycle.run();
                 floodCycleCount.incrementAndGet();
                 if (!running.get()) {
                   break;
@@ -62,7 +96,8 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
                   break;
                 }
               }
-            });
+            },
+            ManagedStressor.failure(onEnd, "ReferenceQueueFlood"));
     LOGGER.fine(
         "ReferenceQueueFloodStressor started; referenceCount="
             + referenceCount
