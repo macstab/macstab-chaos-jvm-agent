@@ -1835,6 +1835,9 @@ public final class BootstrapDispatcher {
       }
     } catch (final Throwable throwable) {
       // The process runs: a failed record only leaves its wait to the process's own information.
+      // Swallowed without a trace on purpose: the record is a map put that fails only with an
+      // Error, and a bridge class has no logger (it cannot see AgentLog, and JUL from here could
+      // fix the LogManager before the application chose its own).
     } finally {
       depth[0]--;
     }
