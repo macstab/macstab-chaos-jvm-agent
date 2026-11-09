@@ -1056,4 +1056,43 @@ class ChaosPlanMapperTest {
           .isEqualTo("@WithChaos");
     }
   }
+
+  @Test
+  @DisplayName("a written plan lists a selector's operations in declaration order")
+  void writtenOperationsKeepDeclarationOrder() {
+    // EnumSet iterates in declaration order.
+    final List<OperationType> declared =
+        List.copyOf(
+            java.util.EnumSet.of(
+                OperationType.FILE_IO_READ,
+                OperationType.FILE_IO_WRITE,
+                OperationType.FILE_IO_DELETE,
+                OperationType.FILE_IO_SYNC,
+                OperationType.FILE_IO_TRUNCATE,
+                OperationType.FILE_IO_MAP,
+                OperationType.FILE_IO_OPEN,
+                OperationType.FILE_IO_CLOSE));
+    final List<OperationType> reversed = new java.util.ArrayList<>(declared);
+    java.util.Collections.reverse(reversed);
+    final ChaosPlan plan =
+        new ChaosPlan(
+            new ChaosPlan.Metadata("ordered", ""),
+            null,
+            List.of(
+                ChaosScenario.builder("files")
+                    .selector(ChaosSelector.fileIo(new java.util.LinkedHashSet<>(reversed)))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .build()));
+
+    final String json = ChaosPlanMapper.write(plan);
+
+    final java.util.regex.Matcher operations =
+        java.util.regex.Pattern.compile("\"operations\"\\s*:\\s*\\[([^\\]]*)]").matcher(json);
+    assertThat(operations.find()).as(json).isTrue();
+    assertThat(
+            java.util.Arrays.stream(operations.group(1).split(","))
+                .map(name -> name.replaceAll("[\\s\"]", ""))
+                .toList())
+        .containsExactlyElementsOf(declared.stream().map(OperationType::name).toList());
+  }
 }

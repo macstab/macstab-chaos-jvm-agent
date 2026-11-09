@@ -902,12 +902,25 @@ final class ScenarioController {
     }
   }
 
+  /**
+   * Event attributes from alternating keys and values, in that order: {@code Map.of} iterates in an
+   * order that differs between JVMs, and the attributes reach the log line and the listeners as
+   * they are given.
+   */
+  private static Map<String, String> orderedAttributes(final String... keysAndValues) {
+    final Map<String, String> attributes = new LinkedHashMap<>();
+    for (int i = 0; i < keysAndValues.length; i += 2) {
+      attributes.put(keysAndValues[i], keysAndValues[i + 1]);
+    }
+    return attributes;
+  }
+
   private void publishInactive(final String newReason) {
     observabilityBus.publish(
         ChaosEvent.Type.INACTIVE,
         scenario.id(),
         "scenario inactive: " + newReason,
-        Map.of("scope", scopeKey, "reason", newReason));
+        orderedAttributes("scope", scopeKey, "reason", newReason));
   }
 
   /** Whether the policy bounds the scenario in time ({@code activeFor} or {@code activeUntil}). */
@@ -984,7 +997,8 @@ final class ScenarioController {
           ChaosEvent.Type.SKIPPED,
           scenario.id(),
           "skipped: " + reason,
-          Map.of("reason", reason, "operation", context.operationType().name(), "scope", scopeKey));
+          orderedAttributes(
+              "reason", reason, "operation", context.operationType().name(), "scope", scopeKey));
     }
     return null;
   }

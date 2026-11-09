@@ -402,21 +402,32 @@ final class ObservabilityBus {
    *       per-invocation events and are emitted at {@code FINE} to avoid flooding production logs.
    * </ul>
    *
+   * <p>The line is {@code type=X scenarioId="…" message="…" attributes={k="v", …}}, the attributes
+   * in the event's order and every id, message, key and value {@link #escape escaped}, so a value
+   * cannot break the line or forge another.
+   *
    * @param event the event to log; must not be {@code null}
    */
   private void log(final ChaosEvent event) {
     if (event.scenarioId() != null && loggingMuted.contains(event.scenarioId())) {
       return;
     }
-    final String formatted =
-        "type="
-            + event.type()
-            + " scenarioId="
-            + event.scenarioId()
-            + " message=\""
-            + event.message()
-            + "\" attributes="
-            + event.attributes();
+    final StringBuilder line = new StringBuilder(128);
+    line.append("type=").append(event.type()).append(" scenarioId=\"");
+    escape(event.scenarioId(), line);
+    line.append("\" message=\"");
+    escape(event.message(), line);
+    line.append("\" attributes={");
+    String separator = "";
+    for (final Map.Entry<String, String> attribute : event.attributes().entrySet()) {
+      line.append(separator);
+      escape(attribute.getKey(), line);
+      line.append("=\"");
+      escape(attribute.getValue(), line);
+      line.append('"');
+      separator = ", ";
+    }
+    final String formatted = line.append('}').toString();
     switch (event.type()) {
       case STARTED, STOPPED, INACTIVE -> LOGGER.info(formatted);
       case APPLIED, RELEASED -> LOGGER.fine(formatted);
@@ -428,6 +439,30 @@ final class ObservabilityBus {
       // limiting, probability misses) so push it to FINER.
       case REGISTERED -> LOGGER.fine(formatted);
       case SKIPPED -> LOGGER.finer(formatted);
+    }
+  }
+
+  /**
+   * Appends {@code text} to {@code line} escaped for a quoted log field: {@code \\}, {@code \"},
+   * {@code \r} and {@code \n}, and {@code \}{@code uXXXX} for the other C0 controls, DEL, the C1
+   * controls and the line and paragraph separators (U+2028, U+2029).
+   */
+  private static void escape(final String text, final StringBuilder line) {
+    for (int i = 0; i < text.length(); i++) {
+      final char c = text.charAt(i);
+      switch (c) {
+        case '\\' -> line.append("\\\\");
+        case '"' -> line.append("\\\"");
+        case '\r' -> line.append("\\r");
+        case '\n' -> line.append("\\n");
+        default -> {
+          if (c < 0x20 || (c >= 0x7f && c <= 0x9f) || c == '\u2028' || c == '\u2029') {
+            line.append(String.format(java.util.Locale.ROOT, "\\u%04x", (int) c));
+          } else {
+            line.append(c);
+          }
+        }
+      }
     }
   }
 }

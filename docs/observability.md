@@ -49,12 +49,14 @@ Both files are written to a staging file and renamed, so a reader never sees a p
 |--------------|------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
 | `REGISTERED` | a scenario was registered, before it starts                                                                                  | `scope`                                      |
 | `STARTED`    | the scenario became `ACTIVE`                                                                                                 | `scope`                                      |
-| `APPLIED`    | an effect took effect                                                                                                        | `operation`, `scope`, `effectType`, `match` (the scenario's 1-based match number), `delayMillis` (when it added a delay), `sessionId` (session scenarios) |
+| `APPLIED`    | an effect took effect                                                                                                        | `operation`, `match` (the scenario's 1-based match number), `scope`, `effectType`, `delayMillis` (when it added a delay), `sessionId` (session scenarios) |
 | `SKIPPED`    | the selector matched but the policy kept the effect from applying — published only while a listener is registered           | `reason` (`notYetActive`, `warmUp`, `probability`, `rateLimit`, `maxApplications`), `operation`, `scope` |
 | `RELEASED`   | a gate was released                                                                                                          | `scope`                                      |
-| `INACTIVE`   | the scenario ended on its own (`ACTIVE → INACTIVE`), once                                                                    | `scope`, `reason` (`expired`, `max applications reached`) |
+| `INACTIVE`   | the scenario ended on its own (`ACTIVE → INACTIVE`), once                                                                    | `scope`, `reason` (`expired`, `max applications reached`, and for a stressor `stressor failed: <type>`, `duration elapsed`, `lifespan elapsed`) |
 | `STOPPED`    | the scenario stopped: once per transition into `STOPPED` (a second `stop()`, or `close()` after `stop()`, publishes nothing) | `scope`                                      |
 | `FAILED`     | an activation failed (also recorded in the diagnostics)                                                                     | `category` (`INVALID_CONFIGURATION`, `UNSUPPORTED_RUNTIME`, `ACTIVATION_CONFLICT`, `INSTRUMENTATION_FAILURE`) |
+
+An event's attributes iterate in the order listed above, the same in every JVM, and the diagnostics' `runtimeDetails` in the order they are reported; a selector's `operations` iterate (and are written to JSON) in the declaration order of `OperationType`. Every event is also logged through `java.util.logging` as one line, `type=X scenarioId="…" message="…" attributes={k="v", …}`, with every id, message, key and value escaped (see [configuration-reference §12.2](configuration-reference.md#122-structured-logging)).
 
 ## 3. Metrics
 

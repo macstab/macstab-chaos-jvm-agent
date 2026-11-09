@@ -654,7 +654,13 @@ Access via `jconsole`, `jmc`, or any JMX client. `Observability.jmxEnabled = fal
 
 ## 12.2 Structured Logging
 
-Chaos events are written to `java.util.logging` (logger `com.macstab.chaos.jvm`): `FAILED` at `WARNING`, `STARTED`/`STOPPED`/`INACTIVE` at `INFO`, `REGISTERED`/`APPLIED`/`RELEASED` at `FINE`, `SKIPPED` at `FINER`. Configure with `-Djava.util.logging.config.file=logging.properties` or programmatically. Each line carries the event type, scenario ID, message and attributes (for `APPLIED`: operation, scope, effect type and, for session scenarios, session ID).
+Chaos events are written to `java.util.logging` (logger `com.macstab.chaos.jvm`): `FAILED` at `WARNING`, `STARTED`/`STOPPED`/`INACTIVE` at `INFO`, `REGISTERED`/`APPLIED`/`RELEASED` at `FINE`, `SKIPPED` at `FINER`. Configure with `-Djava.util.logging.config.file=logging.properties` or programmatically. Each event is one line:
+
+```
+type=APPLIED scenarioId="slow-db" message="scenario effect applied" attributes={operation="JDBC_STATEMENT_EXECUTE", match="3", scope="jvm", effectType="DelayEffect", delayMillis="200"}
+```
+
+The scenario ID, the message and every attribute key and value are escaped — `\\`, `\"`, `\r`, `\n`, and `\uXXXX` for the other control characters (C0, DEL, C1) and U+2028/U+2029 — so a value with a line break or a quote can neither split the line nor forge another; ID, message and values are quoted. The attributes come in the order the event carries them, the same in every JVM (for `APPLIED`: operation, match, scope, effect type, the delay and, for session scenarios, session ID; the order per type is in [observability.md](observability.md#2-events)).
 
 ## 12.3 JFR Integration
 

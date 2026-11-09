@@ -65,12 +65,12 @@ class PlanObservabilityTest {
       final ChaosActivationHandle plan =
           runtime.activate(plan(new ChaosPlan.Observability(true, false, false), "quiet"));
       submit();
-      assertThat(logged).noneMatch(line -> line.contains("scenarioId=quiet"));
+      assertThat(logged).noneMatch(line -> line.contains("scenarioId=\"quiet\""));
 
       plan.close();
       logged.clear();
       runtime.activate(scenario("quiet")).close();
-      assertThat(logged).anyMatch(line -> line.contains("scenarioId=quiet"));
+      assertThat(logged).anyMatch(line -> line.contains("scenarioId=\"quiet\""));
     } finally {
       logger.setLevel(previous);
     }

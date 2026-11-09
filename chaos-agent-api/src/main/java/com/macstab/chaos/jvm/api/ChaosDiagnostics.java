@@ -138,10 +138,11 @@ public interface ChaosDiagnostics {
    * Immutable point-in-time snapshot of the full agent state.
    *
    * @param capturedAt when this snapshot was taken
-   * @param scenarios per-scenario reports ordered by registration time
+   * @param scenarios per-scenario reports ordered by id, then scope
    * @param failures all activation failures accumulated since agent startup
    * @param runtimeDetails capability map: {@code jdkFeatureVersion}, {@code
-   *     virtualThreadsSupported}, {@code jfrSupported}, {@code currentSessionId}
+   *     virtualThreadsSupported}, {@code jfrSupported}, {@code currentSessionId}; iterates in the
+   *     order it was given in
    */
   record Snapshot(
       Instant capturedAt,
@@ -152,7 +153,7 @@ public interface ChaosDiagnostics {
      * Canonical constructor — rejects nulls on the required scalar and takes immutable snapshots of
      * the list/map fields. Without the copies, a caller who kept the list returned from the
      * registry could mutate it after publishing the snapshot, breaking the "point in time" name.
-     * {@code List.copyOf}/{@code Map.copyOf} additionally reject null elements.
+     * The copies reject null elements, and the runtime details keep the order they were given in.
      */
     public Snapshot(
         final Instant capturedAt,
@@ -162,7 +163,7 @@ public interface ChaosDiagnostics {
       Objects.requireNonNull(capturedAt, "capturedAt");
       this.scenarios = scenarios == null ? List.of() : List.copyOf(scenarios);
       this.failures = failures == null ? List.of() : List.copyOf(failures);
-      this.runtimeDetails = runtimeDetails == null ? Map.of() : Map.copyOf(runtimeDetails);
+      this.runtimeDetails = ChaosEvent.orderedCopy(runtimeDetails);
       this.capturedAt = capturedAt;
     }
   }

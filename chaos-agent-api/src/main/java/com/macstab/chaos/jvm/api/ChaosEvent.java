@@ -41,10 +41,11 @@ public record ChaosEvent(
 
   /**
    * Canonical constructor — enforces null-safety on every required field and takes an immutable
-   * snapshot of the attribute map. Without the copy, a listener could hold a reference to the
-   * original {@code Map} and mutate it long after the event has been published, breaking the
-   * published immutability contract. {@code Map.copyOf} additionally rejects null keys/values,
-   * which keeps downstream serialisation (Jackson, JFR commit) from tripping on them later.
+   * snapshot of the attribute map, in the map's iteration order (a {@code LinkedHashMap} keeps its
+   * insertion order), so the attributes print the same way in every JVM. Without the copy, a
+   * listener could hold a reference to the original {@code Map} and mutate it long after the event
+   * has been published, breaking the published immutability contract. A null key or value is
+   * rejected, which keeps downstream serialisation (Jackson, JFR commit) from tripping on it later.
    */
   public ChaosEvent(
       final Instant timestamp,
@@ -56,11 +57,32 @@ public record ChaosEvent(
     Objects.requireNonNull(type, "type");
     Objects.requireNonNull(scenarioId, "scenarioId");
     Objects.requireNonNull(message, "message");
-    this.attributes = attributes == null ? Map.of() : Map.copyOf(attributes);
+    this.attributes = orderedCopy(attributes);
     this.timestamp = timestamp;
     this.type = type;
     this.scenarioId = scenarioId;
     this.message = message;
+  }
+
+  /**
+   * Returns an unmodifiable copy of {@code map} that iterates in {@code map}'s order, or an empty
+   * map for {@code null}.
+   *
+   * @param map the map to copy
+   * @return the copy
+   * @throws NullPointerException if a key or a value is {@code null}
+   */
+  static Map<String, String> orderedCopy(final @Nullable Map<String, String> map) {
+    if (map == null || map.isEmpty()) {
+      return Map.of();
+    }
+    final Map<String, String> copy = new java.util.LinkedHashMap<>(map.size() * 2);
+    map.forEach(
+        (key, value) ->
+            copy.put(
+                Objects.requireNonNull(key, "attribute key"),
+                Objects.requireNonNull(value, "attribute value")));
+    return java.util.Collections.unmodifiableMap(copy);
   }
 
   /** Discriminates the kind of chaos event delivered to {@link ChaosEventListener}. */

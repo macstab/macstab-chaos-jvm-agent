@@ -54,6 +54,7 @@
 | 35 | `EXECUTOR_SUBMIT` covers scheduled and virtual-thread executors | a scenario counts or delays `EXECUTOR_SUBMIT` expecting only `ThreadPoolExecutor`, matches an STPE's `execute` / `submit` as `SCHEDULE_SUBMIT` | narrow by `executorClassPattern`; select the STPE submission as `EXECUTOR_SUBMIT` (§35) |
 | 36 | Injected exceptions are JDK classes, resolved at activation | an `ExceptionInjectionEffect` names a `jakarta.` or agent class, or a class that is abstract, not public, not a `Throwable` or has no public `(String)` / no-argument constructor | name a public JDK exception class (§36) |
 | 37 | Stressors without load are refused; a stressor that stops ends its scenario | a plan runs a `safepointStorm` with `retransformClassCount = 0` on a JVM with `-XX:+DisableExplicitGC`, or a `finalizerBacklog` with `--finalization=disabled`; a test expects a `gcPressure` or `threadLeak` scenario to stay `ACTIVE` after its `duration` / `lifespan` | set `retransformClassCount` above 0 or drop the stressor on that JVM; expect `INACTIVE` (§37) |
+| 38 | The event log line is quoted and escaped | you parse the `com.macstab.chaos.jvm` log lines (`type=… scenarioId=… attributes={k=v}`) | read the quoted, escaped form (§38) |
 
 ---
 
@@ -430,6 +431,12 @@ A scenario on a general primitive (file reads, ZIP inflation, direct buffers, GC
 - A `safepointStorm` with `retransformClassCount = 0` on a JVM started with `-XX:+DisableExplicitGC`, and a `finalizerBacklog` on a JVM started with `--finalization=disabled`, are refused at activation with `ChaosUnsupportedFeatureException` (`UNSUPPORTED_RUNTIME`; over HTTP and JMX the outcome is `rejected`). 1.x accepted them, and they produced no safepoint and no finalizer backlog. Give the safepoint storm a `retransformClassCount` above 0 (retransforms reach a safepoint under every flag), or leave the stressor out of the plan on such a JVM.
 - Not refused: every stressor under ZGC, Shenandoah or `-XX:+ExplicitGCInvokesConcurrent` (the pauses are shorter), and `referenceQueueFlood` under `-XX:+DisableExplicitGC` (only the application's own collections enqueue its references).
 - A stressor scenario no longer stays `ACTIVE` once its load has stopped: when a `gcPressure` `duration` or a `threadLeak` `lifespan` elapses, or a stressor thread fails, the scenario becomes `INACTIVE` with reason `duration elapsed`, `lifespan elapsed` or `stressor failed: <type>`, and publishes `INACTIVE`. A test that asserted `ACTIVE` afterwards asserts `INACTIVE`.
+
+## 38. The event log line is quoted and escaped
+
+- Each event the agent logs (logger `com.macstab.chaos.jvm`) is one line `type=X scenarioId="…" message="…" attributes={k="v", …}`. 1.x wrote `scenarioId=` and the attribute values unquoted and nothing escaped, so a line break in an id or a message split the line.
+- The id, the message and the attribute keys and values are escaped: `\\`, `\"`, `\r`, `\n`, and `\uXXXX` for the other C0 controls, DEL, the C1 controls and U+2028/U+2029. A log parser reads the quoted fields and unescapes them.
+- The attributes come in a fixed order per event type (see [observability.md](observability.md#2-events)), the same in every JVM; 1.x printed them in an order that changed between runs.
 
 ---
 

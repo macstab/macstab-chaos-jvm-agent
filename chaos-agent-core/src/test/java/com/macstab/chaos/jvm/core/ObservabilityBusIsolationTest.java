@@ -181,7 +181,7 @@ class ObservabilityBusIsolationTest {
       }
       final Map<String, Level> levels =
           log.records().stream()
-              .filter(record -> record.getMessage().contains("scenarioId=level-"))
+              .filter(record -> record.getMessage().contains("scenarioId=\"level-"))
               .collect(
                   java.util.stream.Collectors.toMap(
                       record -> record.getMessage().substring(0, record.getMessage().indexOf(" ")),
@@ -353,6 +353,28 @@ class ObservabilityBusIsolationTest {
               });
     } finally {
       bus.removeListener(failing);
+    }
+  }
+
+  @Test
+  @DisplayName(
+      "the log line quotes and escapes the id, the message and the attributes: one line, in"
+          + " insertion order")
+  void logLineIsEscaped() {
+    final ObservabilityBus bus = new ObservabilityBus(ChaosMetricsSink.NOOP);
+    final Map<String, String> attributes = new java.util.LinkedHashMap<>();
+    attributes.put("scope", "jvm");
+    attributes.put("reason", "a\rb\n\"c\"\\");
+    attributes.put("control", "\u0001\u007f\u0085\u2028\u2029\t");
+    try (LogCapture log = LogCapture.agent()) {
+      bus.publish(ChaosEvent.Type.STARTED, "a\nb", "say \"hi\"", attributes);
+
+      assertThat(log.messages())
+          .containsExactly(
+              "type=STARTED scenarioId=\"a\\nb\" message=\"say \\\"hi\\\"\""
+                  + " attributes={scope=\"jvm\", reason=\"a\\rb\\n\\\"c\\\"\\\\\","
+                  + " control=\"\\u0001\\u007f\\u0085\\u2028\\u2029\\u0009\"}");
+      assertThat(log.messages().get(0)).doesNotContain("\n", "\r", "\u2028");
     }
   }
 }
