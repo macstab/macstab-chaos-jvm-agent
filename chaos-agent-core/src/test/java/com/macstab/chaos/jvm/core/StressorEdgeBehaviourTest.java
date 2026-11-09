@@ -837,4 +837,32 @@ class StressorEdgeBehaviourTest {
       assertThat(reports).hasValue(0);
     }
   }
+
+  @Nested
+  @DisplayName("AgentThreads context class loader")
+  class ContextClassLoader {
+
+    @Test
+    @DisplayName("an agent thread keeps no loader of the thread that made it")
+    void agentThreadHasNoContextClassLoader() {
+      // Arrange
+      final Thread self = Thread.currentThread();
+      final ClassLoader original = self.getContextClassLoader();
+      final ClassLoader application = new java.net.URLClassLoader(new java.net.URL[0], null);
+      final Thread expiryLike;
+      final Thread stressorLike;
+      self.setContextClassLoader(application);
+      try {
+        // Act
+        expiryLike = AgentThreads.platform("edge-tccl-expiry", true, () -> {});
+        stressorLike = AgentThreads.platform("edge-tccl-stressor", true, () -> {}, () -> {});
+      } finally {
+        self.setContextClassLoader(original);
+      }
+
+      // Assert
+      assertThat(expiryLike.getContextClassLoader()).isNull();
+      assertThat(stressorLike.getContextClassLoader()).isNull();
+    }
+  }
 }

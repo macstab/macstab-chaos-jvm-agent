@@ -14,7 +14,8 @@ import java.util.stream.Collectors;
  * dispatch depth raised. A thread started with the depth raised still begins its own depth at zero,
  * so the body has to raise it too. A stressor thread's body reports its failure (a {@link
  * Throwable} escaping it) to an end callback, so its scenario ends instead of staying {@code
- * ACTIVE} without load (L17).
+ * ACTIVE} without load (L17). A platform thread made here has no context class loader, so it keeps
+ * no application's loader reachable.
  */
 final class AgentThreads {
 
@@ -129,6 +130,9 @@ final class AgentThreads {
   private static Thread named(final Thread thread, final String name, final boolean daemon) {
     thread.setName(name);
     thread.setDaemon(daemon);
+    // Not the creating thread's loader: the JVM-wide expiry thread would keep the first activating
+    // application's loader (a dev-mode restart's) reachable for the JVM's life.
+    thread.setContextClassLoader(null);
     return thread;
   }
 
