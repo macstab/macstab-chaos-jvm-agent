@@ -392,6 +392,9 @@ final class FileIoAdvice {
         @Advice.Argument(0) final java.nio.file.Path source,
         @Advice.Argument(1) final java.nio.file.Path target)
         throws Throwable {
+      if (BootstrapDispatcher.idle(OperationTags.FILE_IO_OPEN)) {
+        return;
+      }
       BootstrapDispatcher.beforeFileIo(
           OperationTags.FILE_IO_OPEN, provider, source == null ? null : source.toString(), -1);
       BootstrapDispatcher.beforeFileIo(
@@ -430,6 +433,9 @@ final class FileIoAdvice {
     static void enter(
         @Advice.This final Object provider, @Advice.Argument(0) final java.nio.file.Path file)
         throws Throwable {
+      if (BootstrapDispatcher.idle(OperationTags.FILE_IO_DELETE)) {
+        return;
+      }
       BootstrapDispatcher.beforeFileIo(
           OperationTags.FILE_IO_DELETE, provider, file == null ? null : file.toString(), -1);
     }
@@ -444,6 +450,9 @@ final class FileIoAdvice {
     static boolean enter(
         @Advice.This final Object provider, @Advice.Argument(0) final java.nio.file.Path file)
         throws Throwable {
+      if (BootstrapDispatcher.idle(OperationTags.FILE_IO_DELETE)) {
+        return false;
+      }
       try {
         BootstrapDispatcher.beforeFileIo(
             OperationTags.FILE_IO_DELETE, provider, file == null ? null : file.toString(), -1);
@@ -487,7 +496,8 @@ final class FileIoAdvice {
     static void enter(
         @Advice.This final Object provider, @Advice.Argument(0) final java.nio.file.Path path)
         throws Throwable {
-      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_FILE_OPEN)) {
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_FILE_OPEN)
+          && !BootstrapDispatcher.idle(OperationTags.FILE_IO_OPEN)) {
         try {
           BootstrapDispatcher.beforeFileIo(
               OperationTags.FILE_IO_OPEN, provider, path == null ? null : path.toString(), -1);
@@ -512,6 +522,10 @@ final class FileIoAdvice {
         @Advice.Argument(0) final java.nio.file.Path source,
         @Advice.Argument(1) final java.nio.file.Path target)
         throws Throwable {
+      if (BootstrapDispatcher.idle(OperationTags.FILE_IO_MOVE)
+          && BootstrapDispatcher.idle(OperationTags.FILE_IO_MOVE_TARGET)) {
+        return;
+      }
       BootstrapDispatcher.beforeFileIo(
           OperationTags.FILE_IO_MOVE, provider, source == null ? null : source.toString(), -1);
       BootstrapDispatcher.beforeFileIo(

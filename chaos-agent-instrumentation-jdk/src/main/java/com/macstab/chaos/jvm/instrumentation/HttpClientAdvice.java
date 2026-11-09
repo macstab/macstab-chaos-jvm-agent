@@ -150,6 +150,10 @@ final class HttpClientAdvice {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
       }
+      // The exit advice leaves the scope; the idle check comes before the URL is formatted.
+      if (BootstrapDispatcher.idle(OperationTags.HTTP_CLIENT_SEND)) {
+        return;
+      }
       // URL.toString() formats the URL; unlike equals()/hashCode() it never resolves the host.
       final String target = url == null ? null : url.toString();
       try {

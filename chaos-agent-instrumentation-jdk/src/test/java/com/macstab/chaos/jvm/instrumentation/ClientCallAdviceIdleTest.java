@@ -67,6 +67,36 @@ class ClientCallAdviceIdleTest {
     assertThat(delegateCalls).doesNotContain("beforeJmxGetAttr");
   }
 
+  @Test
+  @DisplayName("an idle HttpURLConnection connect formats no URL and reaches no HTTP dispatch")
+  void idleHttpUrlConnectionFormatsNothing() throws Throwable {
+    BootstrapDispatcher.install(idleDelegate(), JdkInstrumentationInstaller.buildMethodHandles());
+
+    HttpClientAdvice.HttpUrlConnectionConnectAdvice.enter(
+        java.net.URI.create("http://orders.internal/v1").toURL());
+    HttpClientAdvice.HttpUrlConnectionConnectAdvice.exit();
+
+    assertThat(delegateCalls).doesNotContain("beforeHttpSend");
+  }
+
+  @Test
+  @DisplayName("idle file system calls format no path and reach no file dispatch")
+  void idleFileSystemCallsFormatNothing() throws Throwable {
+    BootstrapDispatcher.install(idleDelegate(), JdkInstrumentationInstaller.buildMethodHandles());
+    final Object provider = new Object();
+    final java.nio.file.Path source = java.nio.file.Path.of("/data/source");
+    final java.nio.file.Path target = java.nio.file.Path.of("/data/target");
+
+    FileIoAdvice.FilesOpenAdvice.enter(provider, source);
+    FileIoAdvice.FilesOpenAdvice.exit();
+    FileIoAdvice.FilesCopyAdvice.enter(provider, source, target);
+    FileIoAdvice.FilesMoveAdvice.enter(provider, source, target);
+    FileIoAdvice.FilesDeleteAdvice.enter(provider, source);
+    assertThat(FileIoAdvice.FilesDeleteIfExistsAdvice.enter(provider, source)).isFalse();
+
+    assertThat(delegateCalls).doesNotContain("beforeFileIo");
+  }
+
   /** A delegate that is idle for every operation and records every other call. */
   private Object idleDelegate() {
     return Proxy.newProxyInstance(

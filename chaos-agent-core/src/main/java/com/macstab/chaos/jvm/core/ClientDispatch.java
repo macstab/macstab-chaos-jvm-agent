@@ -116,7 +116,10 @@ public final class ClientDispatch {
    * @throws Throwable an {@link java.sql.SQLException} if an active scenario rejects the call
    */
   public void beforeJdbcStatementExecute(final @Nullable String sql) throws Throwable {
-    evaluateJdbc(OperationType.JDBC_STATEMENT_EXECUTE, "java.sql.Statement", snippet(sql));
+    // The idle check comes before the snippet: a long statement's substring is a new string.
+    if (!engine.idle(OperationType.JDBC_STATEMENT_EXECUTE)) {
+      evaluateJdbcActive(OperationType.JDBC_STATEMENT_EXECUTE, "java.sql.Statement", snippet(sql));
+    }
   }
 
   /**
@@ -126,7 +129,10 @@ public final class ClientDispatch {
    * @throws Throwable an {@link java.sql.SQLException} if an active scenario rejects the call
    */
   public void beforeJdbcPreparedStatement(final @Nullable String sql) throws Throwable {
-    evaluateJdbc(OperationType.JDBC_PREPARED_STATEMENT, "java.sql.Connection", snippet(sql));
+    if (!engine.idle(OperationType.JDBC_PREPARED_STATEMENT)) {
+      evaluateJdbcActive(
+          OperationType.JDBC_PREPARED_STATEMENT, "java.sql.Connection", snippet(sql));
+    }
   }
 
   /**
@@ -150,9 +156,15 @@ public final class ClientDispatch {
   private void evaluateJdbc(
       final OperationType opType, final String targetClassName, final @Nullable String targetName)
       throws Throwable {
-    if (engine.idle(opType)) {
-      return;
+    if (!engine.idle(opType)) {
+      evaluateJdbcActive(opType, targetClassName, targetName);
     }
+  }
+
+  /** Evaluates a JDBC operation whose idle check the caller has made. */
+  private void evaluateJdbcActive(
+      final OperationType opType, final String targetClassName, final @Nullable String targetName)
+      throws Throwable {
     apply(
         engine.evaluate(
             new InvocationContext(

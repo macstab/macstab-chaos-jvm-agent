@@ -41,6 +41,37 @@ class JdbcRuntimeTest {
         Set.of(OperationType.JDBC_STATEMENT_EXECUTE), NamePattern.glob(sqlGlob));
   }
 
+  @Test
+  @DisplayName("a statement with no JDBC scenario allocates nothing, however long its SQL")
+  void idleStatementAllocatesNothing() throws Throwable {
+    final java.lang.management.ThreadMXBean threads =
+        java.lang.management.ManagementFactory.getThreadMXBean();
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+        threads instanceof com.sun.management.ThreadMXBean allocation
+            && allocation.isThreadAllocatedMemorySupported(),
+        "the JVM measures a thread's allocations");
+    final com.sun.management.ThreadMXBean allocation = (com.sun.management.ThreadMXBean) threads;
+    final String sql = "SELECT * FROM orders WHERE id = ?" + " ".repeat(300);
+    try (ChaosRuntime runtime = new ChaosRuntime()) {
+      final int calls = 10_000;
+      for (int i = 0; i < calls; i++) {
+        runtime.beforeJdbcStatementExecute(sql);
+        runtime.beforeJdbcPreparedStatement(sql);
+      }
+      final long thread = Thread.currentThread().threadId();
+
+      final long before = allocation.getThreadAllocatedBytes(thread);
+      for (int i = 0; i < calls; i++) {
+        runtime.beforeJdbcStatementExecute(sql);
+        runtime.beforeJdbcPreparedStatement(sql);
+      }
+      final long allocated = allocation.getThreadAllocatedBytes(thread) - before;
+
+      // The 200-character snippet of each statement is a new string of over 200 bytes.
+      assertThat(allocated).as("bytes allocated by %d idle calls", 2 * calls).isLessThan(calls);
+    }
+  }
+
   @Nested
   @DisplayName("RejectEffect: the driver's SQLException")
   class RejectSemantics {
