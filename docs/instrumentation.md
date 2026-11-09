@@ -78,6 +78,9 @@ Both mechanisms grant the same set of opens. The manifest opens to every unnamed
 | `java.base/jdk.internal.misc`         | Named reflectively by the shaded ByteBuddy (`ClassInjector.UsingUnsafe`).                     |
 | `java.base/sun.nio.ch`                | `DirectBuffer.cleaner()` reflection (`DirectBufferPressureStressor`).                         |
 | `java.base/jdk.internal.ref`          | Modern `Cleaner` mechanism (Java 9+ replacement for `sun.misc.Cleaner`).                      |
+| `java.base/java.util.concurrent`      | `DelayScheduler$ScheduledForkJoinTask.runnable` (JDK 25), read by `ExecutorDispatch`.         |
+
+While the agent is attached, these packages are open to class-path code as well (the system class loader's unnamed module; with `-javaagent:`, every unnamed module): its `setAccessible` on their non-public members, the `java.util.concurrent` internals among them, succeeds where it would otherwise throw `InaccessibleObjectException`.
 
 When an open is refused (a JVM that denies `redefineModule`), `DirectBufferPressureStressor` logs one WARNING and a stopped stressor's memory is freed by a later GC only.
 
