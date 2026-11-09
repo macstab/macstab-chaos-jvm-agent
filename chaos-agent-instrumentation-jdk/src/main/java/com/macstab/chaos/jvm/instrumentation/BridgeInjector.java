@@ -379,6 +379,7 @@ final class BridgeInjector {
           // inlined references resolve through the bootstrap class path.
           "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor.class",
           "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor$1.class",
+          "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor$2.class",
           // Client-library advice (Kafka, gRPC, Redis, AWS SDK, Netty) references this. A library
           // defined by a loader that reaches only the platform and boot loaders (a plugin or module
           // loader) cannot see the agent's loader, so it must come from the bootstrap class path.

@@ -116,4 +116,36 @@ class JdbcTargetExtractorTest {
         ((ClassValue<java.util.Map<String, Object>>) field.get(null)).get(MissPool.class);
     assertThat(cached).containsEntry("getPoolName", java.util.Optional.empty());
   }
+
+  @Test
+  @DisplayName(
+      "whether a pool type declares its own toString() is looked up once: an acquire allocates"
+          + " nothing")
+  void ownToStringLookupIsCached() {
+    final java.lang.management.ThreadMXBean threads =
+        java.lang.management.ManagementFactory.getThreadMXBean();
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+        threads instanceof com.sun.management.ThreadMXBean allocation
+            && allocation.isThreadAllocatedMemorySupported(),
+        "the JVM measures a thread's allocations");
+    final com.sun.management.ThreadMXBean allocation = (com.sun.management.ThreadMXBean) threads;
+    final SelfNamedPool named = new SelfNamedPool("ledger-pool");
+    final MissPool unnamed = new MissPool();
+    final int acquires = 10_000;
+    for (int i = 0; i < acquires; i++) {
+      JdbcTargetExtractor.fromHikariPool(named);
+      JdbcTargetExtractor.fromHikariPool(unnamed);
+    }
+    final long thread = Thread.currentThread().threadId();
+
+    final long before = allocation.getThreadAllocatedBytes(thread);
+    for (int i = 0; i < acquires; i++) {
+      JdbcTargetExtractor.fromHikariPool(named);
+      JdbcTargetExtractor.fromHikariPool(unnamed);
+    }
+    final long allocated = allocation.getThreadAllocatedBytes(thread) - before;
+
+    // A reflective getMethod("toString") copies a Method on every call (over 100 bytes each).
+    assertThat(allocated).as("bytes allocated by %d acquires", 2 * acquires).isLessThan(acquires);
+  }
 }

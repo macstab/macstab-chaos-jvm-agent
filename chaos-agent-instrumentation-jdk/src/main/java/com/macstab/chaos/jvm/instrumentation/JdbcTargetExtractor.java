@@ -31,6 +31,20 @@ public final class JdbcTargetExtractor {
         }
       };
 
+  // Whether a pool type declares a toString() of its own, looked up once per class: a reflective
+  // getMethod copies a Method on every call, on every connection acquire.
+  private static final ClassValue<Boolean> OWN_TO_STRING =
+      new ClassValue<>() {
+        @Override
+        protected Boolean computeValue(final Class<?> type) {
+          try {
+            return type.getMethod("toString").getDeclaringClass() != Object.class;
+          } catch (final NoSuchMethodException | SecurityException unreachable) {
+            return false;
+          }
+        }
+      };
+
   private JdbcTargetExtractor() {}
 
   /**
@@ -57,7 +71,7 @@ public final class JdbcTargetExtractor {
       // fall through
     }
     try {
-      if (pool.getClass().getMethod("toString").getDeclaringClass() != Object.class) {
+      if (OWN_TO_STRING.get(pool.getClass())) {
         final String name = pool.toString();
         if (name != null && !name.isBlank()) {
           return name;
