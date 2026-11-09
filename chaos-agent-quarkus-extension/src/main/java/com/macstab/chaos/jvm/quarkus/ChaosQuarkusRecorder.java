@@ -66,7 +66,7 @@ public class ChaosQuarkusRecorder {
       LOGGER.log(
           Level.WARNING,
           exception,
-          () -> "chaos-agent: failed to self-attach during Quarkus runtime-init");
+          () -> "[chaos-agent] failed to self-attach during Quarkus runtime-init");
       return new RuntimeValue<>(Boolean.FALSE);
     }
   }

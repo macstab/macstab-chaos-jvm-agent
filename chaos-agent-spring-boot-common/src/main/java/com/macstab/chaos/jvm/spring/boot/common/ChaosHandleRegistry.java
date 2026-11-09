@@ -65,7 +65,7 @@ public final class ChaosHandleRegistry implements DisposableBean {
         LOGGER.log(
             Level.WARNING,
             exception,
-            () -> "chaos-agent: failed to stop handle registered during shutdown: " + handle.id());
+            () -> "[chaos-agent] failed to stop handle registered during shutdown: " + handle.id());
       }
       return;
     }
@@ -77,7 +77,7 @@ public final class ChaosHandleRegistry implements DisposableBean {
         LOGGER.log(
             Level.WARNING,
             exception,
-            () -> "chaos-agent: failed to stop previous handle for id=" + handle.id());
+            () -> "[chaos-agent] failed to stop previous handle for id=" + handle.id());
       }
     }
     // Re-check closing after the put: stopAll() may have drained the map in the window
@@ -91,7 +91,7 @@ public final class ChaosHandleRegistry implements DisposableBean {
         LOGGER.log(
             Level.WARNING,
             exception,
-            () -> "chaos-agent: failed to stop late-racing handle for id=" + handle.id());
+            () -> "[chaos-agent] failed to stop late-racing handle for id=" + handle.id());
       }
     }
   }
@@ -164,7 +164,7 @@ public final class ChaosHandleRegistry implements DisposableBean {
       LOGGER.log(
           Level.WARNING,
           stopFailure,
-          () -> "chaos-agent: stop failed for handle id=" + handle.id());
+          () -> "[chaos-agent] stop failed for handle id=" + handle.id());
     }
   }
 

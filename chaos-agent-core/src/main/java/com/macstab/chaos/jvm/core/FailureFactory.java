@@ -544,7 +544,7 @@ final class FailureFactory {
     } catch (final ReflectiveOperationException reflective) {
       return atCallSite(
           new RuntimeException(
-              "chaos-agent: failed to instantiate " + effect.exceptionClassName(), reflective));
+              "[chaos-agent] failed to instantiate " + effect.exceptionClassName(), reflective));
     }
     if (!effect.withStackTrace()) {
       instance.setStackTrace(new StackTraceElement[0]);

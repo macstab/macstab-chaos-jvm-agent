@@ -320,7 +320,7 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
             LOGGER.log(
                 java.util.logging.Level.WARNING,
                 failure,
-                () -> "chaos-agent: could not remove the meter " + meter.getId());
+                () -> "[chaos-agent] could not remove the meter " + meter.getId());
           }
         }
       }

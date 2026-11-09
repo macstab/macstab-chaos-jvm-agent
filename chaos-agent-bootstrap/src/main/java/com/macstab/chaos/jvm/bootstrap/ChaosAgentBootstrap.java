@@ -227,7 +227,7 @@ public final class ChaosAgentBootstrap {
     } catch (final java.io.IOException
         | java.net.URISyntaxException
         | RuntimeException unreadable) {
-      LOGGER.fine(() -> "chaos-agent: agent copies not compared: " + unreadable);
+      LOGGER.fine(() -> "[chaos-agent] agent copies not compared: " + unreadable);
       return;
     }
     if (new java.util.HashSet<>(versions.values()).size() > 1) {
@@ -246,7 +246,7 @@ public final class ChaosAgentBootstrap {
               + LogText.sanitize(copies.toString(), COPIES_LOG_LENGTH)
               + ". Keep one agent version.");
     } else if (versions.size() > 1) {
-      LOGGER.fine(() -> "chaos-agent: agent copies of one version: " + versions.keySet());
+      LOGGER.fine(() -> "[chaos-agent] agent copies of one version: " + versions.keySet());
     }
   }
 
@@ -271,7 +271,7 @@ public final class ChaosAgentBootstrap {
         System.setProperty(to, value);
       }
     } catch (final SecurityException denied) {
-      LOGGER.fine(() -> "chaos-agent: cannot hand " + from + " on: " + denied);
+      LOGGER.fine(() -> "[chaos-agent] cannot hand " + from + " on: " + denied);
     }
   }
 
@@ -385,7 +385,7 @@ public final class ChaosAgentBootstrap {
   public static ChaosControlPlane current() {
     final ChaosRuntime runtime = installedRuntime();
     if (runtime == null) {
-      throw new IllegalStateException("chaos agent is not installed");
+      throw new IllegalStateException("the chaos agent is not installed");
     }
     return runtime;
   }

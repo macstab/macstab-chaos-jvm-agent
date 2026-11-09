@@ -62,7 +62,7 @@ final class AgentThreads {
             LOGGER.log(
                 Level.WARNING,
                 failure,
-                () -> "chaos-agent: agent thread " + Thread.currentThread().getName() + " failed");
+                () -> "[chaos-agent] agent thread " + Thread.currentThread().getName() + " failed");
             try {
               onFailure.run();
             } catch (final Throwable endFailure) {
@@ -70,7 +70,7 @@ final class AgentThreads {
                   Level.WARNING,
                   endFailure,
                   () ->
-                      "chaos-agent: agent thread "
+                      "[chaos-agent] agent thread "
                           + Thread.currentThread().getName()
                           + " could not report its failure");
             }
@@ -221,7 +221,7 @@ final class AgentThreads {
     if (!survivors.isEmpty()) {
       LOGGER.warning(
           () ->
-              "chaos-agent: "
+              "[chaos-agent] "
                   + survivors.size()
                   + " stressor thread(s) still running after stop: "
                   + survivors.stream().map(Thread::getName).collect(Collectors.joining(", ")));

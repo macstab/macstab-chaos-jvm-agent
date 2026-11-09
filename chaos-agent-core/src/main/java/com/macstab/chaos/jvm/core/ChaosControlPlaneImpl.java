@@ -713,7 +713,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       // Unweaving after a removal: the scenario is already gone, so leftover advice only costs an
       // evaluation that matches nothing. Report it and carry on.
       java.util.logging.Logger.getLogger("com.macstab.chaos.jvm")
-          .warning(() -> "chaos-agent: could not update method hooks: " + failure);
+          .warning(() -> "[chaos-agent] could not update method hooks: " + failure);
     }
   }
 

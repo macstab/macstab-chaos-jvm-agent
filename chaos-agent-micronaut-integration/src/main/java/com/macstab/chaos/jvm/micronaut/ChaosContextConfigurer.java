@@ -68,7 +68,7 @@ public class ChaosContextConfigurer implements ApplicationContextConfigurer {
       LOGGER.log(
           Level.WARNING,
           exception,
-          () -> "chaos-agent: failed to self-attach during Micronaut context bootstrap");
+          () -> "[chaos-agent] failed to self-attach during Micronaut context bootstrap");
     }
   }
 

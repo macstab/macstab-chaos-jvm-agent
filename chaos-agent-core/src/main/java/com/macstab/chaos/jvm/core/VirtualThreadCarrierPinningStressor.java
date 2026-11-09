@@ -127,13 +127,13 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
     if (allowed < 1) {
       LOGGER.warning(
           () ->
-              "chaos-agent: virtual-thread carrier pinning skipped: the scheduler has a single"
+              "[chaos-agent] virtual-thread carrier pinning skipped: the scheduler has a single"
                   + " carrier, and holding it needs allowDestructiveEffects");
       return null;
     }
     LOGGER.warning(
         () ->
-            "chaos-agent: virtual-thread carrier pinning of "
+            "[chaos-agent] virtual-thread carrier pinning of "
                 + effect.pinnedThreadCount()
                 + " carriers capped at "
                 + allowed

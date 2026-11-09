@@ -74,7 +74,7 @@ class StartupPathIntegrationTest {
       final Result result = run(Map.of(), List.of(), "agentmain");
 
       assertThat(result.value("installedBefore"))
-          .isEqualTo("IllegalStateException:chaos agent is not installed");
+          .isEqualTo("IllegalStateException:the chaos agent is not installed");
       assertThat(result.value("installedAfterAttach")).isEqualTo("false");
       assertThat(result.output())
           .contains(
@@ -122,7 +122,7 @@ class StartupPathIntegrationTest {
               "IllegalStateException:chaos agent initialization re-entered on the initializing"
                   + " thread");
       assertThat(result.value("currentWhileInstalling"))
-          .isEqualTo("IllegalStateException:chaos agent is not installed");
+          .isEqualTo("IllegalStateException:the chaos agent is not installed");
       assertThat(result.value("first")).isEqualTo("runtime");
       assertThat(result.value("waiter")).isEqualTo("runtime");
       assertThat(result.value("localInstallReturnsInstalled")).isEqualTo("true");

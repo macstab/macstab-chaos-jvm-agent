@@ -277,7 +277,7 @@ class LifecycleEdgeTest {
         assertThatCode(handle::close).doesNotThrowAnyException();
         assertThat(log.messages())
             .contains(
-                "chaos-agent: could not update method hooks:"
+                "[chaos-agent] could not update method hooks:"
                     + " java.lang.IllegalStateException: retransform refused");
       }
       assertThat(runtime.registry().controllers()).isEmpty();

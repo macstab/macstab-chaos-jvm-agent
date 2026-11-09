@@ -255,7 +255,7 @@ final class ObservabilityBus {
       if (thread.isAlive()) {
         LOGGER.warning(
             () ->
-                "chaos-agent: asynchronous ChaosEventListener "
+                "[chaos-agent] asynchronous ChaosEventListener "
                     + delegate.getClass().getName()
                     + " did not return within "
                     + CLOSE_JOIN_MILLIS

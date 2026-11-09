@@ -279,7 +279,7 @@ final class ChaosReports implements AutoCloseable {
             .log(
                 java.util.logging.Level.WARNING,
                 failed,
-                () -> "chaos-agent: cannot write reports in " + directory);
+                () -> "[chaos-agent] cannot write reports in " + directory);
       }
       if (staging != null) {
         try {

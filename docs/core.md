@@ -622,7 +622,7 @@ Sessions provide hard isolation boundaries via `ScopeContext`, a thread-local st
 
 If `Class.forName(exceptionClassName)` throws `ClassNotFoundException`, or if neither a `(String)` constructor nor a no-arg constructor is accessible via reflection, `buildInjectedExceptionTerminal()` returns a `RuntimeException` describing the failure. This is a degrade-gracefully design: the scenario fires, but injects a different exception than configured.
 
-**Operator signal**: If injected exceptions are unexpected `RuntimeException`s containing "chaos-agent: failed to instantiate", the `exceptionClassName` in the scenario configuration is wrong or the exception class is not on the classpath.
+**Operator signal**: If injected exceptions are unexpected `RuntimeException`s containing "[chaos-agent] failed to instantiate", the `exceptionClassName` in the scenario configuration is wrong or the exception class is not on the classpath.
 
 ## Stressor Creation Failure
 

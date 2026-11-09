@@ -142,7 +142,7 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
         try {
           handle.close();
         } catch (final RuntimeException failure) {
-          LOGGER.log(Level.WARNING, failure, () -> "chaos-agent: could not close a finished plan");
+          LOGGER.log(Level.WARNING, failure, () -> "[chaos-agent] could not close a finished plan");
         }
       }
     }

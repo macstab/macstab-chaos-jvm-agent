@@ -122,7 +122,7 @@ public class ChaosAutoConfiguration {
     // The plan file injects faults: an untrusted source may not name it, as for enabled.
     if (configFile != null && TrustedChaosEnablement.rejected(environment, CONFIG_FILE_PROPERTY)) {
       LOGGER.warning(
-          "chaos-agent: "
+          "[chaos-agent] "
               + CONFIG_FILE_PROPERTY
               + " comes from an untrusted property source and is ignored");
     } else if (configFile != null && !configFile.isBlank()) {
@@ -138,7 +138,7 @@ public class ChaosAutoConfiguration {
             handleRegistry.activateShared(ChaosPlatform.installLocally(), plan);
         LOGGER.log(
             Level.INFO,
-            "chaos-agent: activated startup plan \"{0}\" from {1}",
+            "[chaos-agent] activated startup plan \"{0}\" from {1}",
             new Object[] {handle.id(), safeConfigFile});
       } catch (final ConfigLoadException exception) {
         // Only the sanitised message, never the exception: its cause chain (Jackson's own
@@ -146,7 +146,7 @@ public class ChaosAutoConfiguration {
         LOGGER.log(
             Level.SEVERE,
             () ->
-                "chaos-agent: failed to load startup config file "
+                "[chaos-agent] failed to load startup config file "
                     + safeConfigFile
                     + " (reason: "
                     + LogText.sanitize(exception.getMessage())
@@ -156,7 +156,7 @@ public class ChaosAutoConfiguration {
         LOGGER.log(
             Level.WARNING,
             () ->
-                "chaos-agent: startup plan from "
+                "[chaos-agent] startup plan from "
                     + safeConfigFile
                     + " not activated: another context's startup plan holds one of its scenario"
                     + " ids (reason: "
@@ -166,13 +166,13 @@ public class ChaosAutoConfiguration {
         LOGGER.log(
             Level.SEVERE,
             exception,
-            () -> "chaos-agent: failed to activate startup plan from " + safeConfigFile);
+            () -> "[chaos-agent] failed to activate startup plan from " + safeConfigFile);
       }
     }
     if (properties.isDebugDumpOnStart()) {
       LOGGER.log(
           Level.INFO,
-          () -> "chaos-agent: startup diagnostics\n" + controlPlane.diagnostics().debugDump());
+          () -> "[chaos-agent] startup diagnostics\n" + controlPlane.diagnostics().debugDump());
     }
   }
 
@@ -206,7 +206,7 @@ public class ChaosAutoConfiguration {
       if (!isSpringSecurityOnClasspath()) {
         LOGGER.log(
             Level.WARNING,
-            "chaos-agent: /actuator/chaos endpoint is enabled but Spring Security is not on the"
+            "[chaos-agent] /actuator/chaos endpoint is enabled but Spring Security is not on the"
                 + " classpath. The endpoint exposes chaos activation/state; protect it with"
                 + " Security or network-level controls before using in production.");
       }

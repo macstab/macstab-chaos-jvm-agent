@@ -133,9 +133,9 @@ class ChaosManagementTest {
     release.countDown();
 
     assertThat(second.status()).isEqualTo("conflict");
-    assertThat(second.message()).contains("in progress");
+    assertThat(second.message()).startsWith("plan conflict: ").contains("in progress");
     assertThat(stop.status()).isEqualTo("conflict");
-    assertThat(stop.message()).contains("in progress");
+    assertThat(stop.message()).startsWith("plan conflict: ").contains("in progress");
     assertThat(activation.get(5, java.util.concurrent.TimeUnit.SECONDS).status())
         .isEqualTo("activated");
     assertThat(management.stop("mgmt").status()).isEqualTo("stopped");
@@ -437,7 +437,35 @@ class ChaosManagementTest {
     final ChaosManagement.ActivationResponse response = failing.activate(PLAN);
 
     assertThat(response.status()).isEqualTo("invalid");
-    assertThat(response.message()).isEqualTo("plan rejected: null");
+    assertThat(response.message()).isEqualTo("invalid plan: null");
+  }
+
+  @Test
+  @DisplayName("each outcome has its own message prefix")
+  void messagePrefixPerOutcome() {
+    assertThat(management.activate(" ").message())
+        .as("blank: invalid")
+        .isEqualTo("invalid plan: plan JSON must not be blank");
+    assertThat(management.activate("{ broken").message())
+        .as("malformed: invalid")
+        .startsWith("invalid plan: ");
+    assertThat(management.activate(PLAN).status()).isEqualTo("activated");
+    assertThat(management.activate(PLAN).message())
+        .as("a running plan of that name: conflict")
+        .startsWith("plan conflict: a running plan has its name");
+    assertThat(management.activate(PLAN.replace("mgmt\"}", "other\"}")).message())
+        .as("an active scenario id: conflict")
+        .startsWith("plan conflict: ")
+        .contains("already active");
+    management.stopAll();
+
+    runtime.setHookDemand(
+        operations -> {
+          throw new IllegalStateException("internal weaving detail");
+        });
+    assertThat(management.activate(PLAN).message())
+        .as("the runtime could not run it: rejected")
+        .isEqualTo("plan rejected: the runtime could not activate it (see the log)");
   }
 
   @Test

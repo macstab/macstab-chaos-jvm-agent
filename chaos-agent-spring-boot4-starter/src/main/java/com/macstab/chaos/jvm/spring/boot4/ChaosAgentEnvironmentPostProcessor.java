@@ -83,7 +83,7 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
       LOGGER.log(
           Level.WARNING,
           () ->
-              "chaos-agent: ignoring macstab.chaos.enabled=true because it did not originate from a"
+              "[chaos-agent] ignoring macstab.chaos.enabled=true because it did not originate from a"
                   + " trusted property source; set macstab.chaos.allow-remote-enable=true via a"
                   + " trusted source to opt in");
       return;
@@ -100,7 +100,7 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
       LOGGER.log(
           Level.WARNING,
           () ->
-              "chaos-agent: failed to self-attach during Spring Boot startup; chaos stays off"
+              "[chaos-agent] failed to self-attach during Spring Boot startup; chaos stays off"
                   + " (reason: "
                   + LogText.sanitize(failure.toString())
                   + ")");

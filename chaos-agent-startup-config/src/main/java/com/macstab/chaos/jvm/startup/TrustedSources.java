@@ -127,7 +127,7 @@ public final class TrustedSources {
     } catch (final RuntimeException failure) {
       report(
           Level.WARNING,
-          "chaos-agent: "
+          "[chaos-agent] "
               + property
               + " could not be read and is treated as off: "
               + LogText.sanitize(failure.getMessage()));
@@ -141,7 +141,7 @@ public final class TrustedSources {
     }
     report(
         Level.INFO,
-        "chaos-agent: "
+        "[chaos-agent] "
             + property
             + " comes from the config source '"
             + LogText.sanitize(sourced.source())
@@ -164,7 +164,7 @@ public final class TrustedSources {
     if (parsed == null && value != null) {
       report(
           Level.WARNING,
-          "chaos-agent: "
+          "[chaos-agent] "
               + property
               + " has the unrecognised boolean value '"
               + LogText.sanitize(value)

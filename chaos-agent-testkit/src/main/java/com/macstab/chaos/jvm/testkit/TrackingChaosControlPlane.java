@@ -134,7 +134,7 @@ public final class TrackingChaosControlPlane implements ChaosControlPlane {
       LOGGER.log(
           Level.WARNING,
           exception,
-          () -> "chaos-agent: failed to stop JVM-scoped handle during test teardown");
+          () -> "[chaos-agent] failed to stop JVM-scoped handle during test teardown");
     }
   }
 

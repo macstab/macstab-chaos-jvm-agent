@@ -266,6 +266,10 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 * **startup-config:** a reloaded plan with an invalid scenario stopped the changed scenarios, activated part of the new plan and then rolled back, so for a moment neither plan was fully active and part of the invalid one was. Every new or changed scenario is now validated before the active set is touched.
 * **micrometer:** `chaos.events` was registered with different tag keys per event type (`reason` on skipped, `category` on failed), which Prometheus registries reject; those tags moved to `chaos.skips` and `chaos.activation.failures`, so every meter has one tag key set.
 
+### Changed
+
+* **bootstrap, spring, micronaut, quarkus:** the `message` of a management activation answer (HTTP and JMX) starts with one prefix per outcome: `invalid plan:` for every `invalid` answer (also a blank plan, and an activation failure that is neither a validation error nor a conflict, which said `plan rejected:`), `plan conflict:` for `conflict` (it said `plan rejected:`), and `plan rejected:` only for `rejected`. Every log line and printed warning of the agent and its integrations starts with `[chaos-agent] ` (most said `chaos-agent: `), and a missing agent is "the chaos agent is not installed" everywhere.
+
 ### Performance Improvements
 
 * **core:** `ScenarioRegistry` keeps an immutable index from operation type to controllers, pre-sorted by descending precedence then id and swapped on register/unregister. `match()` evaluates only the scenarios whose selector names the intercepted operation and no longer sorts per call; clock-skew reads use the same index and return immediately when no scenario names the clock.

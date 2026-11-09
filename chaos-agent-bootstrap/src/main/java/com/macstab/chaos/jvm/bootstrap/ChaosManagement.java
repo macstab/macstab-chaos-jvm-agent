@@ -98,7 +98,7 @@ public final class ChaosManagement implements AutoCloseable {
    */
   public ActivationResponse activate(final @Nullable String planJson) {
     if (planJson == null || planJson.isBlank()) {
-      return new ActivationResponse("invalid", null, "plan JSON must not be blank");
+      return new ActivationResponse("invalid", null, "invalid plan: plan JSON must not be blank");
     }
     final ChaosPlan plan;
     try {
@@ -108,7 +108,7 @@ public final class ChaosManagement implements AutoCloseable {
       LOGGER.log(
           Level.WARNING,
           () ->
-              "chaos-agent: rejecting malformed plan JSON: "
+              "[chaos-agent] rejecting malformed plan JSON: "
                   + LogText.sanitize(invalid.getMessage()));
       return new ActivationResponse("invalid", null, "invalid plan: " + invalid.getMessage());
     }
@@ -137,17 +137,17 @@ public final class ChaosManagement implements AutoCloseable {
     } catch (final com.macstab.chaos.jvm.api.ChaosValidationException invalid) {
       return new ActivationResponse("invalid", null, "invalid plan: " + invalid.getMessage());
     } catch (final com.macstab.chaos.jvm.api.ChaosActivationConflictException conflict) {
-      return new ActivationResponse("conflict", null, "plan rejected: " + conflict.getMessage());
+      return new ActivationResponse("conflict", null, "plan conflict: " + conflict.getMessage());
     } catch (final com.macstab.chaos.jvm.api.ChaosInstrumentationException notWoven) {
       // The runtime's own failure, like the catch-all below: the detail goes to the log.
-      LOGGER.log(Level.WARNING, notWoven, () -> "chaos-agent: plan activation rejected");
+      LOGGER.log(Level.WARNING, notWoven, () -> "[chaos-agent] plan activation rejected");
       return new ActivationResponse(
           "rejected", null, "plan rejected: the runtime could not activate it (see the log)");
     } catch (final com.macstab.chaos.jvm.api.ChaosActivationException failed) {
-      return new ActivationResponse("invalid", null, "plan rejected: " + failed.getMessage());
+      return new ActivationResponse("invalid", null, "invalid plan: " + failed.getMessage());
     } catch (final RuntimeException rejected) {
       // The runtime's own failure: the detail goes to the log, not to the caller.
-      LOGGER.log(Level.WARNING, rejected, () -> "chaos-agent: plan activation rejected");
+      LOGGER.log(Level.WARNING, rejected, () -> "[chaos-agent] plan activation rejected");
       return new ActivationResponse(
           "rejected", null, "plan rejected: the runtime could not activate it (see the log)");
     }
@@ -180,12 +180,12 @@ public final class ChaosManagement implements AutoCloseable {
   }
 
   private static String inProgress(final String id) {
-    return "an activation of " + id + " is in progress; try again once it completed";
+    return "plan conflict: an activation of " + id + " is in progress; try again once it completed";
   }
 
   private static ActivationResponse nameConflict(final String id) {
     return new ActivationResponse(
-        "conflict", null, "plan rejected: a running plan has its name (" + id + "); stop it first");
+        "conflict", null, "plan conflict: a running plan has its name (" + id + "); stop it first");
   }
 
   /**
@@ -237,7 +237,7 @@ public final class ChaosManagement implements AutoCloseable {
         stopped++;
       } catch (final RuntimeException failure) {
         // One plan that fails to stop must not keep the others running.
-        LOGGER.log(Level.WARNING, failure, () -> "chaos-agent: could not stop plan " + id);
+        LOGGER.log(Level.WARNING, failure, () -> "[chaos-agent] could not stop plan " + id);
       }
     }
     return new StopAllResponse(stopped);
