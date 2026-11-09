@@ -6,12 +6,15 @@ import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import com.macstab.chaos.jvm.startup.AgentArgs;
 import com.macstab.chaos.jvm.startup.AgentSettings;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
@@ -20,6 +23,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -45,6 +51,18 @@ import org.jspecify.annotations.Nullable;
  * the agent's own reports. {@code <dir>} is {@code java.io.tmpdir} ({@code /tmp} on Linux, like the
  * library) unless {@code reportsDir} is set. Both files are off unless {@code reports=on}: an agent
  * leaves nothing in a shared directory by default.
+ *
+ * <p>An existing report is replaced or removed only when it is a regular file owned by the JVM's
+ * user (the owner is compared on file systems with a {@code posix} view): in a directory other
+ * users can write without the sticky bit, the agent never deletes or overwrites their files.
+ *
+ * <p>Unlike the library, which writes a {@code 0} line for every loaded rule, the hits file lists
+ * only ids that applied, and keeps them after the scenario ends; the status file's {@code
+ * scenarios} count shows what was loaded. The status file has one name per directory, so JVMs
+ * sharing a {@code reportsDir} overwrite each other's status, and containers that share it all run
+ * as pid 1 and so share a hits file name: give each JVM its own {@code reportsDir}. Every text
+ * value (scenario id, source, reason) is cut to its first 200 characters, as the library cuts rule
+ * texts.
  */
 final class ChaosReports implements AutoCloseable {
 
@@ -62,6 +80,8 @@ final class ChaosReports implements AutoCloseable {
   private static final int IMMEDIATE_HITS = 64;
 
   private static final long BATCH_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
+
+  private static final Logger LOGGER = Logger.getLogger(ChaosReports.class.getName());
 
   private static volatile @Nullable ChaosReports current;
 
@@ -210,13 +230,86 @@ final class ChaosReports implements AutoCloseable {
 
   /** Removes the status file: the configured plan file no longer exists. */
   void removeStatus() {
+    removeStatus(
+        directory.getFileSystem().supportedFileAttributeViews(),
+        ChaosReports::ownerName,
+        System.getProperty("user.name", ""));
+  }
+
+  /**
+   * Test seam of {@link #removeStatus()}: the file system's attribute views, the owner lookup and
+   * the JVM's user name are passed in, so a test can model a file another user owns.
+   *
+   * @param supportedViews the attribute views of the report directory's file system
+   * @param ownerOf the owner name of a path, not following a link; throws {@link
+   *     UncheckedIOException} or {@link UnsupportedOperationException} where it is unavailable
+   * @param jvmUser the JVM's user name ({@code user.name})
+   */
+  void removeStatus(
+      final Set<String> supportedViews,
+      final Function<Path, String> ownerOf,
+      final String jvmUser) {
     BootstrapDispatcher.beginInternalCall();
     try {
-      Files.deleteIfExists(directory.resolve(STATUS_FILE));
+      final Path status = directory.resolve(STATUS_FILE);
+      if (isOurs(status, supportedViews, ownerOf, jvmUser)) {
+        Files.deleteIfExists(status);
+      }
     } catch (final IOException ignored) {
       // a stale report is better than a failing poller
     } finally {
       BootstrapDispatcher.endInternalCall();
+    }
+  }
+
+  /**
+   * Whether an existing report may be replaced or removed: it is a regular file and, on a file
+   * system with a {@code posix} view, owned by the JVM's user. In a directory other users can write
+   * without the sticky bit, a rename or delete would otherwise destroy another user's file. A
+   * missing file is ours to create. The owner is not compared where it or the user name is unknown
+   * (a container running an unnamed uid), as for the plan file. A refused file is logged at FINE
+   * and left as it is.
+   */
+  private static boolean isOurs(
+      final Path report,
+      final Set<String> supportedViews,
+      final Function<Path, String> ownerOf,
+      final String jvmUser) {
+    if (!Files.exists(report, LinkOption.NOFOLLOW_LINKS)) {
+      return true;
+    }
+    if (!Files.isRegularFile(report, LinkOption.NOFOLLOW_LINKS)) {
+      LOGGER.fine(() -> "[chaos-agent] report left alone, not a regular file: " + report);
+      return false;
+    }
+    if (!supportedViews.contains("posix") || jvmUser.isBlank() || jvmUser.equals("?")) {
+      return true;
+    }
+    final String owner;
+    try {
+      owner = ownerOf.apply(report);
+    } catch (final UncheckedIOException | UnsupportedOperationException unavailable) {
+      return true;
+    }
+    if (!owner.equals(jvmUser)) {
+      LOGGER.fine(
+          () ->
+              "[chaos-agent] report left alone, owned by "
+                  + owner
+                  + ", not by the JVM's user "
+                  + jvmUser
+                  + ": "
+                  + report);
+      return false;
+    }
+    return true;
+  }
+
+  private static String ownerName(final Path path) {
+    try {
+      return Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).getName();
+    } catch (final IOException unavailable) {
+      throw new UncheckedIOException(unavailable);
     }
   }
 
@@ -247,10 +340,31 @@ final class ChaosReports implements AutoCloseable {
   }
 
   private void writeAtomically(final String name, final String content) {
+    writeAtomically(
+        name,
+        content,
+        directory.getFileSystem().supportedFileAttributeViews(),
+        ChaosReports::ownerName,
+        System.getProperty("user.name", ""));
+  }
+
+  /**
+   * Test seam of {@link #writeAtomically(String, String)}, with the parameters of {@link
+   * #removeStatus(Set, Function, String)}.
+   */
+  void writeAtomically(
+      final String name,
+      final String content,
+      final Set<String> supportedViews,
+      final Function<Path, String> ownerOf,
+      final String jvmUser) {
     BootstrapDispatcher.beginInternalCall();
     Path staging = null;
     try {
       Files.createDirectories(directory);
+      if (!isOurs(directory.resolve(name), supportedViews, ownerOf, jvmUser)) {
+        return;
+      }
       staging =
           directory.resolve(
               ".chaos-staging-"
@@ -275,11 +389,8 @@ final class ChaosReports implements AutoCloseable {
       // A report that cannot be written leaves the previous one in place; chaos must not fail
       // because a report directory is unwritable. The first failure says why.
       if (failureLogged.compareAndSet(false, true)) {
-        java.util.logging.Logger.getLogger(ChaosReports.class.getName())
-            .log(
-                java.util.logging.Level.WARNING,
-                failed,
-                () -> "[chaos-agent] cannot write reports in " + directory);
+        LOGGER.log(
+            Level.WARNING, failed, () -> "[chaos-agent] cannot write reports in " + directory);
       }
       if (staging != null) {
         try {

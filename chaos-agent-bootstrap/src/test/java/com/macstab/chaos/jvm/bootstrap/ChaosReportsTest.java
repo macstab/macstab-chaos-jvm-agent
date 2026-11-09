@@ -322,6 +322,85 @@ class ChaosReportsTest {
   }
 
   @Test
+  @DisplayName("a status file another user owns is neither removed nor replaced")
+  void foreignStatusFileIsLeftAlone() throws Exception {
+    // A fresh temp directory has no sticky bit: the JVM user could delete or rename over anything.
+    final ChaosReports reports = create("reports=on;reportsDir=" + tempDir, Map.of());
+    final Path status = Files.writeString(tempDir.resolve(ChaosReports.STATUS_FILE), "bob's");
+
+    reports.writeAtomically(
+        ChaosReports.STATUS_FILE, "state=ok\n", Set.of("basic", "posix"), path -> "bob", "alice");
+    reports.removeStatus(Set.of("basic", "posix"), path -> "bob", "alice");
+
+    assertThat(status).hasContent("bob's");
+    try (Stream<Path> files = Files.list(tempDir)) {
+      assertThat(files.map(path -> path.getFileName().toString()))
+          .as("no staged file is left")
+          .containsExactly(ChaosReports.STATUS_FILE);
+    }
+  }
+
+  @Test
+  @DisplayName("the JVM user's own status file is replaced and removed")
+  void ownStatusFileIsReplacedAndRemoved() throws Exception {
+    final ChaosReports reports = create("reports=on;reportsDir=" + tempDir, Map.of());
+    final Path status = Files.writeString(tempDir.resolve(ChaosReports.STATUS_FILE), "old");
+
+    reports.writeAtomically(
+        ChaosReports.STATUS_FILE, "state=ok\n", Set.of("basic", "posix"), path -> "alice", "alice");
+    assertThat(status).hasContent("state=ok\n");
+
+    reports.removeStatus(Set.of("basic", "posix"), path -> "alice", "alice");
+    assertThat(status).doesNotExist();
+  }
+
+  @Test
+  @DisplayName("without a posix view (Windows DOMAIN\\user) the owner is not compared")
+  void ownerNotComparedWithoutPosixView() throws Exception {
+    final ChaosReports reports = create("reports=on;reportsDir=" + tempDir, Map.of());
+    final Path status = Files.writeString(tempDir.resolve(ChaosReports.STATUS_FILE), "old");
+
+    reports.removeStatus(Set.of("basic", "owner", "acl"), path -> "DESKTOP\\alice", "alice");
+
+    assertThat(status).doesNotExist();
+  }
+
+  @Test
+  @DisplayName("an unknown JVM user, or an owner that cannot be read, leaves the owner uncompared")
+  void ownerNotComparedWhenUnknown() throws Exception {
+    final ChaosReports reports = create("reports=on;reportsDir=" + tempDir, Map.of());
+    final Path status = tempDir.resolve(ChaosReports.STATUS_FILE);
+    final Set<String> posix = Set.of("basic", "posix");
+
+    for (final String unknownUser : new String[] {"", "?"}) {
+      Files.writeString(status, "old");
+      reports.removeStatus(posix, path -> "bob", unknownUser);
+      assertThat(status).as("JVM user '%s'", unknownUser).doesNotExist();
+    }
+
+    Files.writeString(status, "old");
+    reports.removeStatus(
+        posix,
+        path -> {
+          throw new java.io.UncheckedIOException(new java.io.IOException("no owner"));
+        },
+        "alice");
+    assertThat(status).doesNotExist();
+  }
+
+  @Test
+  @DisplayName("a symbolic link at the status path is not followed (coverage)")
+  void statusLinkIsNotFollowed() throws Exception {
+    final ChaosReports reports = create("reports=on;reportsDir=" + tempDir, Map.of());
+    final Path elsewhere = Files.writeString(tempDir.resolve("elsewhere"), "keep");
+    Files.createSymbolicLink(tempDir.resolve(ChaosReports.STATUS_FILE), elsewhere);
+
+    reports.removeStatus();
+
+    assertThat(elsewhere).hasContent("keep");
+  }
+
+  @Test
   @DisplayName("closing a superseded instance keeps the current one; a second close does nothing")
   void closeKeepsNewerInstance() throws Exception {
     final ChaosReports older =

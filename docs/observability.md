@@ -34,7 +34,14 @@ pid=4711
 - `<applied count><TAB><scenario id>`; the count is cumulative since the agent started: a stopped, expired or reloaded scenario keeps its count, and the same id in several sessions is one line with their sum.
 - Written after each of the first 64 applications, then at most every 100 ms while applications happen, and at exit. A JVM in which nothing was ever applied writes none. Files of finished JVMs stay: sum all `.chaos-jvm.hits.<pid>` files for totals and remove them between runs.
 
-Both files are written to a staging file and renamed, so a reader never sees a partial report; the writes run with the dispatch depth raised, so a file I/O scenario never applies to them.
+Both files are written to a staging file and renamed, so a reader never sees a partial report; the writes run with the dispatch depth raised, so a file I/O scenario never applies to them. An existing report is replaced or removed only when it is a regular file owned by the JVM's user (the owner is compared on file systems with a POSIX view): in a directory other users can write without the sticky bit, the agent never overwrites or deletes their files, and a refused file is logged at `FINE`.
+
+Differences from the native library, and limits of shared directories:
+
+- **No `0` lines.** The library writes a line for every loaded rule, `0` for one that never matched; the agent lists only ids that applied, and keeps an id after its scenario ends. Read the status file's `scenarios` (and the diagnostics) for what was loaded.
+- **One status file per directory.** JVMs that share a `reportsDir` (forked test JVMs, several services) overwrite each other's status; the `pid` line names the last writer. Give each JVM its own `reportsDir`.
+- **pid 1 in containers.** Containers that share a mounted `reportsDir` usually all run their JVM as pid 1, so their hits files have the same name and replace each other (the library picks another suffix; the agent does not). Give each container its own `reportsDir`.
+- **200 characters.** Every text value (a scenario id, `source`, `reason`) is cut to its first 200 characters after control characters become spaces, as the library cuts rule texts to 200 bytes; two ids that differ only after that appear as two lines with the same text.
 
 | Setting                | Agent arg    | System property            | Environment variable         | Default            |
 |------------------------|--------------|----------------------------|------------------------------|--------------------|

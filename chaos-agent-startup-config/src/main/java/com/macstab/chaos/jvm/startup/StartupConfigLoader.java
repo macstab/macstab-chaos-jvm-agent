@@ -370,6 +370,9 @@ public final class StartupConfigLoader {
       rejectForeignOwner(path, filePath, "config file", ownerOf, jvmUser);
       if (!target.equals(path)) {
         rejectForeignOwner(target, filePath, "config file", ownerOf, jvmUser);
+        rejectWritableMountDirectory(
+            java.util.Objects.requireNonNull(path.getParent(), "parent of an absolute link"),
+            filePath);
       }
       // The mode check follows a link to the directory, so whoever owns the link chooses the
       // directory the plan is read from: the link must be trusted as the file is.
@@ -539,21 +542,7 @@ public final class StartupConfigLoader {
       }
       final Path linkedParent = path.getParent();
       if (linkedParent != null) {
-        final Path parent = linkedParent.toRealPath();
-        final Set<PosixFilePermission> dirPerms =
-            Files.getPosixFilePermissions(parent, LinkOption.NOFOLLOW_LINKS);
-        // A world-writable parent without the sticky bit (t) lets any local user replace the
-        // target file via unlink+create, even if the file itself is mode 0644. Sticky dirs
-        // (typical for /tmp) restrict unlink to the file's owner so the replacement attack is
-        // closed; accept those and reject the rest.
-        if (dirPerms.contains(PosixFilePermission.OTHERS_WRITE) && !isStickyBitSet(parent)) {
-          throw new ConfigLoadException(
-              "config file's parent directory is world-writable without sticky bit (rejected"
-                  + " for safety): "
-                  + parent
-                  + WORLD_WRITABLE_HINT,
-              fileSource(originalPath));
-        }
+        rejectWorldWritableDirectory(linkedParent, originalPath, "config file's parent directory");
       }
     } catch (UnsupportedOperationException | IOException exception) {
       // Treat an unreadable POSIX view on a filesystem that claimed to support POSIX as an
@@ -564,6 +553,52 @@ public final class StartupConfigLoader {
           fileSource(originalPath),
           exception);
     }
+  }
+
+  /**
+   * Rejects a directory that is world-writable without the sticky bit, checked where its links
+   * lead: any local user could replace the entries in it by unlink and create, even a file of mode
+   * 0644. Sticky directories (typical for {@code /tmp}) restrict unlink to the entry's owner, so
+   * they are accepted.
+   */
+  private static void rejectWorldWritableDirectory(
+      final Path linkedDirectory, final String originalPath, final String subject) {
+    try {
+      final Path directory = linkedDirectory.toRealPath();
+      final Set<PosixFilePermission> dirPerms =
+          Files.getPosixFilePermissions(directory, LinkOption.NOFOLLOW_LINKS);
+      if (dirPerms.contains(PosixFilePermission.OTHERS_WRITE) && !isStickyBitSet(directory)) {
+        throw new ConfigLoadException(
+            subject
+                + " is world-writable without sticky bit (rejected for safety): "
+                + directory
+                + WORLD_WRITABLE_HINT,
+            fileSource(originalPath));
+      }
+    } catch (UnsupportedOperationException | IOException exception) {
+      throw new ConfigLoadException(
+          "cannot check POSIX permissions on " + subject + ": " + linkedDirectory,
+          fileSource(originalPath),
+          exception);
+    }
+  }
+
+  /**
+   * Rejects a ConfigMap mount directory that is world-writable without the sticky bit: it holds the
+   * {@code ..data} link an update swaps, so whoever can write it chooses the directory the plan is
+   * read from, whatever the modes inside. Kubernetes creates the volume directory with mode 0777
+   * but mounts it read-only into the container, where nobody can write it: a directory on a
+   * read-only file store is accepted.
+   */
+  private static void rejectWritableMountDirectory(final Path mount, final String originalPath) {
+    try {
+      if (Files.getFileStore(mount).isReadOnly()) {
+        return;
+      }
+    } catch (final IOException unknown) {
+      // check the mode
+    }
+    rejectWorldWritableDirectory(mount, originalPath, "config file's ConfigMap directory");
   }
 
   private static boolean isStickyBitSet(final Path directory) {

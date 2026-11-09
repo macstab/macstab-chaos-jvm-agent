@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.startup;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
@@ -653,6 +654,22 @@ class StartupConfigLoaderTest {
             .isInstanceOf(ConfigLoadException.class)
             .hasMessageContaining("..data does not point at a timestamped directory");
       }
+    }
+
+    @Test
+    @DisplayName("rejects a mount directory that is world-writable without the sticky bit")
+    void worldWritableMountDirectoryRejected() throws Exception {
+      assumePosix();
+      assumeFalse("root".equals(System.getProperty("user.name")), "test runs as root");
+      final Path volume = volume(Path.of("..data", "plan.json"), Path.of(VERSION_DIR));
+      // Anyone who can write the mount directory can swap ..data and choose the plan read.
+      Files.setPosixFilePermissions(volume, PosixFilePermissions.fromString("rwxrwxrwx"));
+
+      assertThatThrownBy(
+              () -> StartupConfigLoader.load("configFile=" + volume.resolve("plan.json"), Map.of()))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("ConfigMap directory is world-writable without sticky bit")
+          .hasMessageContaining(volume.toRealPath().toString());
     }
 
     /**
