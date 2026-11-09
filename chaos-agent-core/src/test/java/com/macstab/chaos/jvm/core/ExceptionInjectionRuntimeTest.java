@@ -31,67 +31,70 @@ class ExceptionInjectionRuntimeTest {
   @Test
   @DisplayName("throws the declared exception class at matching method entry")
   void throwsDeclaredExceptionAtMatchingMethodEntry() {
-    final ChaosRuntime runtime = new ChaosRuntime();
-    runtime.activate(
-        ChaosScenario.builder("inject-ioex")
-            .scope(ChaosScenario.ScenarioScope.JVM)
-            .selector(
-                ChaosSelector.method(
-                    Set.of(OperationType.METHOD_ENTER),
-                    NamePattern.exact("com.example.Dao"),
-                    NamePattern.exact("findById")))
-            .effect(
-                new ChaosEffect.ExceptionInjectionEffect("java.io.IOException", "injected", true))
-            .activationPolicy(ActivationPolicy.always())
-            .build());
+    try (ChaosRuntime runtime = new ChaosRuntime()) {
+      runtime.activate(
+          ChaosScenario.builder("inject-ioex")
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(
+                  ChaosSelector.method(
+                      Set.of(OperationType.METHOD_ENTER),
+                      NamePattern.exact("com.example.Dao"),
+                      NamePattern.exact("findById")))
+              .effect(
+                  new ChaosEffect.ExceptionInjectionEffect("java.io.IOException", "injected", true))
+              .activationPolicy(ActivationPolicy.always())
+              .build());
 
-    assertThatThrownBy(() -> runtime.beforeMethodEnter("com.example.Dao", "findById"))
-        .isInstanceOf(IOException.class)
-        .hasMessage("injected");
+      assertThatThrownBy(() -> runtime.beforeMethodEnter("com.example.Dao", "findById"))
+          .isInstanceOf(IOException.class)
+          .hasMessage("injected");
+    }
   }
 
   @Test
   @DisplayName("non-matching class name does not throw")
   void nonMatchingClassDoesNotThrow() {
-    final ChaosRuntime runtime = new ChaosRuntime();
-    runtime.activate(
-        ChaosScenario.builder("inject-miss")
-            .scope(ChaosScenario.ScenarioScope.JVM)
-            .selector(
-                ChaosSelector.method(
-                    Set.of(OperationType.METHOD_ENTER),
-                    NamePattern.exact("com.example.Dao"),
-                    NamePattern.any()))
-            .effect(new ChaosEffect.ExceptionInjectionEffect("java.io.IOException", "msg", true))
-            .activationPolicy(ActivationPolicy.always())
-            .build());
+    try (ChaosRuntime runtime = new ChaosRuntime()) {
+      runtime.activate(
+          ChaosScenario.builder("inject-miss")
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(
+                  ChaosSelector.method(
+                      Set.of(OperationType.METHOD_ENTER),
+                      NamePattern.exact("com.example.Dao"),
+                      NamePattern.any()))
+              .effect(new ChaosEffect.ExceptionInjectionEffect("java.io.IOException", "msg", true))
+              .activationPolicy(ActivationPolicy.always())
+              .build());
 
-    assertThatCode(() -> runtime.beforeMethodEnter("com.example.OtherClass", "findById"))
-        .doesNotThrowAnyException();
+      assertThatCode(() -> runtime.beforeMethodEnter("com.example.OtherClass", "findById"))
+          .doesNotThrowAnyException();
+    }
   }
 
   @Test
   @DisplayName("withStackTrace=false produces exception with empty stack trace")
   void withStackTraceFalseProducesEmptyStackTrace() throws Throwable {
-    final ChaosRuntime runtime = new ChaosRuntime();
-    runtime.activate(
-        ChaosScenario.builder("inject-no-trace")
-            .scope(ChaosScenario.ScenarioScope.JVM)
-            .selector(
-                ChaosSelector.method(
-                    Set.of(OperationType.METHOD_ENTER),
-                    NamePattern.exact("com.example.Service"),
-                    NamePattern.any()))
-            .effect(
-                new ChaosEffect.ExceptionInjectionEffect(
-                    "java.lang.RuntimeException", "no-trace", false))
-            .activationPolicy(ActivationPolicy.always())
-            .build());
+    try (ChaosRuntime runtime = new ChaosRuntime()) {
+      runtime.activate(
+          ChaosScenario.builder("inject-no-trace")
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(
+                  ChaosSelector.method(
+                      Set.of(OperationType.METHOD_ENTER),
+                      NamePattern.exact("com.example.Service"),
+                      NamePattern.any()))
+              .effect(
+                  new ChaosEffect.ExceptionInjectionEffect(
+                      "java.lang.RuntimeException", "no-trace", false))
+              .activationPolicy(ActivationPolicy.always())
+              .build());
 
-    try {
-      runtime.beforeMethodEnter("com.example.Service", "doWork");
-    } catch (final RuntimeException e) {
-      assertThat(e.getStackTrace()).isEmpty();
+      try {
+        runtime.beforeMethodEnter("com.example.Service", "doWork");
+      } catch (final RuntimeException e) {
+        assertThat(e.getStackTrace()).isEmpty();
+      }
     }
   }
 

@@ -92,6 +92,36 @@ class EffectReachesTheCallTest {
   private static final Set<String> KNOWN_DROPPED = Set.of();
 
   /**
+   * The operations on which every selector refuses a reject, by design: the real call never fails
+   * that way, or failing it there would break the caller instead of simulating a fault. The
+   * enumeration skips a refused pair, so a new refusal would drop the operation's reject case
+   * silently; it must be added here on purpose.
+   */
+  private static final Set<OperationType> KNOWN_REFUSED =
+      EnumSet.of(
+          OperationType.ASYNC_CANCEL,
+          OperationType.CLOCK_READ,
+          OperationType.DATE_NEW,
+          OperationType.EXECUTOR_SHUTDOWN,
+          OperationType.EXECUTOR_WORKER_RUN,
+          OperationType.FORK_JOIN_TASK_RUN,
+          OperationType.INSTANT_NOW,
+          OperationType.LOCAL_DATE_TIME_NOW,
+          OperationType.MONITOR_ENTER,
+          OperationType.NETTY_CHANNEL_READ,
+          OperationType.QUEUE_POLL,
+          OperationType.QUEUE_TAKE,
+          OperationType.SYSTEM_CLOCK_MILLIS,
+          OperationType.SYSTEM_CLOCK_NANOS,
+          OperationType.SYSTEM_EXIT_REQUEST,
+          OperationType.SYSTEM_GC_REQUEST,
+          OperationType.THREAD_LOCAL_GET,
+          OperationType.THREAD_LOCAL_SET,
+          OperationType.THREAD_PARK,
+          OperationType.ZIP_DEFLATE,
+          OperationType.ZONED_DATE_TIME_NOW);
+
+  /**
    * Operations that cannot be invoked from a unit test, with the reason. Every other operation
    * except {@code LIFECYCLE} must have an invoker in {@link #INVOKERS}. Empty: every operation's
    * entry point is a public method of {@link ChaosRuntime} that runs without the agent installed.
@@ -719,13 +749,25 @@ class EffectReachesTheCallTest {
 
   @Test
   @DisplayName("the enumeration checks a sane number of pairs")
-  void enumerationIsNotEmpty() {
+  void enumerationKeepsItsSize() {
     final List<Pair> pairs = acceptedPairs();
     // 420 when written; a shrinking enumeration must be noticed, not pass quietly.
     assertThat(pairs).hasSizeGreaterThan(350);
     assertThat(pairs.stream().map(Pair::name).collect(Collectors.toSet()))
         .as("every known dropped pair is still accepted")
         .containsAll(KNOWN_DROPPED);
+  }
+
+  @Test
+  @DisplayName("a reject is refused on exactly the operations known to refuse it")
+  void rejectRefusalsAreKnown() {
+    final Set<OperationType> refused = EnumSet.noneOf(OperationType.class);
+    refused.addAll(selectorsByOperation().keySet());
+    acceptedPairs().stream()
+        .filter(pair -> pair.effectName().equals("reject"))
+        .forEach(pair -> refused.remove(pair.operation()));
+
+    assertThat(refused).containsExactlyInAnyOrderElementsOf(KNOWN_REFUSED);
   }
 
   @Test

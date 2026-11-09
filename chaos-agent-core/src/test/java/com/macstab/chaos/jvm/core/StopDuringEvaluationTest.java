@@ -43,55 +43,60 @@ class StopDuringEvaluationTest {
     @Test
     @DisplayName("state is STOPPED immediately after stop() returns on calling thread")
     void stateIsStoppedAfterStopReturns() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("stop-transition")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-                  .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("stop-transition")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
 
-      // Trigger at least one evaluation to advance state to ACTIVE.
-      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-      assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+        // Trigger at least one evaluation to advance state to ACTIVE.
+        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+        assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
 
-      handle.stop();
+        handle.stop();
 
-      assertThat(handle.state())
-          .as("state must be STOPPED after stop() returns")
-          .isEqualTo(ChaosDiagnostics.ScenarioState.STOPPED);
+        assertThat(handle.state())
+            .as("state must be STOPPED after stop() returns")
+            .isEqualTo(ChaosDiagnostics.ScenarioState.STOPPED);
+      }
     }
 
     @Test
     @DisplayName("evaluate() after stop() returns null contribution — no effect applied")
     void evaluateAfterStopReturnsNoContribution() {
-      final ChaosRuntime runtime = new ChaosRuntime();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
 
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("stop-no-effect")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-                  .effect(ChaosEffect.delay(Duration.ofMillis(80)))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("stop-no-effect")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(80)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
 
-      // One evaluation before stop — delay is applied.
-      final long before =
-          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      assertThat(before)
-          .as("first call before stop should experience delay")
-          .isGreaterThanOrEqualTo(60L);
+        // One evaluation before stop — delay is applied.
+        final long before =
+            measureMillis(
+                () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+        assertThat(before)
+            .as("first call before stop should experience delay")
+            .isGreaterThanOrEqualTo(60L);
 
-      handle.stop();
-      final long appliedAtStop = handle.appliedCount();
+        handle.stop();
+        final long appliedAtStop = handle.appliedCount();
 
-      for (int i = 0; i < 5; i++) {
-        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+        for (int i = 0; i < 5; i++) {
+          runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+        }
+        assertThat(handle.appliedCount())
+            .as("nothing applies after stop()")
+            .isEqualTo(appliedAtStop);
       }
-      assertThat(handle.appliedCount()).as("nothing applies after stop()").isEqualTo(appliedAtStop);
     }
   }
 
@@ -108,103 +113,129 @@ class StopDuringEvaluationTest {
             + THREAD_COUNT
             + " threads")
     void noExceptionWhenStopRacesWithEvaluate() throws Exception {
-      final ChaosRuntime runtime = new ChaosRuntime();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
 
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("concurrent-stop")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-                  .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("concurrent-stop")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
 
-      final CountDownLatch startLatch = new CountDownLatch(1);
-      final AtomicInteger unexpectedErrors = new AtomicInteger(0);
-      final AtomicInteger successfulEvals = new AtomicInteger(0);
+        final CountDownLatch startLatch = new CountDownLatch(1);
+        final AtomicInteger unexpectedErrors = new AtomicInteger(0);
+        final AtomicInteger successfulEvals = new AtomicInteger(0);
 
-      final var executor = Executors.newFixedThreadPool(THREAD_COUNT + 1);
-      try {
-        // Evaluation threads
-        for (int i = 0; i < THREAD_COUNT; i++) {
+        final var executor = Executors.newFixedThreadPool(THREAD_COUNT + 1);
+        try {
+          // Evaluation threads
+          for (int i = 0; i < THREAD_COUNT; i++) {
+            executor.submit(
+                () -> {
+                  try {
+                    startLatch.await();
+                  } catch (final InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                  }
+                  for (int j = 0; j < ITERATIONS_PER_THREAD; j++) {
+                    try {
+                      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                      successfulEvals.incrementAndGet();
+                    } catch (final Exception e) {
+                      // RejectedExecutionException from a reject effect is expected;
+                      // any other exception type is a bug.
+                      if (!(e instanceof java.util.concurrent.RejectedExecutionException)) {
+                        unexpectedErrors.incrementAndGet();
+                      }
+                    }
+                  }
+                });
+          }
+
+          // Stop thread: calls stop() after a brief head start for evaluations
           executor.submit(
               () -> {
                 try {
                   startLatch.await();
+                  Thread.sleep(2); // Let evaluations begin
                 } catch (final InterruptedException e) {
                   Thread.currentThread().interrupt();
                   return;
                 }
-                for (int j = 0; j < ITERATIONS_PER_THREAD; j++) {
-                  try {
-                    runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-                    successfulEvals.incrementAndGet();
-                  } catch (final Exception e) {
-                    // RejectedExecutionException from a reject effect is expected;
-                    // any other exception type is a bug.
-                    if (!(e instanceof java.util.concurrent.RejectedExecutionException)) {
-                      unexpectedErrors.incrementAndGet();
-                    }
-                  }
-                }
+                handle.stop();
               });
+
+          startLatch.countDown();
+          executor.shutdown();
+          assertThat(executor.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
+        } finally {
+          executor.shutdownNow();
         }
 
-        // Stop thread: calls stop() after a brief head start for evaluations
-        executor.submit(
-            () -> {
-              try {
-                startLatch.await();
-                Thread.sleep(2); // Let evaluations begin
-              } catch (final InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-              }
-              handle.stop();
-            });
+        assertThat(unexpectedErrors.get())
+            .as(
+                "no unexpected exception type should occur when stop() races with evaluate(). "
+                    + "Got %d unexpected errors, %d successful evals",
+                unexpectedErrors.get(), successfulEvals.get())
+            .isZero();
 
-        startLatch.countDown();
-        executor.shutdown();
-        assertThat(executor.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
-      } finally {
-        executor.shutdownNow();
+        assertThat(handle.state())
+            .as("scenario must be STOPPED after the stop thread completes")
+            .isEqualTo(ChaosDiagnostics.ScenarioState.STOPPED);
       }
-
-      assertThat(unexpectedErrors.get())
-          .as(
-              "no unexpected exception type should occur when stop() races with evaluate(). "
-                  + "Got %d unexpected errors, %d successful evals",
-              unexpectedErrors.get(), successfulEvals.get())
-          .isZero();
-
-      assertThat(handle.state())
-          .as("scenario must be STOPPED after the stop thread completes")
-          .isEqualTo(ChaosDiagnostics.ScenarioState.STOPPED);
     }
 
     @Test
     @DisplayName("state monotonically advances toward STOPPED under concurrent reads")
     void stateMonotonicallyAdvancesUnderConcurrentReads() throws Exception {
-      final ChaosRuntime runtime = new ChaosRuntime();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
 
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("monotone-stop")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-                  .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("monotone-stop")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
 
-      final CountDownLatch startLatch = new CountDownLatch(1);
-      final AtomicInteger reversals = new AtomicInteger(0);
-      final AtomicInteger sawStop = new AtomicInteger(0);
+        final CountDownLatch startLatch = new CountDownLatch(1);
+        final AtomicInteger reversals = new AtomicInteger(0);
+        final AtomicInteger sawStop = new AtomicInteger(0);
 
-      // Reader threads: each polls state repeatedly. A reversal (STOPPED → ACTIVE) is a bug.
-      final int readers = 20;
-      final var executor = Executors.newFixedThreadPool(readers + 1);
-      try {
-        for (int i = 0; i < readers; i++) {
+        // Reader threads: each polls state repeatedly. A reversal (STOPPED → ACTIVE) is a bug.
+        final int readers = 20;
+        final var executor = Executors.newFixedThreadPool(readers + 1);
+        try {
+          for (int i = 0; i < readers; i++) {
+            executor.submit(
+                () -> {
+                  try {
+                    startLatch.await();
+                  } catch (final InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                  }
+                  // Read until STOPPED is seen, then keep reading: it must never revert.
+                  final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                  int readsAfterStop = 0;
+                  while (readsAfterStop < 50 && System.nanoTime() < deadline) {
+                    if (handle.state() == ChaosDiagnostics.ScenarioState.STOPPED) {
+                      readsAfterStop++;
+                    } else if (readsAfterStop > 0) {
+                      reversals.incrementAndGet();
+                    }
+                    Thread.yield();
+                  }
+                  if (readsAfterStop == 50) {
+                    sawStop.incrementAndGet();
+                  }
+                });
+          }
+
           executor.submit(
               () -> {
                 try {
@@ -213,45 +244,21 @@ class StopDuringEvaluationTest {
                   Thread.currentThread().interrupt();
                   return;
                 }
-                // Read until STOPPED is seen, then keep reading: it must never revert.
-                final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                int readsAfterStop = 0;
-                while (readsAfterStop < 50 && System.nanoTime() < deadline) {
-                  if (handle.state() == ChaosDiagnostics.ScenarioState.STOPPED) {
-                    readsAfterStop++;
-                  } else if (readsAfterStop > 0) {
-                    reversals.incrementAndGet();
-                  }
-                  Thread.yield();
-                }
-                if (readsAfterStop == 50) {
-                  sawStop.incrementAndGet();
-                }
+                handle.stop();
               });
+
+          startLatch.countDown();
+          executor.shutdown();
+          assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        } finally {
+          executor.shutdownNow();
         }
 
-        executor.submit(
-            () -> {
-              try {
-                startLatch.await();
-              } catch (final InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-              }
-              handle.stop();
-            });
-
-        startLatch.countDown();
-        executor.shutdown();
-        assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
-      } finally {
-        executor.shutdownNow();
+        assertThat(sawStop).as("every reader observed the stop").hasValue(readers);
+        assertThat(reversals.get())
+            .as("ScenarioState must never revert after STOPPED is observed")
+            .isZero();
       }
-
-      assertThat(sawStop).as("every reader observed the stop").hasValue(readers);
-      assertThat(reversals.get())
-          .as("ScenarioState must never revert after STOPPED is observed")
-          .isZero();
     }
   }
 

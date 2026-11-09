@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.testkit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assumptions.assumeThat;
 
 import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
@@ -12,15 +13,23 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 @ExtendWith(ChaosAgentExtension.class)
 @WithChaos(resource = "classpath:chaos/with-chaos-plan.json")
 @DisplayName("@WithChaos")
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class WithChaosTest {
+
+  /** Set by the test whose method-level scenario a later test expects to be gone. */
+  private static final AtomicBoolean METHOD_SCENARIO_RAN = new AtomicBoolean();
 
   @Test
   @DisplayName("activates a class-level resource plan for the test")
@@ -32,6 +41,7 @@ class WithChaosTest {
   }
 
   @Test
+  @Order(1)
   @WithChaos(
       """
       {"id": "wc-method-session", "scope": "SESSION",
@@ -51,11 +61,15 @@ class WithChaosTest {
         .scenario("wc-method-session")
         .applied()
         .atLeast(1);
+    METHOD_SCENARIO_RAN.set(true);
   }
 
   @Test
+  @Order(2)
   @DisplayName("method-level scenarios of an earlier test are gone")
   void methodScenariosEndWithTheirTest(final ChaosControlPlane controlPlane) {
+    // Ordered after the test that activates it; run alone, there is nothing to check.
+    assumeThat(METHOD_SCENARIO_RAN).as("the test that activated it ran first").isTrue();
     final ChaosDiagnostics.ScenarioReport report =
         controlPlane.diagnostics().scenario("wc-method-session").orElse(null);
     if (report != null) {

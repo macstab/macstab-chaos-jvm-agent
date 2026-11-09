@@ -9,6 +9,7 @@ import java.net.URL;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinTask;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -17,11 +18,18 @@ import org.junit.jupiter.api.Test;
 @DisplayName("ChaosBridge")
 class ChaosBridgeTest {
 
+  private ChaosRuntime runtime;
   private ChaosBridge bridge;
 
   @BeforeEach
   void setUp() {
-    bridge = new ChaosBridge(new ChaosRuntime());
+    runtime = new ChaosRuntime();
+    bridge = new ChaosBridge(runtime);
+  }
+
+  @AfterEach
+  void tearDown() {
+    runtime.close();
   }
 
   @Nested

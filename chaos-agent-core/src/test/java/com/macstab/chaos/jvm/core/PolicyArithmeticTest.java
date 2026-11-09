@@ -15,6 +15,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.Set;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,11 @@ class PolicyArithmeticTest {
 
     private final MutableClock clock = new MutableClock(Instant.ofEpochMilli(10_500L));
     private final ChaosRuntime runtime = new ChaosRuntime(clock, ChaosMetricsSink.NOOP);
+
+    @AfterEach
+    void closeRuntime() {
+      runtime.close();
+    }
 
     @Test
     @DisplayName("the first window starts when the scenario starts, not at an epoch boundary")

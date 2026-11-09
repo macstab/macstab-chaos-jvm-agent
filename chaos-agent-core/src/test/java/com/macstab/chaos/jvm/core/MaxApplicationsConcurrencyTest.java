@@ -47,59 +47,60 @@ class MaxApplicationsConcurrencyTest {
   @Test
   @DisplayName("applied count never exceeds maxApplications under concurrent evaluation")
   void appliedCountNeverExceedsMaxApplicationsUnderConcurrency() throws Exception {
-    final ChaosRuntime runtime = new ChaosRuntime();
-    runtime.activate(
-        ChaosScenario.builder("cas-test")
-            .scope(ChaosScenario.ScenarioScope.JVM)
-            .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-            .effect(ChaosEffect.delay(Duration.ZERO))
-            .activationPolicy(
-                new ActivationPolicy(
-                    ActivationPolicy.StartMode.AUTOMATIC,
-                    1.0d,
-                    0,
-                    (long) MAX_APPLICATIONS,
-                    null,
-                    null,
-                    null,
-                    false))
-            .build());
+    try (ChaosRuntime runtime = new ChaosRuntime()) {
+      runtime.activate(
+          ChaosScenario.builder("cas-test")
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(ChaosEffect.delay(Duration.ZERO))
+              .activationPolicy(
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC,
+                      1.0d,
+                      0,
+                      (long) MAX_APPLICATIONS,
+                      null,
+                      null,
+                      null,
+                      false))
+              .build());
 
-    final CountDownLatch startLatch = new CountDownLatch(1);
-    final var executor = Executors.newFixedThreadPool(THREAD_COUNT);
-    try {
-      for (int i = 0; i < THREAD_COUNT; i++) {
-        executor.submit(
-            () -> {
-              try {
-                startLatch.await();
-              } catch (final InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-              }
-              // Each thread triggers one evaluation; if a non-no-op runnable is returned the
-              // effect was applied. We measure applied count via diagnostics after the run.
-              runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-            });
+      final CountDownLatch startLatch = new CountDownLatch(1);
+      final var executor = Executors.newFixedThreadPool(THREAD_COUNT);
+      try {
+        for (int i = 0; i < THREAD_COUNT; i++) {
+          executor.submit(
+              () -> {
+                try {
+                  startLatch.await();
+                } catch (final InterruptedException e) {
+                  Thread.currentThread().interrupt();
+                  return;
+                }
+                // Each thread triggers one evaluation; if a non-no-op runnable is returned the
+                // effect was applied. We measure applied count via diagnostics after the run.
+                runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+              });
+        }
+        startLatch.countDown();
+        executor.shutdown();
+        assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+      } finally {
+        executor.shutdownNow();
       }
-      startLatch.countDown();
-      executor.shutdown();
-      assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
-    } finally {
-      executor.shutdownNow();
+
+      final long appliedCount =
+          runtime.diagnostics().snapshot().scenarios().stream()
+              .filter(r -> "cas-test".equals(r.id()))
+              .mapToLong(ChaosDiagnostics.ScenarioReport::appliedCount)
+              .sum();
+
+      // 50 threads compete for 5 applications: exactly the budget is spent, never more, and the
+      // reservations of the losers never leave it short.
+      assertThat(appliedCount)
+          .as("applied count must be exactly maxApplications")
+          .isEqualTo(MAX_APPLICATIONS);
     }
-
-    final long appliedCount =
-        runtime.diagnostics().snapshot().scenarios().stream()
-            .filter(r -> "cas-test".equals(r.id()))
-            .mapToLong(ChaosDiagnostics.ScenarioReport::appliedCount)
-            .sum();
-
-    // 50 threads compete for 5 applications: exactly the budget is spent, never more, and the
-    // reservations of the losers never leave it short.
-    assertThat(appliedCount)
-        .as("applied count must be exactly maxApplications")
-        .isEqualTo(MAX_APPLICATIONS);
   }
 
   @Nested
@@ -195,68 +196,69 @@ class MaxApplicationsConcurrencyTest {
     @Test
     @DisplayName("100 threads suppressing ThreadLocal.get() — no StackOverflowError, no corruption")
     void hundredThreadsConcurrentThreadLocalSuppressNoCrash() throws Exception {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final int threadCount = 100;
-      final int opsPerThread = 50;
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("tl-concurrency")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(
-                      ChaosSelector.threadLocal(
-                          Set.of(OperationType.THREAD_LOCAL_GET),
-                          NamePattern.prefix(
-                              "com.macstab.chaos.jvm.core.MaxApplicationsConcurrencyTest")))
-                  .effect(ChaosEffect.suppress())
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final int threadCount = 100;
+        final int opsPerThread = 50;
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("tl-concurrency")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(
+                        ChaosSelector.threadLocal(
+                            Set.of(OperationType.THREAD_LOCAL_GET),
+                            NamePattern.prefix(
+                                "com.macstab.chaos.jvm.core.MaxApplicationsConcurrencyTest")))
+                    .effect(ChaosEffect.suppress())
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
 
-      final CountDownLatch ready = new CountDownLatch(threadCount);
-      final CountDownLatch go = new CountDownLatch(1);
-      final AtomicInteger errors = new AtomicInteger(0);
-      final AtomicInteger stackOverflows = new AtomicInteger(0);
-      final List<Thread> threads = new ArrayList<>();
+        final CountDownLatch ready = new CountDownLatch(threadCount);
+        final CountDownLatch go = new CountDownLatch(1);
+        final AtomicInteger errors = new AtomicInteger(0);
+        final AtomicInteger stackOverflows = new AtomicInteger(0);
+        final List<Thread> threads = new ArrayList<>();
 
-      for (int i = 0; i < threadCount; i++) {
-        final int threadId = i;
-        threads.add(
-            Thread.ofPlatform()
-                .start(
-                    () -> {
-                      final ConcurrentThreadLocal tl = new ConcurrentThreadLocal();
-                      tl.set("thread-" + threadId);
-                      ready.countDown();
-                      try {
-                        go.await();
-                      } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                      }
-                      try {
-                        for (int op = 0; op < opsPerThread; op++) {
-                          runtime.beforeThreadLocalGet(tl);
-                          tl.set("v-" + op);
+        for (int i = 0; i < threadCount; i++) {
+          final int threadId = i;
+          threads.add(
+              Thread.ofPlatform()
+                  .start(
+                      () -> {
+                        final ConcurrentThreadLocal tl = new ConcurrentThreadLocal();
+                        tl.set("thread-" + threadId);
+                        ready.countDown();
+                        try {
+                          go.await();
+                        } catch (InterruptedException e) {
+                          Thread.currentThread().interrupt();
                         }
-                      } catch (StackOverflowError soe) {
-                        stackOverflows.incrementAndGet();
-                      } catch (Throwable e) {
-                        errors.incrementAndGet();
-                      }
-                    }));
-      }
+                        try {
+                          for (int op = 0; op < opsPerThread; op++) {
+                            runtime.beforeThreadLocalGet(tl);
+                            tl.set("v-" + op);
+                          }
+                        } catch (StackOverflowError soe) {
+                          stackOverflows.incrementAndGet();
+                        } catch (Throwable e) {
+                          errors.incrementAndGet();
+                        }
+                      }));
+        }
 
-      ready.await();
-      go.countDown();
-      for (final Thread t : threads) {
-        t.join(5000);
-      }
+        ready.await();
+        go.countDown();
+        for (final Thread t : threads) {
+          t.join(5000);
+        }
 
-      try {
-        assertThat(stackOverflows.get())
-            .as("reentrancy fix must hold under concurrency — no StackOverflowError")
-            .isZero();
-        assertThat(errors.get()).as("no unexpected exceptions").isZero();
-      } finally {
-        handle.stop();
+        try {
+          assertThat(stackOverflows.get())
+              .as("reentrancy fix must hold under concurrency — no StackOverflowError")
+              .isZero();
+          assertThat(errors.get()).as("no unexpected exceptions").isZero();
+        } finally {
+          handle.stop();
+        }
       }
     }
   }
@@ -268,56 +270,57 @@ class MaxApplicationsConcurrencyTest {
     @Test
     @DisplayName("10 concurrent Selectors all receive spurious wakeup simultaneously")
     void tenConcurrentSelectorsAllReceiveSpuriousWakeup() throws Exception {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final int selectorCount = 10;
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("nio-concurrency")
-                  .selector(ChaosSelector.nio(Set.of(OperationType.NIO_SELECTOR_SELECT)))
-                  .effect(ChaosEffect.suppress())
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final int selectorCount = 10;
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("nio-concurrency")
+                    .selector(ChaosSelector.nio(Set.of(OperationType.NIO_SELECTOR_SELECT)))
+                    .effect(ChaosEffect.suppress())
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
 
-      final CountDownLatch ready = new CountDownLatch(selectorCount);
-      final CountDownLatch go = new CountDownLatch(1);
-      final AtomicInteger spuriousCount = new AtomicInteger(0);
-      final AtomicInteger errors = new AtomicInteger(0);
-      final List<Thread> threads = new ArrayList<>();
+        final CountDownLatch ready = new CountDownLatch(selectorCount);
+        final CountDownLatch go = new CountDownLatch(1);
+        final AtomicInteger spuriousCount = new AtomicInteger(0);
+        final AtomicInteger errors = new AtomicInteger(0);
+        final List<Thread> threads = new ArrayList<>();
 
-      for (int i = 0; i < selectorCount; i++) {
-        threads.add(
-            Thread.ofPlatform()
-                .start(
-                    () -> {
-                      try (final Selector selector = Selector.open()) {
-                        ready.countDown();
-                        go.await();
-                        try {
-                          if (runtime.beforeNioSelect(selector, 5000L)) {
-                            spuriousCount.incrementAndGet();
+        for (int i = 0; i < selectorCount; i++) {
+          threads.add(
+              Thread.ofPlatform()
+                  .start(
+                      () -> {
+                        try (final Selector selector = Selector.open()) {
+                          ready.countDown();
+                          go.await();
+                          try {
+                            if (runtime.beforeNioSelect(selector, 5000L)) {
+                              spuriousCount.incrementAndGet();
+                            }
+                          } catch (Throwable t) {
+                            errors.incrementAndGet();
                           }
-                        } catch (Throwable t) {
+                        } catch (Exception e) {
                           errors.incrementAndGet();
                         }
-                      } catch (Exception e) {
-                        errors.incrementAndGet();
-                      }
-                    }));
-      }
+                      }));
+        }
 
-      ready.await();
-      go.countDown();
-      for (final Thread t : threads) {
-        t.join(6000);
-      }
+        ready.await();
+        go.countDown();
+        for (final Thread t : threads) {
+          t.join(6000);
+        }
 
-      try {
-        assertThat(errors.get()).as("no errors in selector threads").isZero();
-        assertThat(spuriousCount.get())
-            .as("all selectors should receive spurious wakeup")
-            .isEqualTo(selectorCount);
-      } finally {
-        handle.stop();
+        try {
+          assertThat(errors.get()).as("no errors in selector threads").isZero();
+          assertThat(spuriousCount.get())
+              .as("all selectors should receive spurious wakeup")
+              .isEqualTo(selectorCount);
+        } finally {
+          handle.stop();
+        }
       }
     }
   }

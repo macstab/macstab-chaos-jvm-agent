@@ -41,64 +41,66 @@ class ChaosRuntimeTest {
     @Test
     @DisplayName("SESSION-scoped executor delay does not bleed across sessions")
     void sessionScopedExecutorDelayDoesNotBleedAcrossSessions() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      try (var delayedSession = runtime.openSession("delayed");
-          var plainSession = runtime.openSession("plain")) {
-        final ChaosActivationHandle delayed =
-            delayedSession.activate(
-                ChaosScenario.builder("session-delay")
-                    .scope(ChaosScenario.ScenarioScope.SESSION)
-                    .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-                    .effect(ChaosEffect.delay(DELAY))
-                    .activationPolicy(ActivationPolicy.always())
-                    .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        try (var delayedSession = runtime.openSession("delayed");
+            var plainSession = runtime.openSession("plain")) {
+          final ChaosActivationHandle delayed =
+              delayedSession.activate(
+                  ChaosScenario.builder("session-delay")
+                      .scope(ChaosScenario.ScenarioScope.SESSION)
+                      .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                      .effect(ChaosEffect.delay(DELAY))
+                      .activationPolicy(ActivationPolicy.always())
+                      .build());
 
-        final long plainNanos =
-            measureNanos(
-                () ->
-                    plainSession
-                        .wrap(
-                            () -> {
-                              runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-                            })
-                        .run());
-        assertThat(delayed.appliedCount()).as("the plain session's call is not delayed").isZero();
-        final long delayedNanos =
-            measureNanos(
-                () ->
-                    delayedSession
-                        .wrap(
-                            () -> {
-                              runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-                            })
-                        .run());
+          final long plainNanos =
+              measureNanos(
+                  () ->
+                      plainSession
+                          .wrap(
+                              () -> {
+                                runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                              })
+                          .run());
+          assertThat(delayed.appliedCount()).as("the plain session's call is not delayed").isZero();
+          final long delayedNanos =
+              measureNanos(
+                  () ->
+                      delayedSession
+                          .wrap(
+                              () -> {
+                                runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                              })
+                          .run());
 
-        assertThat(delayed.appliedCount()).as("the delayed session's call is").isEqualTo(1L);
-        assertThat(delayedNanos).isGreaterThanOrEqualTo(DELAY.toNanos());
-        assertThat(plainNanos)
-            .as("plain session should not experience delay")
-            .isLessThan(DELAY.toNanos() / 2);
+          assertThat(delayed.appliedCount()).as("the delayed session's call is").isEqualTo(1L);
+          assertThat(delayedNanos).isGreaterThanOrEqualTo(DELAY.toNanos());
+          assertThat(plainNanos)
+              .as("plain session should not experience delay")
+              .isLessThan(DELAY.toNanos() / 2);
+        }
       }
     }
 
     @Test
     @DisplayName("SESSION-scoped class-loading chaos is rejected: a class load carries no session")
     void sessionScopedClassLoadingChaosIsRejected() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      try (var session = runtime.openSession("invalid")) {
-        assertThatThrownBy(
-                () ->
-                    session.activate(
-                        ChaosScenario.builder("class-load")
-                            .scope(ChaosScenario.ScenarioScope.SESSION)
-                            .selector(
-                                ChaosSelector.classLoading(
-                                    Set.of(OperationType.CLASS_LOAD),
-                                    com.macstab.chaos.jvm.api.NamePattern.any()))
-                            .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-                            .activationPolicy(ActivationPolicy.always())
-                            .build()))
-            .isInstanceOf(ChaosValidationException.class);
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        try (var session = runtime.openSession("invalid")) {
+          assertThatThrownBy(
+                  () ->
+                      session.activate(
+                          ChaosScenario.builder("class-load")
+                              .scope(ChaosScenario.ScenarioScope.SESSION)
+                              .selector(
+                                  ChaosSelector.classLoading(
+                                      Set.of(OperationType.CLASS_LOAD),
+                                      com.macstab.chaos.jvm.api.NamePattern.any()))
+                              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                              .activationPolicy(ActivationPolicy.always())
+                              .build()))
+              .isInstanceOf(ChaosValidationException.class);
+        }
       }
     }
   }
@@ -110,33 +112,34 @@ class ChaosRuntimeTest {
     @Test
     @DisplayName("multiple matching JVM scenarios accumulate delay")
     void jvmGlobalDelayCompositionAccumulates() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      final ChaosActivationHandle slowA =
-          runtime.activate(
-              ChaosScenario.builder("slow-a")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-                  .effect(ChaosEffect.delay(Duration.ofMillis(30)))
-                  .activationPolicy(ActivationPolicy.always())
-                  .precedence(10)
-                  .build());
-      final ChaosActivationHandle slowB =
-          runtime.activate(
-              ChaosScenario.builder("slow-b")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-                  .effect(ChaosEffect.delay(Duration.ofMillis(20)))
-                  .activationPolicy(ActivationPolicy.always())
-                  .precedence(5)
-                  .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final ChaosActivationHandle slowA =
+            runtime.activate(
+                ChaosScenario.builder("slow-a")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(30)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .precedence(10)
+                    .build());
+        final ChaosActivationHandle slowB =
+            runtime.activate(
+                ChaosScenario.builder("slow-b")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(20)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .precedence(5)
+                    .build());
 
-      final long elapsed =
-          measureNanos(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      assertThat(slowA.appliedCount()).isEqualTo(1L);
-      assertThat(slowB.appliedCount()).isEqualTo(1L);
-      assertThat(elapsed)
-          .as("both delays are added")
-          .isGreaterThanOrEqualTo(Duration.ofMillis(50).toNanos());
+        final long elapsed =
+            measureNanos(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+        assertThat(slowA.appliedCount()).isEqualTo(1L);
+        assertThat(slowB.appliedCount()).isEqualTo(1L);
+        assertThat(elapsed)
+            .as("both delays are added")
+            .isGreaterThanOrEqualTo(Duration.ofMillis(50).toNanos());
+      }
     }
   }
 
@@ -147,35 +150,36 @@ class ChaosRuntimeTest {
     @Test
     @DisplayName("blocks until release")
     void gateEffectBlocksUntilRelease() throws Exception {
-      ChaosRuntime runtime = new ChaosRuntime();
-      var handle =
-          runtime.activate(
-              ChaosScenario.builder("gate")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_WORKER_RUN)))
-                  .effect(ChaosEffect.gate(null))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        var handle =
+            runtime.activate(
+                ChaosScenario.builder("gate")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_WORKER_RUN)))
+                    .effect(ChaosEffect.gate(null))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
 
-      CompletableFuture<Void> future = new CompletableFuture<>();
-      var executor = Executors.newSingleThreadExecutor();
-      try {
-        executor.submit(
-            () -> {
-              try {
-                runtime.beforeWorkerRun(this, Thread.currentThread(), () -> {});
-                future.complete(null);
-              } catch (Throwable throwable) {
-                future.completeExceptionally(throwable);
-              }
-            });
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+          executor.submit(
+              () -> {
+                try {
+                  runtime.beforeWorkerRun(this, Thread.currentThread(), () -> {});
+                  future.complete(null);
+                } catch (Throwable throwable) {
+                  future.completeExceptionally(throwable);
+                }
+              });
 
-        assertThatThrownBy(() -> future.get(150, TimeUnit.MILLISECONDS))
-            .isInstanceOf(java.util.concurrent.TimeoutException.class);
-        handle.release();
-        assertThatCode(() -> future.get(1, TimeUnit.SECONDS)).doesNotThrowAnyException();
-      } finally {
-        executor.shutdownNow();
+          assertThatThrownBy(() -> future.get(150, TimeUnit.MILLISECONDS))
+              .isInstanceOf(java.util.concurrent.TimeoutException.class);
+          handle.release();
+          assertThatCode(() -> future.get(1, TimeUnit.SECONDS)).doesNotThrowAnyException();
+        } finally {
+          executor.shutdownNow();
+        }
       }
     }
   }
@@ -187,17 +191,19 @@ class ChaosRuntimeTest {
     @Test
     @DisplayName("throws on executor submit")
     void rejectEffectThrowsOnExecutorSubmit() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("reject-submit")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.reject("executor overloaded"))
-              .activationPolicy(ActivationPolicy.always())
-              .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("reject-submit")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.reject("executor overloaded"))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
 
-      assertThatThrownBy(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}))
-          .isInstanceOf(RejectedExecutionException.class);
+        assertThatThrownBy(
+                () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}))
+            .isInstanceOf(RejectedExecutionException.class);
+      }
     }
   }
 
@@ -208,17 +214,18 @@ class ChaosRuntimeTest {
     @Test
     @DisplayName("returns false on QUEUE_OFFER")
     void suppressEffectOnQueueOfferReturnsFalse() throws Throwable {
-      ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("suppress-offer")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.queue(Set.of(OperationType.QUEUE_OFFER)))
-              .effect(ChaosEffect.suppress())
-              .activationPolicy(ActivationPolicy.always())
-              .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("suppress-offer")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.queue(Set.of(OperationType.QUEUE_OFFER)))
+                .effect(ChaosEffect.suppress())
+                .activationPolicy(ActivationPolicy.always())
+                .build());
 
-      Boolean result = runtime.beforeBooleanQueueOperation("QUEUE_OFFER", new Object());
-      assertThat(result).isFalse();
+        Boolean result = runtime.beforeBooleanQueueOperation("QUEUE_OFFER", new Object());
+        assertThat(result).isFalse();
+      }
     }
   }
 
@@ -229,24 +236,25 @@ class ChaosRuntimeTest {
     @Test
     @DisplayName("halts effect application")
     void stopHaltsEffectApplication() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("stoppable")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-                  .effect(ChaosEffect.delay(DELAY))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("stoppable")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                    .effect(ChaosEffect.delay(DELAY))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
 
-      handle.stop();
+        handle.stop();
 
-      final long elapsed =
-          measureNanos(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      assertThat(handle.appliedCount())
-          .as("after stop(), effect must no longer be applied")
-          .isZero();
-      assertThat(elapsed).as("and the call is not delayed").isLessThan(DELAY.toNanos() / 2);
+        final long elapsed =
+            measureNanos(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+        assertThat(handle.appliedCount())
+            .as("after stop(), effect must no longer be applied")
+            .isZero();
+        assertThat(elapsed).as("and the call is not delayed").isLessThan(DELAY.toNanos() / 2);
+      }
     }
   }
 
@@ -257,30 +265,31 @@ class ChaosRuntimeTest {
     @Test
     @DisplayName("snapshot reflects applied count")
     void diagnosticsSnapshotReflectsAppliedCount() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("count-a")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .activationPolicy(ActivationPolicy.always())
-              .build());
-      runtime.activate(
-          ChaosScenario.builder("count-b")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_WORKER_RUN)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .activationPolicy(ActivationPolicy.always())
-              .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("count-a")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+        runtime.activate(
+            ChaosScenario.builder("count-b")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_WORKER_RUN)))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
 
-      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
 
-      ChaosDiagnostics.Snapshot snapshot = runtime.diagnostics().snapshot();
-      long totalApplied =
-          snapshot.scenarios().stream()
-              .mapToLong(ChaosDiagnostics.ScenarioReport::appliedCount)
-              .sum();
-      assertThat(totalApplied).isGreaterThanOrEqualTo(1);
+        ChaosDiagnostics.Snapshot snapshot = runtime.diagnostics().snapshot();
+        long totalApplied =
+            snapshot.scenarios().stream()
+                .mapToLong(ChaosDiagnostics.ScenarioReport::appliedCount)
+                .sum();
+        assertThat(totalApplied).isGreaterThanOrEqualTo(1);
+      }
     }
   }
 
@@ -291,30 +300,31 @@ class ChaosRuntimeTest {
     @Test
     @DisplayName("receives APPLIED event")
     void eventListenerReceivesAppliedEvent() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      List<ChaosEvent> events = new ArrayList<>();
-      runtime.addEventListener(events::add);
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        List<ChaosEvent> events = new ArrayList<>();
+        runtime.addEventListener(events::add);
 
-      runtime.activate(
-          ChaosScenario.builder("event-test")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .activationPolicy(ActivationPolicy.always())
-              .build());
+        runtime.activate(
+            ChaosScenario.builder("event-test")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
 
-      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
 
-      ChaosEvent appliedEvent =
-          events.stream()
-              .filter(
-                  e -> e.type() == ChaosEvent.Type.APPLIED && "event-test".equals(e.scenarioId()))
-              .findFirst()
-              .orElse(null);
+        ChaosEvent appliedEvent =
+            events.stream()
+                .filter(
+                    e -> e.type() == ChaosEvent.Type.APPLIED && "event-test".equals(e.scenarioId()))
+                .findFirst()
+                .orElse(null);
 
-      assertThat(appliedEvent).isNotNull();
-      assertThat(appliedEvent.type()).isEqualTo(ChaosEvent.Type.APPLIED);
-      assertThat(appliedEvent.scenarioId()).isEqualTo("event-test");
+        assertThat(appliedEvent).isNotNull();
+        assertThat(appliedEvent.type()).isEqualTo(ChaosEvent.Type.APPLIED);
+        assertThat(appliedEvent.scenarioId()).isEqualTo("event-test");
+      }
     }
   }
 

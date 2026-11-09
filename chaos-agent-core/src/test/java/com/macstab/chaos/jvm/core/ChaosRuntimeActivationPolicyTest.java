@@ -123,26 +123,27 @@ class ChaosRuntimeActivationPolicyTest {
     @Test
     @DisplayName("receives STARTED and APPLIED events")
     void addEventListenerReceivesStartedAndAppliedEvents() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      List<ChaosEvent> events = new ArrayList<>();
-      runtime.addEventListener(events::add);
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        List<ChaosEvent> events = new ArrayList<>();
+        runtime.addEventListener(events::add);
 
-      runtime.activate(
-          ChaosScenario.builder("listen-test")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .activationPolicy(ActivationPolicy.always())
-              .build());
+        runtime.activate(
+            ChaosScenario.builder("listen-test")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
 
-      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
 
-      assertThat(events)
-          .anyMatch(
-              e -> e.type() == ChaosEvent.Type.STARTED && "listen-test".equals(e.scenarioId()));
-      assertThat(events)
-          .anyMatch(
-              e -> e.type() == ChaosEvent.Type.APPLIED && "listen-test".equals(e.scenarioId()));
+        assertThat(events)
+            .anyMatch(
+                e -> e.type() == ChaosEvent.Type.STARTED && "listen-test".equals(e.scenarioId()));
+        assertThat(events)
+            .anyMatch(
+                e -> e.type() == ChaosEvent.Type.APPLIED && "listen-test".equals(e.scenarioId()));
+      }
     }
   }
 
@@ -153,27 +154,28 @@ class ChaosRuntimeActivationPolicyTest {
     @Test
     @DisplayName("snapshot reflects matched and applied count")
     void diagnosticsSnapshotReflectsMatchedAndAppliedCount() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("counter-test")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .activationPolicy(ActivationPolicy.always())
-              .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("counter-test")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
 
-      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
 
-      ChaosDiagnostics.Snapshot snapshot = runtime.diagnostics().snapshot();
-      ChaosDiagnostics.ScenarioReport report =
-          snapshot.scenarios().stream()
-              .filter(r -> "counter-test".equals(r.id()))
-              .findFirst()
-              .orElseThrow(() -> new AssertionError("scenario not found in snapshot"));
+        ChaosDiagnostics.Snapshot snapshot = runtime.diagnostics().snapshot();
+        ChaosDiagnostics.ScenarioReport report =
+            snapshot.scenarios().stream()
+                .filter(r -> "counter-test".equals(r.id()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("scenario not found in snapshot"));
 
-      assertThat(report.matchedCount()).as("matched count").isEqualTo(2);
-      assertThat(report.appliedCount()).as("applied count").isEqualTo(2);
+        assertThat(report.matchedCount()).as("matched count").isEqualTo(2);
+        assertThat(report.appliedCount()).as("applied count").isEqualTo(2);
+      }
     }
   }
 

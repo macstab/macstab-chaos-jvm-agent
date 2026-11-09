@@ -16,9 +16,11 @@ class JfrAvailabilityTest {
 
   @Test
   void jfrIntegrationInstallDoesNotThrow() {
-    ChaosRuntime runtime = new ChaosRuntime();
-    assertDoesNotThrow(
-        () -> JfrIntegration.installIfAvailable(runtime),
-        "installIfAvailable must not throw on a JDK with JFR present");
+    // Closing the runtime closes the JFR sink it holds, which removes its periodic JFR hook.
+    try (ChaosRuntime runtime = new ChaosRuntime()) {
+      assertDoesNotThrow(
+          () -> JfrIntegration.installIfAvailable(runtime),
+          "installIfAvailable must not throw on a JDK with JFR present");
+    }
   }
 }

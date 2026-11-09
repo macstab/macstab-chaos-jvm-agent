@@ -47,34 +47,36 @@ class ThreadLocalChaosIntegrationTest {
     @DisplayName(
         "beforeThreadLocalGet returns true when SuppressEffect active on matching ThreadLocal")
     void suppressReturnsTrueForTestThreadLocal() throws Throwable {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("tl-get-suppress")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(
-                  ChaosSelector.threadLocal(
-                      Set.of(OperationType.THREAD_LOCAL_GET), TEST_TL_PATTERN))
-              .effect(ChaosEffect.suppress())
-              .activationPolicy(ActivationPolicy.always())
-              .build());
-      assertThat(runtime.beforeThreadLocalGet(new TestThreadLocal())).isTrue();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("tl-get-suppress")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(
+                    ChaosSelector.threadLocal(
+                        Set.of(OperationType.THREAD_LOCAL_GET), TEST_TL_PATTERN))
+                .effect(ChaosEffect.suppress())
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+        assertThat(runtime.beforeThreadLocalGet(new TestThreadLocal())).isTrue();
+      }
     }
 
     @Test
     @DisplayName("narrow NamePattern does not suppress unrelated ThreadLocals")
     void narrowPatternDoesNotSuppressOtherThreadLocals() throws Throwable {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("tl-get-suppress-narrow")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(
-                  ChaosSelector.threadLocal(
-                      Set.of(OperationType.THREAD_LOCAL_GET), TEST_TL_PATTERN))
-              .effect(ChaosEffect.suppress())
-              .activationPolicy(ActivationPolicy.always())
-              .build());
-      // java.lang.ThreadLocal does not match the test-class prefix
-      assertThat(runtime.beforeThreadLocalGet(new ThreadLocal<String>())).isFalse();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("tl-get-suppress-narrow")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(
+                    ChaosSelector.threadLocal(
+                        Set.of(OperationType.THREAD_LOCAL_GET), TEST_TL_PATTERN))
+                .effect(ChaosEffect.suppress())
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+        // java.lang.ThreadLocal does not match the test-class prefix
+        assertThat(runtime.beforeThreadLocalGet(new ThreadLocal<String>())).isFalse();
+      }
     }
   }
 
@@ -90,34 +92,36 @@ class ThreadLocalChaosIntegrationTest {
     @DisplayName(
         "beforeThreadLocalSet returns true when SuppressEffect active on matching ThreadLocal")
     void suppressReturnsTrueForTestThreadLocal() throws Throwable {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("tl-set-suppress")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(
-                  ChaosSelector.threadLocal(
-                      Set.of(OperationType.THREAD_LOCAL_SET), TEST_TL_PATTERN))
-              .effect(ChaosEffect.suppress())
-              .activationPolicy(ActivationPolicy.always())
-              .build());
-      assertThat(runtime.beforeThreadLocalSet(new TestThreadLocal(), "hello")).isTrue();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("tl-set-suppress")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(
+                    ChaosSelector.threadLocal(
+                        Set.of(OperationType.THREAD_LOCAL_SET), TEST_TL_PATTERN))
+                .effect(ChaosEffect.suppress())
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+        assertThat(runtime.beforeThreadLocalSet(new TestThreadLocal(), "hello")).isTrue();
+      }
     }
 
     @Test
     @DisplayName("narrow NamePattern does not suppress unrelated ThreadLocals")
     void narrowPatternDoesNotSuppressOtherThreadLocals() throws Throwable {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("tl-set-suppress-narrow")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(
-                  ChaosSelector.threadLocal(
-                      Set.of(OperationType.THREAD_LOCAL_SET), TEST_TL_PATTERN))
-              .effect(ChaosEffect.suppress())
-              .activationPolicy(ActivationPolicy.always())
-              .build());
-      // java.lang.ThreadLocal does not match the test-class prefix
-      assertThat(runtime.beforeThreadLocalSet(new ThreadLocal<String>(), "hello")).isFalse();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("tl-set-suppress-narrow")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(
+                    ChaosSelector.threadLocal(
+                        Set.of(OperationType.THREAD_LOCAL_SET), TEST_TL_PATTERN))
+                .effect(ChaosEffect.suppress())
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+        // java.lang.ThreadLocal does not match the test-class prefix
+        assertThat(runtime.beforeThreadLocalSet(new ThreadLocal<String>(), "hello")).isFalse();
+      }
     }
   }
 
@@ -132,24 +136,25 @@ class ThreadLocalChaosIntegrationTest {
     @Test
     @DisplayName("DelayEffect slows beforeThreadLocalGet")
     void delaySlowsGet() throws Throwable {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("tl-get-delay")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(
-                  ChaosSelector.threadLocal(
-                      Set.of(OperationType.THREAD_LOCAL_GET), TEST_TL_PATTERN))
-              .effect(ChaosEffect.delay(Duration.ofMillis(50)))
-              .activationPolicy(ActivationPolicy.always())
-              .build());
-      final long start = System.nanoTime();
-      final boolean result = runtime.beforeThreadLocalGet(new TestThreadLocal());
-      final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(result).isFalse();
-      assertThat(elapsedMs)
-          .as("delay effect should add the whole configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MS);
-      assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("tl-get-delay")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(
+                    ChaosSelector.threadLocal(
+                        Set.of(OperationType.THREAD_LOCAL_GET), TEST_TL_PATTERN))
+                .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+        final long start = System.nanoTime();
+        final boolean result = runtime.beforeThreadLocalGet(new TestThreadLocal());
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(result).isFalse();
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
     }
   }
 
@@ -164,19 +169,20 @@ class ThreadLocalChaosIntegrationTest {
     @Test
     @DisplayName("plain java.lang.ThreadLocal not suppressed by test-class prefix pattern")
     void plainThreadLocalNotSuppressedByNarrowPattern() throws Throwable {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("tl-depth-safe")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(
-                  ChaosSelector.threadLocal(
-                      Set.of(OperationType.THREAD_LOCAL_GET), TEST_TL_PATTERN))
-              .effect(ChaosEffect.suppress())
-              .activationPolicy(ActivationPolicy.always())
-              .build());
-      // java.lang.ThreadLocal (as used by BootstrapDispatcher's depth counter) does not match
-      final ThreadLocal<Integer> jdkTl = new ThreadLocal<>();
-      assertThat(runtime.beforeThreadLocalGet(jdkTl)).isFalse();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("tl-depth-safe")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(
+                    ChaosSelector.threadLocal(
+                        Set.of(OperationType.THREAD_LOCAL_GET), TEST_TL_PATTERN))
+                .effect(ChaosEffect.suppress())
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+        // java.lang.ThreadLocal (as used by BootstrapDispatcher's depth counter) does not match
+        final ThreadLocal<Integer> jdkTl = new ThreadLocal<>();
+        assertThat(runtime.beforeThreadLocalGet(jdkTl)).isFalse();
+      }
     }
   }
 
@@ -191,24 +197,25 @@ class ThreadLocalChaosIntegrationTest {
     @Test
     @DisplayName("beforeThreadLocalGet returns false after handle.stop()")
     void returnsFalseAfterHandleStop() throws Throwable {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("tl-after-stop")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(
-                      ChaosSelector.threadLocal(
-                          Set.of(OperationType.THREAD_LOCAL_GET), TEST_TL_PATTERN))
-                  .effect(ChaosEffect.suppress())
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-      final TestThreadLocal tl = new TestThreadLocal();
-      try {
-        assertThat(runtime.beforeThreadLocalGet(tl)).isTrue();
-      } finally {
-        handle.stop();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("tl-after-stop")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(
+                        ChaosSelector.threadLocal(
+                            Set.of(OperationType.THREAD_LOCAL_GET), TEST_TL_PATTERN))
+                    .effect(ChaosEffect.suppress())
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        final TestThreadLocal tl = new TestThreadLocal();
+        try {
+          assertThat(runtime.beforeThreadLocalGet(tl)).isTrue();
+        } finally {
+          handle.stop();
+        }
+        assertThat(runtime.beforeThreadLocalGet(tl)).isFalse();
       }
-      assertThat(runtime.beforeThreadLocalGet(tl)).isFalse();
     }
   }
 

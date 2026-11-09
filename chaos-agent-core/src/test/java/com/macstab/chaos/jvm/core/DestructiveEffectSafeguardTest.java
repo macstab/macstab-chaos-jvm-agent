@@ -229,58 +229,63 @@ class DestructiveEffectSafeguardTest {
     @Test
     @DisplayName("activating DeadlockEffect without flag throws at registration time")
     void chaosRuntimeRejectsDeadlockWithoutFlag() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      assertThatThrownBy(() -> runtime.activate(deadlockScenario(ActivationPolicy.always())))
-          .isExactlyInstanceOf(ChaosValidationException.class)
-          .hasMessageContaining("until the scenario is stopped");
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        assertThatThrownBy(() -> runtime.activate(deadlockScenario(ActivationPolicy.always())))
+            .isExactlyInstanceOf(ChaosValidationException.class)
+            .hasMessageContaining("until the scenario is stopped");
+      }
     }
 
     @Test
     @DisplayName("activating ThreadLeakEffect without flag throws at registration time")
     void chaosRuntimeRejectsThreadLeakWithoutFlag() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      assertThatThrownBy(() -> runtime.activate(threadLeakScenario(ActivationPolicy.always())))
-          .isExactlyInstanceOf(ChaosValidationException.class)
-          .hasMessageContaining("until the scenario is stopped");
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        assertThatThrownBy(() -> runtime.activate(threadLeakScenario(ActivationPolicy.always())))
+            .isExactlyInstanceOf(ChaosValidationException.class)
+            .hasMessageContaining("until the scenario is stopped");
+      }
     }
 
     @Test
     @DisplayName("failed activation leaves no scenario registered in the runtime")
     void failedActivationLeavesNoScenarioRegistered() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      try {
-        runtime.activate(deadlockScenario(ActivationPolicy.always()));
-      } catch (ChaosValidationException ignored) {
-        // expected
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        try {
+          runtime.activate(deadlockScenario(ActivationPolicy.always()));
+        } catch (ChaosValidationException ignored) {
+          // expected
+        }
+        assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();
       }
-      assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();
     }
 
     @Test
     @DisplayName("activating DeadlockEffect with flag succeeds and registers scenario")
     void chaosRuntimeAcceptsDeadlockWithFlag() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      // Must close the handle immediately — we do NOT want to actually deadlock the JVM.
-      // Activation succeeds; we stop the scenario before the deadlock threads can acquire locks.
-      final var handle =
-          runtime.activate(deadlockScenario(ActivationPolicy.withDestructiveEffects()));
-      handle.stop(); // stops stressor threads before deadlock manifests
-      assertThat(runtime.diagnostics().snapshot().scenarios()).hasSize(1);
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        // Must close the handle immediately — we do NOT want to actually deadlock the JVM.
+        // Activation succeeds; we stop the scenario before the deadlock threads can acquire locks.
+        final var handle =
+            runtime.activate(deadlockScenario(ActivationPolicy.withDestructiveEffects()));
+        handle.stop(); // stops stressor threads before deadlock manifests
+        assertThat(runtime.diagnostics().snapshot().scenarios()).hasSize(1);
+      }
     }
 
     @Test
     @DisplayName("allowDestructiveEffects=false on valid non-destructive scenario has no effect")
     void nonDestructiveScenarioUnaffectedByFlag() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      // heap pressure is safe — should activate without any flag
-      final ChaosScenario scenario =
-          ChaosScenario.builder("heap-ok")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.stress(ChaosSelector.StressTarget.HEAP))
-              .effect(new ChaosEffect.HeapPressureEffect(1024L, 16))
-              .activationPolicy(ActivationPolicy.always())
-              .build();
-      assertThatCode(() -> runtime.activate(scenario).close()).doesNotThrowAnyException();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        // heap pressure is safe — should activate without any flag
+        final ChaosScenario scenario =
+            ChaosScenario.builder("heap-ok")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.stress(ChaosSelector.StressTarget.HEAP))
+                .effect(new ChaosEffect.HeapPressureEffect(1024L, 16))
+                .activationPolicy(ActivationPolicy.always())
+                .build();
+        assertThatCode(() -> runtime.activate(scenario).close()).doesNotThrowAnyException();
+      }
     }
   }
 

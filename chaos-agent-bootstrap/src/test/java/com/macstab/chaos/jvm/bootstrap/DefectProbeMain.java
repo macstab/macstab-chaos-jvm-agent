@@ -102,6 +102,7 @@ public final class DefectProbeMain {
       case "file-corrupt-read" -> fileCorruptRead();
       case "file-channel-write" -> fileChannelWrite();
       case "dns-lookups" -> dnsLookups();
+      case "local-mode-session-delay" -> localModeSessionDelay();
       case "session-handoff" -> sessionHandoff();
       case "random-access-write" -> randomAccessWrite();
       case "file-writes-by-path" -> fileWritesByPath();
@@ -954,7 +955,37 @@ public final class DefectProbeMain {
     System.out.println("outside=" + after.get());
   }
 
-  /** Resolves an unresolvable name and localhost, reporting answers or failures. */
+  /** Installs locally, delays EXECUTOR_SUBMIT in a session, and times one execute(). */
+  private static void localModeSessionDelay() throws Exception {
+    final com.macstab.chaos.jvm.api.ChaosControlPlane controlPlane = ChaosPlatform.installLocally();
+    try (com.macstab.chaos.jvm.api.ChaosSession session = controlPlane.openSession("local-mode")) {
+      final ChaosActivationHandle handle =
+          session.activate(
+              ChaosScenario.builder("local-delay")
+                  .scope(ChaosScenario.ScenarioScope.SESSION)
+                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(60)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final java.util.concurrent.ThreadPoolExecutor executor =
+          new java.util.concurrent.ThreadPoolExecutor(
+              1, 1, 0L, TimeUnit.MILLISECONDS, new java.util.concurrent.LinkedBlockingQueue<>());
+      try {
+        final long start = System.nanoTime();
+        executor.execute(() -> {});
+        System.out.println(
+            "elapsedMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+        System.out.println("applied.local-delay=" + handle.appliedCount());
+      } finally {
+        executor.shutdownNow();
+      }
+    }
+  }
+
+  /**
+   * Resolves an unresolvable name, localhost and dual.test (from a test's hosts file), reporting
+   * answers or failures.
+   */
   private static void dnsLookups() {
     for (final String host : new String[] {"chaos-probe.invalid", "localhost", "dual.test"}) {
       try {

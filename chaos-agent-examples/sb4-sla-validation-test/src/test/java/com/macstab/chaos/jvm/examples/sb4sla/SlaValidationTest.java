@@ -65,9 +65,13 @@ class SlaValidationTest {
 
   @BeforeAll
   static void startWireMocks() {
-    wireMockA = new WireMockServer(WireMockConfiguration.options().port(18081));
-    wireMockB = new WireMockServer(WireMockConfiguration.options().port(18082));
-    wireMockC = new WireMockServer(WireMockConfiguration.options().port(18083));
+    if (wireMockA != null) {
+      return;
+    }
+    // Free ports, not fixed ones: modules run in parallel and may run this test at once.
+    wireMockA = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+    wireMockB = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+    wireMockC = new WireMockServer(WireMockConfiguration.options().dynamicPort());
 
     wireMockA.start();
     wireMockB.start();
@@ -78,11 +82,24 @@ class SlaValidationTest {
     wireMockC.stubFor(get(urlEqualTo("/c")).willReturn(aResponse().withStatus(200).withBody("ok")));
   }
 
+  @org.springframework.test.context.DynamicPropertySource
+  static void downstreams(final org.springframework.test.context.DynamicPropertyRegistry registry) {
+    if (wireMockA == null) {
+      startWireMocks();
+    }
+    registry.add("downstream.a.url", () -> "http://localhost:" + wireMockA.port() + "/a");
+    registry.add("downstream.b.url", () -> "http://localhost:" + wireMockB.port() + "/b");
+    registry.add("downstream.c.url", () -> "http://localhost:" + wireMockC.port() + "/c");
+  }
+
   @AfterAll
   static void stopWireMocks() {
     if (wireMockA != null) wireMockA.stop();
     if (wireMockB != null) wireMockB.stop();
     if (wireMockC != null) wireMockC.stop();
+    wireMockA = null;
+    wireMockB = null;
+    wireMockC = null;
   }
 
   /**

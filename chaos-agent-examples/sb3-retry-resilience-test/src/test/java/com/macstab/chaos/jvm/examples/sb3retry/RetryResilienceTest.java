@@ -27,10 +27,7 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
-@ChaosTest(
-    classes = RetryDemoApplication.class,
-    webEnvironment = WebEnvironment.RANDOM_PORT,
-    properties = "downstream.url=http://localhost:18080")
+@ChaosTest(classes = RetryDemoApplication.class, webEnvironment = WebEnvironment.RANDOM_PORT)
 class RetryResilienceTest {
 
   private static WireMockServer wireMock;
@@ -39,7 +36,11 @@ class RetryResilienceTest {
 
   @BeforeAll
   static void startWireMock() {
-    wireMock = new WireMockServer(WireMockConfiguration.options().port(18080));
+    if (wireMock != null) {
+      return;
+    }
+    // A free port, not a fixed one: modules run in parallel and may run this test at once.
+    wireMock = new WireMockServer(WireMockConfiguration.options().dynamicPort());
     wireMock.start();
     wireMock.stubFor(
         get(urlEqualTo("/ping"))
@@ -50,10 +51,19 @@ class RetryResilienceTest {
                     .withBody("pong")));
   }
 
+  @org.springframework.test.context.DynamicPropertySource
+  static void downstream(final org.springframework.test.context.DynamicPropertyRegistry registry) {
+    if (wireMock == null) {
+      startWireMock();
+    }
+    registry.add("downstream.url", () -> "http://localhost:" + wireMock.port());
+  }
+
   @AfterAll
   static void stopWireMock() {
     if (wireMock != null) {
       wireMock.stop();
+      wireMock = null;
     }
   }
 
@@ -72,7 +82,7 @@ class RetryResilienceTest {
                     Set.of(OperationType.SOCKET_CONNECT),
                     NamePattern.any(),
                     null,
-                    18080,
+                    wireMock.port(),
                     null,
                     null))
             .effect(ChaosEffect.reject("chaos: transient connect failure"))

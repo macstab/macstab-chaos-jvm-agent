@@ -8,6 +8,7 @@ import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import io.micronaut.context.ApplicationContext;
 import io.micronaut.context.env.PropertySource;
 import io.micronaut.http.HttpResponse;
+import io.micronaut.runtime.server.EmbeddedServer;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -66,17 +67,34 @@ class ChaosManagementEndpointTest {
   }
 
   @Test
-  @DisplayName("stops a plan whose name holds characters a URL escapes")
-  void stopsAnEscapedName() {
+  @DisplayName("stops over HTTP a plan whose name holds characters a URL escapes")
+  void stopsAnEscapedName() throws Exception {
     ChaosPlatform.installLocally();
-    try (ApplicationContext context =
-        ApplicationContext.run(Map.of("macstab.chaos.management.enabled", "true"))) {
-      final ChaosManagementEndpoint endpoint = context.getBean(ChaosManagementEndpoint.class);
+    try (EmbeddedServer server =
+        ApplicationContext.run(
+            EmbeddedServer.class,
+            Map.of(
+                "macstab.chaos.management.enabled", "true",
+                "endpoints.chaos.sensitive", "false",
+                "micronaut.server.port", "-1"))) {
+      final ChaosManagementEndpoint endpoint =
+          server.getApplicationContext().getBean(ChaosManagementEndpoint.class);
       assertThat(endpoint.activate(PLAN.replace("\"mn-mgmt\"", "\"50%+off\"")).code())
           .isEqualTo(200);
 
-      // Micronaut hands the endpoint the decoded selector.
-      assertThat(endpoint.stop("50%+off").code()).isEqualTo(200);
+      // The client escapes '%' and '+'; Micronaut decodes the path before the endpoint sees it.
+      final java.net.http.HttpResponse<String> stopped;
+      try (java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient()) {
+        stopped =
+            client.send(
+                java.net.http.HttpRequest.newBuilder(server.getURI().resolve("/chaos/50%25%2Boff"))
+                    .DELETE()
+                    .build(),
+                java.net.http.HttpResponse.BodyHandlers.ofString());
+      }
+
+      assertThat(stopped.statusCode()).as(stopped.body()).isEqualTo(200);
+      assertThat(stopped.body()).contains("\"status\":\"stopped\"");
     }
   }
 

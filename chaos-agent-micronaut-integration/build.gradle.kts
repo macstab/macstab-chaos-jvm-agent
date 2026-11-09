@@ -26,6 +26,10 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation("io.micronaut.test:micronaut-test-junit5")
     testImplementation("io.micronaut:micronaut-management")
+    // The escaping test calls the endpoint over HTTP, as a client would; the server needs a JSON
+    // codec for its error bodies.
+    testImplementation("io.micronaut:micronaut-http-server-netty")
+    testImplementation("io.micronaut:micronaut-jackson-databind")
     testAnnotationProcessor(platform(libs.micronaut.bom))
     testAnnotationProcessor("io.micronaut:micronaut-inject-java")
 }
