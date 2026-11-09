@@ -30,6 +30,7 @@
 | 9 | `OperationType` gained constants between existing ones | you persist ordinals | persist names (§9) |
 | 10 | Bridge handle slots renumbered | you call `BootstrapDispatcher` directly | none for applications (§10) |
 | 11 | A glob's `*` also matches line terminators | a GLOB must not match across a line break | use a REGEX (§11) |
+| 12 | `/actuator/chaos` answers with the operation's HTTP status | a client reads `status = "error"` from a 200 answer of the Spring endpoint, or stops the startup plan through it | check the HTTP status or the `invalid`, `conflict`, `rejected` outcomes (§12) |
 | 13 | `reject` is refused where no real call fails | a plan rejects `THREAD_PARK`, `MONITOR_ENTER`, `SYSTEM_GC_REQUEST`, `SYSTEM_EXIT_REQUEST`, `THREAD_LOCAL_*`, `ASYNC_CANCEL`, `ZIP_DEFLATE`, `EXECUTOR_SHUTDOWN`, a worker or fork-join run, or a queue take or poll | use the effect the refusal names (§13) |
 | 14 | Enabling switches are honoured only from local sources on Quarkus and Micronaut | a config server sets `macstab.chaos.enabled` or a management switch | set `macstab.chaos.allow-remote-enable=true` locally (§14) |
 | 15 | `reject` / `suppress` on `QUEUE_OFFER` skip queues without a capacity limit | you saturate a pool on an unbounded queue through `QUEUE_OFFER` | reject `EXECUTOR_SUBMIT`, or give the queue a capacity (§15) |
@@ -45,6 +46,7 @@
 | 25 | Plan JSON is read strictly and written in ISO-8601 | a plan gives a duration or instant as a number, a number as a string, a fraction for an integer, `0`/`1` for a boolean, an ordinal for an enum or a field twice; or you read `GET /q/chaos` (`/chaos`, `/actuator/chaos`) or `ChaosPlanMapper.toJson` output as numbers | write ISO-8601 strings and plain JSON values; read `capturedAt` and durations as ISO-8601 strings (§25) |
 | 26 | A name pattern is no longer canonicalised | a pattern has a mode without a value (`{"mode": "GLOB"}`, `NamePattern.glob(null)`), a value without a mode, or `ANY` with a value other than `"*"` | give the mode its value, or use `ANY` (`NamePattern.any()`) (§26) |
 | 27 | The API's nullness is published (`@NullMarked`) | Kotlin code passes `null` where a type is non-null, or treats a non-null result as nullable | pass a value, or use the parameters marked `@Nullable` (§27) |
+| 28 | Testkit count assertions under `within` hold for the whole duration | a test uses `within(t).never()` / `atMost(n)` as an instant check, calls `hasNoFailuresFor()` without ids, or passes a negative bound | drop `within` for an instant check; pass the ids or use `hasNoFailures()` (§28) |
 | 29 | `chaos-agent-testkit` no longer brings JUnit | you get `junit-jupiter-api` (or the JUnit BOM's versions) only through the testkit or a starter that depends on it | declare JUnit in your test dependencies (§29) |
 | 30 | `ChaosEvent.Type.INACTIVE`; lifecycle events once per transition | a `switch` over `ChaosEvent.Type` has no `default`; a listener counts `STOPPED` per `stop()` / `close()` call, or waits for `STOPPED` to learn that a scenario expired or used up `maxApplications` | add `case INACTIVE`; count one `STOPPED` per scenario; wait for `INACTIVE` (§30) |
 | 31 | Apache HttpClient is evaluated at `doExecute`, with one URL rule | a scenario counts Apache HttpClient calls made from a response handler, a `urlPattern` matches the path-only URL of `executeOpen(null, …)` or the doubled URL of HC4 `execute(host, absoluteRequest)`, or you subclass `CloseableHttpClient` yourself | expect one more evaluation per request a handler sends; match the full URL; hook your own client differently (§31) |
@@ -259,6 +261,7 @@ A `SuppressEffect` on `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`, `JDBC_CONNEC
 - In plans: replace `{"type": "suppress"}` on these operations with `{"type": "reject", "message": "…"}`; in code, `ChaosEffect.suppress()` with `ChaosEffect.reject("…")`.
 - In tests: catch `java.io.IOException` for HTTP (an `UncheckedIOException` or your client's wrapper where it wraps one) and `java.sql.SQLException` for JDBC (Spring: `DataAccessException`, `CannotGetJdbcConnectionException`) instead of `ChaosHttpSuppressException` / `ChaosJdbcSuppressException`.
 - Code that calls `BootstrapDispatcher` or `BridgeDelegate` directly: `beforeHttpSend`, `beforeHttpSendAsync` and the five `beforeJdbc*` return `void`; a reject throws from them.
+- The deprecated Quarkus `@ChaosScenario` shorthands `httpClient` + `suppress` and `jdbc` + `suppress` are refused when the annotation is read, with `IllegalArgumentException` ("use delay"): use `effect = "delay:<duration>"`, or a `@WithChaos` JSON scenario with a `reject`.
 
 ## 19. `reject` and `errno` raise the real call's exception
 

@@ -76,7 +76,7 @@ The release workflow runs `semantic-release` automatically after a successful bu
 | `chaos-agent-testkit` | JUnit 5 `ChaosAgentExtension`, `@WithChaos`, `ChaosAssertions` |
 | `chaos-agent-spring-boot3/4-starter` | Runtime Spring Boot integration and Actuator endpoint |
 | `chaos-agent-spring-boot3/4-test-starter` | `@ChaosTest` for Spring Boot tests |
-| `chaos-agent-spring-boot-common` | Shared Spring logic (one source, two compile targets) |
+| `chaos-agent-spring-boot-common` | The Spring classes both runtime starters share (`ChaosAutoConfiguration`, `ChaosProperties`, the actuator endpoint, the trust conditions), compiled once against Boot 3 and used on Boot 3 and 4 |
 | `chaos-agent-micronaut-integration` | Micronaut integration and `/chaos` management endpoint |
 | `chaos-agent-micrometer` | `ChaosMeterBinder`: the chaos metrics in Micrometer |
 | `chaos-agent-opentelemetry` | `ChaosOpenTelemetry`: the chaos metrics and span events in OpenTelemetry |
@@ -154,12 +154,12 @@ Add the corresponding `beforeMyOperation(...)` method to the domain dispatcher (
 
 ### 7. Test it
 
-Add an integration test in `chaos-agent-bootstrap/src/test/` that:
-1. Activates a scenario targeting `MY_OPERATION_TAG`
-2. Calls the instrumented JDK method
-3. Asserts the effect was applied (delay, exception, suppression, etc.)
+Add a test of the woven hook in `chaos-agent-bootstrap/src/test/` (`InstrumentationIntegrationTest` and its probe `AgentProcessProbeMain`), which:
+1. Writes a plan with a scenario for `MY_OPERATION_TAG` to a file
+2. Starts a child JVM with `-javaagent:` (the shaded agent jar) and `configFile=` that plan, and calls the instrumented JDK method there
+3. Asserts the effect was applied (delay, exception, suppression, etc.) from the child's output
 
-The `ChaosAgentExtension` handles self-attach — no `-javaagent` flag needed in tests.
+Also add the advice to the expected hooks of `HookCoverageIntegrationTest`, and unit-test the dispatch in the domain dispatcher's test in `chaos-agent-core`. Applications test with the testkit instead (`ChaosAgentExtension` self-attaches, no flag needed; see [user-guide.md](docs/user-guide.md)); the bootstrap module does not depend on the testkit.
 
 ---
 
