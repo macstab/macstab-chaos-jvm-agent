@@ -380,6 +380,7 @@ public final class ChaosQuarkusExtension
           ChaosSelector.jvmRuntime(
               EnumSet.of(
                   OperationType.INSTANT_NOW,
+                  OperationType.CLOCK_READ,
                   OperationType.LOCAL_DATE_TIME_NOW,
                   OperationType.ZONED_DATE_TIME_NOW,
                   OperationType.DATE_NEW));

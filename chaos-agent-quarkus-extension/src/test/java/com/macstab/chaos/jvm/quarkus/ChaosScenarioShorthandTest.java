@@ -60,6 +60,19 @@ class ChaosScenarioShorthandTest {
     }
   }
 
+  @org.junit.jupiter.api.Test
+  @DisplayName("freeze covers every wall-clock read the clockJump preset covers, CLOCK_READ too")
+  void freezeCoversEveryWallClockRead() {
+    final com.macstab.chaos.jvm.api.ChaosSelector expected =
+        com.macstab.chaos.jvm.api.ChaosPresets.clockJump(java.time.Duration.ofSeconds(1))
+            .build()
+            .selector();
+
+    org.assertj.core.api.Assertions.assertThat(
+            ChaosQuarkusExtension.toScenario(annotation("jvmRuntime", "freeze")).selector())
+        .isEqualTo(expected);
+  }
+
   private static ChaosScenario annotation(final String selector, final String effect) {
     return (ChaosScenario)
         Proxy.newProxyInstance(

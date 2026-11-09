@@ -174,6 +174,7 @@ class ChaosQuarkusExtensionTest {
           .as("the clock reads that are actually instrumented, not System.currentTimeMillis")
           .containsExactlyInAnyOrder(
               OperationType.INSTANT_NOW,
+              OperationType.CLOCK_READ,
               OperationType.LOCAL_DATE_TIME_NOW,
               OperationType.ZONED_DATE_TIME_NOW,
               OperationType.DATE_NEW);
