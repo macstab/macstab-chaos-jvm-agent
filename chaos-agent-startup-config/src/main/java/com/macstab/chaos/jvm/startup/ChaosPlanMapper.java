@@ -370,7 +370,7 @@ public final class ChaosPlanMapper {
       final JsonProcessingException exception, final @Nullable JsonNode tree) {
     if (exception
         instanceof com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException unrecognized) {
-      return "unknown property '" + unrecognized.getPropertyName() + "'";
+      return "unknown property '" + printableName(unrecognized.getPropertyName()) + "'";
     }
     if (exception instanceof com.fasterxml.jackson.databind.exc.InvalidTypeIdException) {
       return "unknown or missing type";
@@ -518,12 +518,20 @@ public final class ChaosPlanMapper {
         if (!path.isEmpty()) {
           path.append('.');
         }
-        path.append(reference.getFieldName());
+        path.append(printableName(reference.getFieldName()));
       } else if (reference.getIndex() >= 0) {
         path.append('[').append(reference.getIndex()).append(']');
       }
     }
     return path.toString();
+  }
+
+  /**
+   * A property name from the input, as a failure message relays it: on one line and capped; an
+   * empty name stays empty.
+   */
+  private static String printableName(final @Nullable String name) {
+    return name == null || name.isEmpty() ? "" : LogText.sanitize(name, CAUSE_MESSAGE_MAX_LENGTH);
   }
 
   /**
@@ -552,7 +560,7 @@ public final class ChaosPlanMapper {
         if (!path.isEmpty()) {
           path.append('.');
         }
-        path.append(step);
+        path.append(printableName(step.toString()));
       }
     }
     return path.toString();

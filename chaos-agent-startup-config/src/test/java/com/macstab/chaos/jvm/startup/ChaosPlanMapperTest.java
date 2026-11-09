@@ -490,6 +490,32 @@ class ChaosPlanMapperTest {
     }
 
     @Test
+    @DisplayName("relay an unknown property's name and a path without control characters, capped")
+    void sanitiseUnknownPropertyNameAndPath() {
+      final String escaped = "a\\u001b[2Jforged";
+      final String longName = "x".repeat(500);
+      final String unknownInMetadata =
+          "{\"metadata\": {\"name\": \"p\", \"%s\": 1}, \"scenarios\": []}";
+      final String syntaxErrorInside = "{\"metadata\": {\"%s\": }, \"scenarios\": []}";
+
+      assertThatThrownBy(() -> ChaosPlanMapper.read(unknownInMetadata.formatted(escaped)))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("unknown property 'a�[2Jforged'")
+          .hasMessageNotContaining("\u001b");
+      assertThatThrownBy(() -> ChaosPlanMapper.read(unknownInMetadata.formatted(longName)))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("unknown property")
+          .hasMessageNotContaining(longName);
+      assertThatThrownBy(() -> ChaosPlanMapper.read(syntaxErrorInside.formatted(escaped)))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("metadata.a�[2Jforged")
+          .hasMessageNotContaining("\u001b");
+      assertThatThrownBy(() -> ChaosPlanMapper.read(syntaxErrorInside.formatted(longName)))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageNotContaining(longName);
+    }
+
+    @Test
     @DisplayName("never echo values from the input")
     void doNotEchoValues() {
       final String json =
