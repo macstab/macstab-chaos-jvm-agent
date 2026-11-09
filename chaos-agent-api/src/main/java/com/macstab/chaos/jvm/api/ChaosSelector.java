@@ -49,10 +49,10 @@ public sealed interface ChaosSelector
   // ── Factory methods ────────────────────────────────────────────────────────
 
   /**
-   * Returns a selector that matches thread start operations of the given {@link ThreadKind}.
+   * Returns a selector that matches thread starts and sleeps of the given {@link ThreadKind}.
    *
    * <p>Valid operations: {@link OperationType#THREAD_START}, {@link
-   * OperationType#VIRTUAL_THREAD_START}.
+   * OperationType#VIRTUAL_THREAD_START}, {@link OperationType#THREAD_SLEEP}.
    *
    * @param operations set of thread operations to intercept; must not be empty
    * @param kind {@link ThreadKind#ANY} matches all threads; use {@link ThreadKind#VIRTUAL} to
@@ -69,7 +69,7 @@ public sealed interface ChaosSelector
    *
    * <p>Valid operations: {@link OperationType#EXECUTOR_SUBMIT}, {@link
    * OperationType#EXECUTOR_WORKER_RUN}, {@link OperationType#EXECUTOR_SHUTDOWN}, {@link
-   * OperationType#EXECUTOR_AWAIT_TERMINATION}.
+   * OperationType#EXECUTOR_AWAIT_TERMINATION}, {@link OperationType#FORK_JOIN_TASK_RUN}.
    *
    * @param operations set of executor operations to intercept; must not be empty
    * @return an ExecutorSelector
@@ -92,11 +92,11 @@ public sealed interface ChaosSelector
   }
 
   /**
-   * Returns a selector that matches {@link java.util.concurrent.CompletableFuture} completion
-   * operations.
+   * Returns a selector that matches {@link java.util.concurrent.CompletableFuture} completions and
+   * cancellations.
    *
    * <p>Valid operations: {@link OperationType#ASYNC_COMPLETE}, {@link
-   * OperationType#ASYNC_COMPLETE_EXCEPTIONALLY}.
+   * OperationType#ASYNC_COMPLETE_EXCEPTIONALLY}, {@link OperationType#ASYNC_CANCEL}.
    *
    * @param operations set of async operations to intercept; must not be empty
    * @return an AsyncSelector
@@ -196,14 +196,14 @@ public sealed interface ChaosSelector
    *
    * <p>Valid operations: {@link OperationType#SYSTEM_CLOCK_MILLIS}, {@link
    * OperationType#SYSTEM_CLOCK_NANOS}, {@link OperationType#INSTANT_NOW}, {@link
-   * OperationType#LOCAL_DATE_TIME_NOW}, {@link OperationType#ZONED_DATE_TIME_NOW}, {@link
-   * OperationType#DATE_NEW}, {@link OperationType#SYSTEM_GC_REQUEST}, {@link
-   * OperationType#SYSTEM_EXIT_REQUEST}, {@link OperationType#REFLECTION_INVOKE}, {@link
-   * OperationType#DIRECT_BUFFER_ALLOCATE}, {@link OperationType#OBJECT_DESERIALIZE}, {@link
-   * OperationType#OBJECT_SERIALIZE}, {@link OperationType#NATIVE_LIBRARY_LOAD}, {@link
-   * OperationType#JNDI_LOOKUP}, {@link OperationType#JMX_INVOKE}, {@link
-   * OperationType#JMX_GET_ATTR}, {@link OperationType#ZIP_INFLATE}, {@link
-   * OperationType#ZIP_DEFLATE}.
+   * OperationType#CLOCK_READ}, {@link OperationType#LOCAL_DATE_TIME_NOW}, {@link
+   * OperationType#ZONED_DATE_TIME_NOW}, {@link OperationType#DATE_NEW}, {@link
+   * OperationType#SYSTEM_GC_REQUEST}, {@link OperationType#SYSTEM_EXIT_REQUEST}, {@link
+   * OperationType#REFLECTION_INVOKE}, {@link OperationType#DIRECT_BUFFER_ALLOCATE}, {@link
+   * OperationType#OBJECT_DESERIALIZE}, {@link OperationType#OBJECT_SERIALIZE}, {@link
+   * OperationType#NATIVE_LIBRARY_LOAD}, {@link OperationType#JNDI_LOOKUP}, {@link
+   * OperationType#JMX_INVOKE}, {@link OperationType#JMX_GET_ATTR}, {@link
+   * OperationType#ZIP_INFLATE}, {@link OperationType#ZIP_DEFLATE}.
    *
    * @param operations set of JVM runtime operations to intercept; must not be empty
    * @return a JvmRuntimeSelector
@@ -244,7 +244,9 @@ public sealed interface ChaosSelector
    *
    * <p>Valid operations: {@link OperationType#SOCKET_CONNECT}, {@link OperationType#SOCKET_ACCEPT},
    * {@link OperationType#SOCKET_READ}, {@link OperationType#SOCKET_WRITE}, {@link
-   * OperationType#SOCKET_CLOSE}.
+   * OperationType#SOCKET_CLOSE}, {@link OperationType#SOCKET_BIND}, {@link
+   * OperationType#SOCKET_SHUTDOWN}, {@link OperationType#DATAGRAM_SEND}, {@link
+   * OperationType#DATAGRAM_RECEIVE}.
    *
    * @param operations set of socket operations to intercept; must not be empty
    * @return a NetworkSelector
@@ -364,7 +366,8 @@ public sealed interface ChaosSelector
   /**
    * Returns a selector that matches DNS resolution calls across all hostname patterns.
    *
-   * <p>Valid operations: {@link OperationType#DNS_RESOLVE}.
+   * <p>Valid operations: {@link OperationType#DNS_RESOLVE}, {@link OperationType#DNS_ANSWER},
+   * {@link OperationType#DNS_REVERSE}.
    *
    * @param operations set of DNS operations to intercept; must not be empty
    * @return a DnsSelector
@@ -377,7 +380,8 @@ public sealed interface ChaosSelector
    * Returns a selector that matches DNS resolution calls whose resolved hostname matches {@code
    * hostnamePattern}.
    *
-   * <p>Valid operations: {@link OperationType#DNS_RESOLVE}.
+   * <p>Valid operations: {@link OperationType#DNS_RESOLVE}, {@link OperationType#DNS_ANSWER},
+   * {@link OperationType#DNS_REVERSE}.
    *
    * @param operations set of DNS operations to intercept; must not be empty
    * @param hostnamePattern pattern matched against the hostname being resolved; {@code null} for
@@ -403,10 +407,14 @@ public sealed interface ChaosSelector
   }
 
   /**
-   * Returns a selector that matches file I/O read and write operations across any {@link
-   * java.io.FileInputStream} or {@link java.io.FileOutputStream} instance.
+   * Returns a selector that matches file I/O operations on any path: the {@code java.io} streams
+   * and {@code RandomAccessFile}, the {@code java.nio} channels and {@code Files}.
    *
-   * <p>Valid operations: {@link OperationType#FILE_IO_READ}, {@link OperationType#FILE_IO_WRITE}.
+   * <p>Valid operations: {@link OperationType#FILE_IO_READ}, {@link OperationType#FILE_IO_WRITE},
+   * {@link OperationType#FILE_IO_SYNC}, {@link OperationType#FILE_IO_TRUNCATE}, {@link
+   * OperationType#FILE_IO_DELETE}, {@link OperationType#FILE_IO_MOVE}, {@link
+   * OperationType#FILE_IO_OPEN}, {@link OperationType#FILE_IO_MAP}, {@link
+   * OperationType#FILE_IO_CLOSE}, {@link OperationType#FILE_IO_MOVE_TARGET}.
    *
    * @param operations set of file I/O operations to intercept; must not be empty
    * @return a FileIoSelector
@@ -926,7 +934,9 @@ public sealed interface ChaosSelector
    *
    * <p><b>Valid operations:</b> {@link OperationType#SOCKET_CONNECT}, {@link
    * OperationType#SOCKET_ACCEPT}, {@link OperationType#SOCKET_READ}, {@link
-   * OperationType#SOCKET_WRITE}, {@link OperationType#SOCKET_CLOSE}.
+   * OperationType#SOCKET_WRITE}, {@link OperationType#SOCKET_CLOSE}, {@link
+   * OperationType#SOCKET_BIND}, {@link OperationType#SOCKET_SHUTDOWN}, {@link
+   * OperationType#DATAGRAM_SEND}, {@link OperationType#DATAGRAM_RECEIVE}.
    *
    * <p>For {@link OperationType#SOCKET_CONNECT} the {@code remoteHostPattern} is matched against
    * the {@link java.net.InetSocketAddress} host string. For other operations the pattern is matched
@@ -1091,7 +1101,8 @@ public sealed interface ChaosSelector
    *
    * <p><b>Valid operations:</b> {@link OperationType#JDBC_CONNECTION_ACQUIRE}, {@link
    * OperationType#JDBC_STATEMENT_EXECUTE}, {@link OperationType#JDBC_PREPARED_STATEMENT}, {@link
-   * OperationType#JDBC_TRANSACTION_COMMIT}, {@link OperationType#JDBC_TRANSACTION_ROLLBACK}.
+   * OperationType#JDBC_TRANSACTION_COMMIT}, {@link OperationType#JDBC_TRANSACTION_ROLLBACK}, {@link
+   * OperationType#R2DBC_STATEMENT_EXECUTE}.
    *
    * @param operations operation types this selector matches
    * @param targetPattern pattern matched against the pool identifier or SQL snippet
@@ -1168,7 +1179,8 @@ public sealed interface ChaosSelector
    * OperationType#FILE_IO_WRITE}, {@link OperationType#FILE_IO_SYNC}, {@link
    * OperationType#FILE_IO_TRUNCATE}, {@link OperationType#FILE_IO_DELETE}, {@link
    * OperationType#FILE_IO_MOVE}, {@link OperationType#FILE_IO_OPEN}, {@link
-   * OperationType#FILE_IO_MAP}. Only reads, writes and maps carry a byte count.
+   * OperationType#FILE_IO_MAP}, {@link OperationType#FILE_IO_CLOSE}, {@link
+   * OperationType#FILE_IO_MOVE_TARGET}. Only reads, writes and maps carry a byte count.
    *
    * <p>The optional filters narrow the match further; a {@code null} filter does not restrict:
    * {@code pathPattern} matches the path the stream was opened with (a stream created from a {@link
@@ -1343,9 +1355,10 @@ public sealed interface ChaosSelector
   }
 
   /**
-   * Matches the start of child processes, optionally by program.
+   * Matches the start of child processes and waits for them, optionally by program.
    *
-   * <p><b>Valid operations:</b> {@link OperationType#PROCESS_START}.
+   * <p><b>Valid operations:</b> {@link OperationType#PROCESS_START}, {@link
+   * OperationType#PROCESS_WAIT}.
    *
    * @param operations operation types this selector matches
    * @param commandPattern pattern matched against the program, the first element of the command as

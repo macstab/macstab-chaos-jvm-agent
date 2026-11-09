@@ -176,7 +176,7 @@ Every policy field is optional:
 - `activeFor`, `activeFrom`, `activeUntil`: no time window
 - `maxApplications`: unlimited
 - `randomSeed`: a random seed per activation; set it for reproducible draws
-- `allowDestructiveEffects`: `false`; must be `true` for `deadlock` and `threadLeak`, which leave non-recoverable JVM state (without it, `virtualThreadCarrierPinning` leaves one carrier free)
+- `allowDestructiveEffects`: `false`; must be `true` for `deadlock` and `threadLeak`, which hold their threads, locks and memory until the scenario is stopped (without it, `virtualThreadCarrierPinning` leaves one carrier free)
 - `replayMatches`: none; when present, it replaces the probability draw and requires probability `1.0` and no `rateLimit`
 
 ---

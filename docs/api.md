@@ -441,7 +441,7 @@ ChaosEffect.referenceQueueFlood(10_000, Duration.ofMillis(50));
 // Most common: always fire, start immediately
 ActivationPolicy.always()
 
-// Opt in to non-recoverable effects (deadlock, thread leak)
+// Opt in to destructive effects (deadlock, thread leak)
 ActivationPolicy.withDestructiveEffects()
 
 // Start paused; fire only after handle.start()
@@ -488,7 +488,7 @@ All guards compose as AND: a scenario fires only if every configured guard passe
 
 ### Destructive Effects Safeguard
 
-`DeadlockEffect` and `ThreadLeakEffect` create JVM state that cannot be recovered within a running process — deadlocked threads cannot be interrupted; leaked non-daemon threads prevent JVM exit until the process is killed.
+`DeadlockEffect` and `ThreadLeakEffect` hold deadlocked or leaked threads, with their locks and memory, until the scenario is stopped or closed, which interrupts and ends them; leaked non-daemon threads keep the JVM from exiting until then.
 
 `CompatibilityValidator` rejects any scenario using these effects unless `allowDestructiveEffects == true`. The rejection is a `ChaosValidationException` thrown at registration time, not at effect application time. This is an opt-in correctness guard, not a security boundary — the calling code is trusted.
 

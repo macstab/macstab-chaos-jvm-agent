@@ -78,8 +78,8 @@ public enum OperationType {
   THREAD_START,
 
   /**
-   * Fires before a virtual thread (Project Loom) is started. Requires JDK 21+ at runtime; the agent
-   * probes availability at startup and rejects activation on older runtimes.
+   * Fires before a virtual thread (Project Loom) is started. The agent runs on JDK 21 and later,
+   * which all have virtual threads.
    *
    * <p>Use with {@link ChaosSelector.ThreadSelector} filtered to {@link
    * ChaosSelector.ThreadKind#VIRTUAL}.
@@ -214,8 +214,9 @@ public enum OperationType {
 
   /**
    * Fires before a class bytecode is defined via {@link ClassLoader#defineClass}. Chaos here can
-   * delay or suppress dynamic class definition, affecting bytecode instrumentation agents,
-   * ASM/ByteBuddy-generated classes, and Groovy/Kotlin dynamic dispatch.
+   * delay dynamic class definition or reject it with a {@link ClassFormatError}, affecting bytecode
+   * instrumentation agents, ASM/ByteBuddy-generated classes, and Groovy/Kotlin dynamic dispatch. A
+   * suppress is refused at activation: a definition cannot be skipped.
    */
   CLASS_DEFINE,
 
@@ -281,9 +282,12 @@ public enum OperationType {
   // ── Monitor and parking ─────────────────────────────────────────────────────
 
   /**
-   * Fires before a thread acquires a {@code synchronized} monitor or calls {@link Object#wait()}.
-   * Chaos here can inject latency before lock acquisition to simulate lock contention and convoy
-   * effects. A reject is refused at activation: entering a monitor never fails.
+   * Fires before a thread acquires an {@link java.util.concurrent.locks.AbstractQueuedSynchronizer}
+   * in exclusive mode ({@code AbstractQueuedSynchronizer.acquire(int)}, the path of {@link
+   * java.util.concurrent.locks.ReentrantLock#lock()} and the other {@code java.util.concurrent}
+   * locks). A {@code synchronized} block and {@link Object#wait()} are not hooked. Chaos here can
+   * inject latency before lock acquisition to simulate lock contention and convoy effects. A reject
+   * is refused at activation: entering a lock never fails.
    *
    * <p>Used exclusively with {@link ChaosSelector.MonitorSelector}.
    */
@@ -292,7 +296,7 @@ public enum OperationType {
   /**
    * Fires before a thread parks itself via {@link java.util.concurrent.locks.LockSupport#park}.
    * Chaos here can delay or gate the park to expose threading bugs in lock-based data structures. A
-   * reject is refused at activation: a park never fails.
+   * reject and a suppress are refused at activation: a park never fails.
    *
    * <p>Used exclusively with {@link ChaosSelector.MonitorSelector}.
    */
@@ -399,9 +403,9 @@ public enum OperationType {
   DATE_NEW,
 
   /**
-   * Fires when {@link System#gc()} or {@link Runtime#gc()} is called. Chaos here can suppress
-   * explicit GC requests or inject delays, testing code that relies on GC hints for memory
-   * management. A reject is refused at activation: a GC request never fails.
+   * Fires when {@link System#gc()} is called; {@link Runtime#gc()} called directly is not hooked.
+   * Chaos here can suppress explicit GC requests or inject delays, testing code that relies on GC
+   * hints for memory management. A reject is refused at activation: a GC request never fails.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
@@ -426,8 +430,10 @@ public enum OperationType {
   REFLECTION_INVOKE,
 
   /**
-   * Fires when {@link java.nio.ByteBuffer#allocateDirect} is called. Chaos here can delay or
-   * suppress native direct memory allocation, testing OOM handling in NIO and Netty-based stacks.
+   * Fires when {@link java.nio.ByteBuffer#allocateDirect} is called. Chaos here can delay native
+   * direct memory allocation or reject it with an {@link OutOfMemoryError}, testing OOM handling in
+   * NIO and Netty-based stacks. A suppress is refused at activation: an allocation cannot be
+   * skipped.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
@@ -479,7 +485,8 @@ public enum OperationType {
 
   /**
    * Fires before {@link java.nio.channels.ServerSocketChannel#accept} is called. Chaos here can add
-   * latency or suppress the accept to simulate a saturated server.
+   * latency, or fail the accept with a reject or an errno, to simulate a saturated server. A
+   * suppress is refused at activation.
    *
    * <p>Use with {@link ChaosSelector.NioSelector}.
    */
@@ -505,7 +512,8 @@ public enum OperationType {
 
   /**
    * Fires before a socket read operation. Chaos here can inject latency to simulate network
-   * congestion, or inject EOF to simulate unexpected connection closure.
+   * congestion, fail the read (a reject, an errno, a {@code timeout()} on a socket with {@code
+   * SO_TIMEOUT}), or shape the bytes it returns ({@code trickle}, {@code corruptRead}).
    *
    * <p>Use with {@link ChaosSelector.NetworkSelector}.
    */
@@ -979,8 +987,10 @@ public enum OperationType {
   NETTY_CHANNEL_WRITE,
 
   /**
-   * Fires before Netty reads from a channel: the NIO, epoll and kqueue stream-channel read loops. A
-   * reject throws {@link java.io.IOException}.
+   * Fires before Netty reads from a channel: the NIO, epoll and kqueue stream-channel read loops.
+   * Chaos here can delay or gate the read. A reject is refused at activation: the read loop runs
+   * outside the pipeline's exception handling; reject {@link #NETTY_CHANNEL_WRITE} instead, which
+   * fails through the pipeline.
    *
    * <p>Use with {@link ChaosSelector.NettySelector}.
    */

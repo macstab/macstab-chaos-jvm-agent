@@ -10,9 +10,9 @@ import org.jspecify.annotations.Nullable;
  * An ordered, named collection of chaos scenarios that activate as a unit.
  *
  * <p>Plans are the primary configuration vehicle for agent-startup scenarios: they are loaded from
- * YAML or JSON files referenced via {@code -javaagent} arguments or environment variables. All
- * scenarios in a plan activate atomically; activating a plan returns a single {@link
- * ChaosActivationHandle} that controls all constituent scenarios.
+ * JSON (a file, inline or Base64) named by {@code -javaagent} arguments, system properties or
+ * environment variables. All scenarios in a plan activate atomically; activating a plan returns a
+ * single {@link ChaosActivationHandle} that controls all constituent scenarios.
  *
  * <p>Plans can also be activated programmatically:
  *

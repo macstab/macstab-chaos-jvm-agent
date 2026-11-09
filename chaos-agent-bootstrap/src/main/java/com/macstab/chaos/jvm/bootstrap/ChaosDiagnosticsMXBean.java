@@ -6,12 +6,13 @@ package com.macstab.chaos.jvm.bootstrap;
  *
  * <p>This interface follows the JMX MXBean convention ({@code javax.management.MXBean}) and exposes
  * operations that operators can invoke from any JMX client (JConsole, JMC, the {@code jmxterm} CLI,
- * or management tooling) to retrieve a human-readable diagnostics snapshot without attaching a
- * debugger.
+ * or management tooling) to inspect the agent without attaching a debugger and, when enabled, to
+ * activate and stop plans.
  *
- * <p>The MBean is registered automatically by {@link ChaosAgentBootstrap#initialize} during agent
- * startup. If registration fails (e.g., because another MBean with the same name already exists),
- * the failure is logged to {@code System.err} and the agent continues without JMX support.
+ * <p>The MBean is registered automatically during agent startup ({@code premain} defers it until
+ * the application has initialised {@code java.util.logging}). If registration fails (e.g., because
+ * another MBean with the same name already exists), the failure is logged to {@code System.err} and
+ * the agent continues without JMX support.
  *
  * <p><b>Available operations:</b>
  *
@@ -21,6 +22,16 @@ package com.macstab.chaos.jvm.bootstrap;
  *   <tr><td>{@link #debugDump()}</td><td>{@code String}</td>
  *       <td>Returns a multi-line human-readable snapshot of the runtime details, all registered
  *           chaos scenarios with their state and counts, and the recent activation failures.</td></tr>
+ *   <tr><td>{@link #listScenarios()}</td><td>{@code String[]}</td>
+ *       <td>One line per registered scenario.</td></tr>
+ *   <tr><td>{@link #isControlEnabled()} (attribute {@code ControlEnabled})</td>
+ *       <td>{@code boolean}</td><td>Whether the control operations below are allowed.</td></tr>
+ *   <tr><td>{@link #activatePlan(String)}</td><td>{@code String}</td>
+ *       <td>Activates a plan given as JSON; control operation.</td></tr>
+ *   <tr><td>{@link #stopScenario(String)}</td><td>{@code boolean}</td>
+ *       <td>Stops a plan activated through {@code activatePlan}; control operation.</td></tr>
+ *   <tr><td>{@link #stopAll()}</td><td>{@code int}</td>
+ *       <td>Stops every plan activated through {@code activatePlan}; control operation.</td></tr>
  * </table>
  */
 public interface ChaosDiagnosticsMXBean {

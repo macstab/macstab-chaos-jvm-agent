@@ -17,7 +17,7 @@ import org.jspecify.annotations.Nullable;
  *   <li>{@link #manual()} — effect fires on every match, but only after {@link
  *       ChaosActivationHandle#start()} is called
  *   <li>{@link #withDestructiveEffects()} — same as {@link #always()} but with explicit opt-in for
- *       non-recoverable effects ({@code deadlock()}, {@code threadLeak()})
+ *       destructive effects ({@code deadlock()}, {@code threadLeak()})
  * </ul>
  *
  * <p>Fine-grained control via the builder (prefer it to the positional constructors, whose argument
@@ -34,12 +34,12 @@ import org.jspecify.annotations.Nullable;
  *
  * <p><strong>Destructive effects</strong>: {@link
  * com.macstab.chaos.jvm.api.ChaosEffect.DeadlockEffect} and {@link
- * com.macstab.chaos.jvm.api.ChaosEffect.ThreadLeakEffect} create non-recoverable JVM state —
- * deadlocked or permanently-parked threads that cannot be interrupted or terminated within the
- * running JVM process. Activation of these effects requires {@code allowDestructiveEffects(true)}
- * in the policy; any attempt without it throws {@link ChaosActivationException} at registration
- * time, not at effect application time. Use only in short-lived test processes or controlled
- * environments where JVM restart is acceptable.
+ * com.macstab.chaos.jvm.api.ChaosEffect.ThreadLeakEffect} hold deadlocked or parked threads, with
+ * their locks and memory, until the scenario is stopped (stopping or closing it interrupts and ends
+ * them); leaked non-daemon threads also keep the JVM from exiting until then. Activation of these
+ * effects requires {@code allowDestructiveEffects(true)} in the policy; any attempt without it
+ * throws {@link ChaosValidationException} at registration time, not at effect application time. Use
+ * them in test processes or controlled environments.
  *
  * @param startMode when the scenario begins accepting matches
  * @param probability fraction of matches that result in effect application; in {@code (0.0, 1.0]}
@@ -51,7 +51,8 @@ import org.jspecify.annotations.Nullable;
  *     random seed from {@link java.util.concurrent.ThreadLocalRandom} on first activation —
  *     sampling is non-deterministic across JVM restarts; set an explicit value for reproducible
  *     sequences
- * @param allowDestructiveEffects whether non-recoverable effects may be activated
+ * @param allowDestructiveEffects whether destructive effects (deadlocks, thread leaks) may be
+ *     activated
  * @param activeFrom wall-clock instant before which the scenario does not fire; {@code null} means
  *     no lower bound. Read from the real system clock, so a clock skew the agent injects cannot
  *     move it
@@ -145,7 +146,8 @@ public record ActivationPolicy(
    * @param activeFor how long the scenario stays active; {@code null} for no bound
    * @param rateLimit rate cap; {@code null} for none
    * @param randomSeed PRNG seed; {@code null} for a random one
-   * @param allowDestructiveEffects whether non-recoverable effects may be activated
+   * @param allowDestructiveEffects whether destructive effects (deadlocks, thread leaks) may be
+   *     activated
    * @param activeFrom wall-clock start; {@code null} for none
    * @param activeUntil wall-clock end; {@code null} for none
    */
@@ -185,7 +187,8 @@ public record ActivationPolicy(
    * @param activeFor time window from start; {@code null} means none
    * @param rateLimit fixed-window rate cap; {@code null} means unlimited
    * @param randomSeed fixed PRNG seed; {@code null} draws a random seed
-   * @param allowDestructiveEffects whether non-recoverable effects may be activated
+   * @param allowDestructiveEffects whether destructive effects (deadlocks, thread leaks) may be
+   *     activated
    */
   public ActivationPolicy(
       final StartMode startMode,
@@ -230,7 +233,8 @@ public record ActivationPolicy(
    * @param randomSeed fixed PRNG seed for reproducible probability sampling; {@code null} draws a
    *     random seed from {@link java.util.concurrent.ThreadLocalRandom} — non-deterministic across
    *     JVM restarts
-   * @param allowDestructiveEffects whether non-recoverable effects may be activated
+   * @param allowDestructiveEffects whether destructive effects (deadlocks, thread leaks) may be
+   *     activated
    * @param activeFrom wall-clock instant before which the scenario does not fire; may be {@code
    *     null}
    * @param activeUntil wall-clock instant from which on the scenario no longer fires; may be {@code
@@ -285,12 +289,12 @@ public record ActivationPolicy(
 
   /**
    * Returns a policy that fires on every match, starts immediately, and explicitly permits
-   * non-recoverable destructive effects ({@link
-   * com.macstab.chaos.jvm.api.ChaosEffect.DeadlockEffect}, {@link
+   * destructive effects ({@link com.macstab.chaos.jvm.api.ChaosEffect.DeadlockEffect}, {@link
    * com.macstab.chaos.jvm.api.ChaosEffect.ThreadLeakEffect}).
    *
-   * <p><strong>Warning</strong>: activating a destructive effect creates JVM state that cannot be
-   * recovered without process restart. Use only in short-lived test processes.
+   * <p><strong>Warning</strong>: a destructive effect holds deadlocked or leaked threads, with
+   * their locks and memory, until the scenario is stopped or closed; leaked non-daemon threads also
+   * keep the JVM from exiting until then. Use it in test processes.
    *
    * @return an always-fire activation policy that permits destructive effects
    */
@@ -460,8 +464,8 @@ public record ActivationPolicy(
     }
 
     /**
-     * Permits non-recoverable effects ({@link ChaosEffect.DeadlockEffect}, {@link
-     * ChaosEffect.ThreadLeakEffect}).
+     * Permits destructive effects ({@link ChaosEffect.DeadlockEffect}, {@link
+     * ChaosEffect.ThreadLeakEffect}), which hold their threads until the scenario is stopped.
      *
      * @param value {@code true} to permit them
      * @return this builder
@@ -553,7 +557,7 @@ public record ActivationPolicy(
     AUTOMATIC,
 
     /**
-     * The scenario starts in {@link ChaosDiagnostics.ScenarioState#INACTIVE INACTIVE} state. No
+     * The scenario stays in {@link ChaosDiagnostics.ScenarioState#REGISTERED REGISTERED} state. No
      * effect fires until {@link ChaosActivationHandle#start()} is called explicitly.
      */
     MANUAL,

@@ -13,9 +13,9 @@ import org.jspecify.annotations.Nullable;
 /**
  * Simulates a classloader leak by generating and loading synthetic classes into the JVM Metaspace.
  *
- * <p>Each synthetic class is a subclass of {@link Object} with {@code fieldsPerClass} static {@code
- * byte[]} fields. ByteBuddy is used to generate valid class bytecode without external tooling or
- * hand-rolled class file writing.
+ * <p>Each synthetic class is a subclass of {@link Object} with {@code fieldsPerClass} public
+ * instance {@code byte[]} fields. ByteBuddy is used to generate valid class bytecode without
+ * external tooling or hand-rolled class file writing.
  *
  * <p>When {@link ChaosEffect.MetaspacePressureEffect#retain()} is {@code true}, strong references
  * to the generated {@link Class} objects are kept in this stressor. This mirrors the realistic

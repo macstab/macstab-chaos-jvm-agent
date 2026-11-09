@@ -10,8 +10,9 @@ import org.jspecify.annotations.Nullable;
  * Each is the JVM counterpart of a rule of the native chaos libraries.
  *
  * <p>Every preset returns a prefilled {@link ChaosScenario.Builder} — id, description, selector,
- * effect, and the tag {@code preset=<name>} — so the scope, the activation policy and the id stay
- * the caller's:
+ * effect, and the tag {@code preset=<name>} — so the scope, the activation policy, the precedence
+ * and further tags stay the caller's. The id is the preset's (the builder cannot change it): to run
+ * a preset twice, stop the first activation or activate the second in another scope:
  *
  * <pre>{@code
  * chaos.activate(

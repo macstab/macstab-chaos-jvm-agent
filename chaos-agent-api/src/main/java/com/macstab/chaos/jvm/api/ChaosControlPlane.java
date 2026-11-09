@@ -31,14 +31,22 @@ public interface ChaosControlPlane extends AutoCloseable {
    * instantly. Manual-start scenarios require a subsequent {@link ChaosActivationHandle#start()}
    * call.
    *
+   * <p>The exceptions have no common root besides {@link RuntimeException}: catch the ones below,
+   * or {@link RuntimeException}. Every failure is recorded once in the diagnostics and published as
+   * a {@code FAILED} event before it is thrown.
+   *
    * @param scenario the scenario to activate; must have {@link ChaosScenario.ScenarioScope#JVM}
    *     scope
    * @return a handle for lifecycle control; close it to stop the scenario
    * @throws ChaosValidationException if the selector ↔ effect combination is invalid
    * @throws ChaosUnsupportedFeatureException if the scenario requires a JVM feature not available
    *     at runtime
-   * @throws ChaosActivationException if a scenario with the same ID is already active
+   * @throws ChaosActivationConflictException if a scenario with the same ID is still registered or
+   *     active (a {@link ChaosActivationException})
+   * @throws ChaosActivationException if the scenario is {@code SESSION}-scoped
    * @throws ChaosInstrumentationException if the instrumentation the scenario needs cannot be woven
+   *     (a {@link ChaosActivationException})
+   * @throws IllegalStateException if the control plane is closed
    */
   ChaosActivationHandle activate(ChaosScenario scenario);
 
@@ -46,12 +54,21 @@ public interface ChaosControlPlane extends AutoCloseable {
    * Activates all scenarios in a {@link ChaosPlan} at JVM scope.
    *
    * <p>All scenarios activate atomically: either all succeed or the plan activation fails. The
-   * returned handle controls all scenarios in the plan as a group.
+   * returned handle controls all scenarios in the plan as a group. Every scenario is validated and
+   * every hook the plan needs is woven before any scenario is registered.
+   *
+   * <p>The exceptions have no common root besides {@link RuntimeException}: catch the ones below,
+   * or {@link RuntimeException}. Every failure is recorded once in the diagnostics and published as
+   * a {@code FAILED} event before it is thrown.
    *
    * @param plan all scenarios must have {@link ChaosScenario.ScenarioScope#JVM} scope
    * @return a composite handle that stops all plan scenarios when closed
-   * @throws ChaosActivationException if any scenario in the plan is not JVM-scoped, or if any
-   *     scenario fails validation
+   * @throws ChaosValidationException if a scenario fails validation
+   * @throws ChaosUnsupportedFeatureException if a scenario requires more than the runtime provides
+   * @throws ChaosActivationConflictException if a scenario's ID is still registered or active
+   * @throws ChaosActivationException if a scenario in the plan is not JVM-scoped
+   * @throws ChaosInstrumentationException if the instrumentation the plan needs cannot be woven
+   * @throws IllegalStateException if the control plane is closed
    */
   ChaosActivationHandle activate(ChaosPlan plan);
 

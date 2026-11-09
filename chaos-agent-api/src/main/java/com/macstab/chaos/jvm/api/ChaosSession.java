@@ -69,6 +69,12 @@ public interface ChaosSession extends AutoCloseable {
    *     scenarios cannot be activated on a session
    * @return a handle for per-scenario lifecycle control
    * @throws ChaosActivationException if the scenario scope is not SESSION
+   * @throws ChaosValidationException if the scenario fails validation
+   * @throws ChaosUnsupportedFeatureException if the scenario requires more than the runtime
+   *     provides
+   * @throws ChaosActivationConflictException if a scenario with the same ID is still registered or
+   *     active in this session
+   * @throws ChaosInstrumentationException if the instrumentation the scenario needs cannot be woven
    */
   ChaosActivationHandle activate(ChaosScenario scenario);
 
@@ -78,6 +84,12 @@ public interface ChaosSession extends AutoCloseable {
    *
    * @param plan all scenarios must be SESSION-scoped
    * @return a composite handle controlling all scenarios in the plan
+   * @throws ChaosActivationException if a scenario in the plan is not SESSION-scoped
+   * @throws ChaosValidationException if a scenario fails validation
+   * @throws ChaosUnsupportedFeatureException if a scenario requires more than the runtime provides
+   * @throws ChaosActivationConflictException if a scenario's ID is still registered or active in
+   *     this session
+   * @throws ChaosInstrumentationException if the instrumentation the plan needs cannot be woven
    */
   ChaosActivationHandle activate(ChaosPlan plan);
 

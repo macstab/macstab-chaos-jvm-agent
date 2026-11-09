@@ -10,11 +10,13 @@ package com.macstab.chaos.jvm.api;
  * <ul>
  *   <li><b>Non-blocking</b> — listeners are invoked synchronously on the thread that triggers the
  *       chaos event. Any I/O, locking, or other blocking call inside {@code onEvent} adds latency
- *       to the instrumented JVM operation.
- *   <li><b>Exception-safe</b> — unchecked exceptions propagate to the triggering thread and may
- *       break application code. Never throw from {@code onEvent}.
- *   <li><b>Idempotent-safe</b> — the same event may be delivered to multiple listeners; each
- *       listener receives its own {@link ChaosEvent} reference (the object is shared, not copied).
+ *       to the instrumented JVM operation; wrap a slow listener with {@link #async} to run it on an
+ *       agent-owned thread.
+ *   <li><b>Exceptions are contained</b> — an exception thrown from {@code onEvent} is caught and
+ *       logged (at WARNING the first time, then at FINE); it never reaches the application thread,
+ *       and the other listeners still receive the event.
+ *   <li><b>Shared events</b> — every listener receives the same {@link ChaosEvent} instance (it is
+ *       immutable; nothing is copied per listener).
  * </ul>
  *
  * <p>Built-in listeners registered automatically:

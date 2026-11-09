@@ -37,11 +37,11 @@ import org.junit.jupiter.api.TestInstance;
  * and a real HikariCP {@link HikariDataSource}) exactly as ByteBuddy would when the agent is
  * attached with {@code -javaagent:}.
  *
- * <p>Self-attach via {@code ByteBuddyAgent.install()} / {@code ChaosPlatform.installLocally()} is
- * not used here because JDBC instrumentation is gated on {@code premainMode=true} in {@link
- * JdkInstrumentationInstaller}, which is only set when the agent is statically attached at JVM
- * startup. Exercising the same runtime + bridge code directly is the closest equivalent achievable
- * without forking a separate JVM with {@code -javaagent:}.
+ * <p>The advice is called directly rather than woven, so the test needs no agent attached: it
+ * exercises the runtime and bridge code the woven advice reaches, with a {@link
+ * JdkInstrumentationInstaller#buildMethodHandles()} table installed into {@link
+ * BootstrapDispatcher}. The woven JDBC hooks themselves (weaving the JDBC hook group on demand, as
+ * under {@code -javaagent:} or self-attach) are covered by the bootstrap module's child-JVM tests.
  */
 @DisplayName("JDBC integration — real H2 + HikariCP via ChaosBridge + BootstrapDispatcher")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)

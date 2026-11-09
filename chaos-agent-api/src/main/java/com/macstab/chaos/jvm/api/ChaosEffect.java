@@ -288,13 +288,16 @@ public sealed interface ChaosEffect
    * the entry of matched methods, before the method body executes. Only valid with {@link
    * ChaosSelector.MethodSelector} and {@link OperationType#METHOD_ENTER}.
    *
-   * <p>The exception is instantiated via reflection. Both checked exceptions and {@link Error}
-   * subclasses are supported — the runtime uses {@code Unsafe.throwException} to bypass the
-   * compiler's checked-exception enforcement.
+   * <p>The class must be in a {@code java.} or {@code javax.} package ({@link
+   * IllegalArgumentException} here) and is resolved at activation ({@link ChaosValidationException}
+   * for a class the agent cannot load or build); see {@link ExceptionInjectionEffect}. The
+   * exception is instantiated via reflection for each call. Both checked exceptions and {@link
+   * Error} subclasses are thrown as they are, by a sneaky throw that the compiler cannot check.
    *
-   * <p>With stack trace enabled (the default here), the exception carries a full stack trace. Use
-   * {@link ExceptionInjectionEffect#ExceptionInjectionEffect(String, String, boolean)} directly
-   * with {@code withStackTrace=false} to suppress it for lower-overhead fault injection.
+   * <p>With stack trace enabled (the default here), the exception carries a stack trace starting at
+   * the intercepted method. Use {@link ExceptionInjectionEffect#ExceptionInjectionEffect(String,
+   * String, boolean)} directly with {@code withStackTrace=false} to throw it with an empty stack
+   * trace (the constructor still fills it; it is cleared before the throw).
    *
    * @param exceptionClassName binary class name of the exception type (e.g., {@code
    *     "java.io.IOException"}); must be a valid binary class name
@@ -398,8 +401,8 @@ public sealed interface ChaosEffect
    * ChaosSelector.StressTarget#METASPACE}.
    *
    * @param generatedClassCount number of synthetic classes to generate; must be &gt; 0
-   * @param fieldsPerClass static fields per class (controls per-class metaspace footprint); must be
-   *     &gt;= 0
+   * @param fieldsPerClass instance fields per class (controls per-class metaspace footprint); must
+   *     be &gt;= 0
    * @return a MetaspacePressureEffect
    */
   static MetaspacePressureEffect metaspacePressure(
@@ -600,9 +603,11 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Returns a virtual-thread carrier pinning stressor that spawns {@code pinnedThreadCount}
-   * platform daemon threads, each of which sits inside a {@code synchronized} block in a loop
-   * sleeping for {@code pinDuration} per cycle.
+   * Returns a virtual-thread carrier pinning stressor that starts {@code pinnedThreadCount} virtual
+   * threads, each of which holds its carrier for {@code pinDuration} per cycle: on JDK 21–23 by
+   * sleeping inside a {@code synchronized} block (true pinning, no CPU), on JDK 24 and later, where
+   * {@code synchronized} no longer pins (JEP 491), by spin-waiting (one CPU per held carrier).
+   * Without {@code allowDestructiveEffects} it leaves one carrier free.
    *
    * <p>When a virtual thread is mounted on a carrier platform thread and that carrier enters a
    * {@code synchronized} block, the JVM (JDK 21) "pins" the virtual thread to its carrier: the
@@ -771,8 +776,13 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Rejects the matched operation by throwing an appropriate exception. The exception type is
-   * inferred from the OperationType by the runtime.
+   * Rejects the matched operation the way the real call fails: by throwing the exception that call
+   * throws, inferred from the OperationType by the runtime ({@code FailureFactory}). Where the real
+   * call reports a failure by its result instead, the result says so: {@link
+   * OperationType#QUEUE_OFFER} returns {@code false}, {@link OperationType#ASYNC_COMPLETE} and
+   * {@link OperationType#ASYNC_COMPLETE_EXCEPTIONALLY} return {@code false} without completing the
+   * future, and {@link OperationType#RESOURCE_LOAD} finds no resource ({@code null}). Operations
+   * whose real call never fails refuse a reject at activation.
    *
    * @param message non-blank message carried by the thrown exception
    */
@@ -968,8 +978,11 @@ public sealed interface ChaosEffect
      */
     EROFS(Family.FILE, 30, 30, "Read-only file system"),
     /**
-     * Permission denied: {@link java.nio.file.AccessDeniedException} on an open, delete or move;
-     * also on a map and on a bind of a privileged port.
+     * Permission denied: {@link java.nio.file.AccessDeniedException} on a {@code java.nio} open,
+     * delete or move ({@link java.io.FileNotFoundException} on a {@code java.io} open); {@link
+     * java.io.IOException} on a map wider than the file's open mode; {@link java.net.BindException}
+     * on {@link OperationType#SOCKET_BIND} (a privileged port); on {@link
+     * OperationType#PROCESS_START}, {@code IOException: Cannot run program}.
      */
     EACCES(Family.FILE, 13, 13, "Permission denied"),
     /**
@@ -996,7 +1009,11 @@ public sealed interface ChaosEffect
      * thread}.
      */
     EAGAIN(Family.PROCESS, 11, 35, "Resource temporarily unavailable"),
-    /** Cannot allocate memory: on {@link OperationType#PROCESS_START}, as {@link #EAGAIN}. */
+    /**
+     * Cannot allocate memory: on {@link OperationType#PROCESS_START} and {@link
+     * OperationType#THREAD_START}, as {@link #EAGAIN}; on {@link OperationType#FILE_IO_MAP}, the
+     * JDK's {@code IOException: Map failed} with an {@code OutOfMemoryError} cause.
+     */
     ENOMEM(Family.PROCESS, 12, 12, "Cannot allocate memory");
 
     /** Which operations an error belongs to. */
@@ -1005,7 +1022,10 @@ public sealed interface ChaosEffect
       NETWORK,
       /** File operations; also process starts, which fail on the program file. */
       FILE,
-      /** Process starts only. */
+      /**
+       * Resource limits of the process: process and platform thread starts ({@link #EAGAIN}, {@link
+       * #ENOMEM}), and for {@link #ENOMEM} also file maps.
+       */
       PROCESS
     }
 
@@ -1300,7 +1320,9 @@ public sealed interface ChaosEffect
    * metaspace exhaustion.
    *
    * <p>When retain is true, strong references to the generated classes are kept to prevent
-   * unloading during GC — the realistic scenario for a classloader leak.
+   * unloading during GC — the realistic scenario for a classloader leak. When retain is false the
+   * classes and their loader are dropped right after loading: a transient spike that the next
+   * collection that unloads classes reclaims.
    *
    * @param generatedClassCount number of synthetic classes to generate; must be {@code > 0}
    * @param fieldsPerClass fields synthesised per generated class; must be {@code >= 0}
@@ -1589,8 +1611,8 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Creates high contention on a shared monitor by spawning threads that repeatedly acquire and
-   * hold a single lock, simulating lock convoy conditions.
+   * Creates high contention on one shared {@link java.util.concurrent.locks.ReentrantLock} by
+   * spawning threads that repeatedly acquire and hold it, simulating lock convoy conditions.
    *
    * <p>When unfair is true the underlying lock does not guarantee FIFO ordering, increasing the
    * likelihood of thread starvation — the more destructive and realistic scenario.

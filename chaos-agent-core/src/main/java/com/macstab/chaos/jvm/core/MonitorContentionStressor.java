@@ -9,7 +9,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
 /**
- * Creates high contention on a shared monitor by spawning threads that compete for a single {@link
+ * Creates high contention on a shared lock by spawning threads that compete for a single {@link
  * ReentrantLock}.
  *
  * <p>Each contending thread repeatedly acquires the lock, holds it for {@link
@@ -80,9 +80,9 @@ final class MonitorContentionStressor implements ManagedStressor {
                   try {
                     final long holdStart = System.nanoTime();
                     while (System.nanoTime() - holdStart < holdNanos && !stopped.get()) {
-                      // Thread.sleep(0, nanos) holds the lock (unlike wait()) and is not
-                      // instrumented by the chaos agent (LockSupport.park* is), preventing
-                      // a chaos delay scenario from recursively targeting this stressor.
+                      // Thread.sleep(0, nanos) holds the lock (unlike wait()). The stressor's
+                      // threads run with the dispatch depth raised (L3), so no THREAD_SLEEP,
+                      // THREAD_PARK or MONITOR_ENTER scenario applies to them.
                       try {
                         Thread.sleep(0, 10_000 /* 10 µs */);
                       } catch (final InterruptedException ie) {
