@@ -16,10 +16,11 @@ import org.jspecify.annotations.Nullable;
  * ({@code java.util.logging.manager}, as WildFly and Quarkus set it).
  *
  * <p>While lines are held ({@link #hold()}, from {@code premain} until the application has
- * initialised JUL), each line is kept in a buffer of {@value #HELD_LINES} lines, the oldest dropped
- * first, and written on {@link #release()} with its original time, or by {@link
- * #releaseToStandardError()} when the JVM exits before that. Otherwise a line goes to the JUL
- * logger of its name, looked up when the first line is written.
+ * initialised JUL), each line at {@code INFO} or above is kept in a buffer of {@value #HELD_LINES}
+ * lines, the oldest dropped first (a line below {@code INFO} is dropped unbuilt), and written on
+ * {@link #release()} with its original time, or by {@link #releaseToStandardError()} when the JVM
+ * exits before that. Otherwise a line goes to the JUL logger of its name, looked up when the first
+ * line is written.
  *
  * <p>Thread-safe. Agent-internal; not an API.
  */
@@ -62,14 +63,19 @@ public final class AgentLog {
   }
 
   /**
-   * Whether a line at {@code level} is written. While lines are held every line is kept, so it is
-   * {@code true} then.
+   * Whether a line at {@code level} is written. While lines are held, a line at {@code INFO} or
+   * above is kept and a lower one dropped, so it is answered by the level alone then.
    *
    * @param level the level
    * @return whether a line at that level is written or held
    */
   public boolean isLoggable(final Level level) {
-    return holding || logger().isLoggable(level);
+    return holding ? keptWhileHeld(level) : logger().isLoggable(level);
+  }
+
+  /** Whether a line at {@code level} is held while lines are held: {@code INFO} and above. */
+  private static boolean keptWhileHeld(final Level level) {
+    return level.intValue() >= Level.INFO.intValue();
   }
 
   /**
@@ -109,8 +115,12 @@ public final class AgentLog {
    */
   public void log(
       final Level level, final @Nullable Throwable thrown, final Supplier<String> message) {
-    if (holding && held(level, thrown, message)) {
-      return;
+    if (holding) {
+      // Below INFO, a held line is dropped unbuilt: per-call FINE lines (APPLIED, RELEASED) would
+      // push the start's WARNINGs out of the buffer, and JUL's default level drops them anyway.
+      if (!keptWhileHeld(level) || held(level, thrown, message)) {
+        return;
+      }
     }
     logger().log(level, thrown, message);
   }
@@ -147,8 +157,8 @@ public final class AgentLog {
   }
 
   /**
-   * Holds every line from now on until {@link #release()}: {@code premain} calls it first, before
-   * any agent class could log. Holding twice keeps the lines already held.
+   * Holds every line at {@code INFO} or above from now on until {@link #release()}: {@code premain}
+   * calls it first, before any agent class could log. Holding twice keeps the lines already held.
    */
   public static void hold() {
     synchronized (LOCK) {

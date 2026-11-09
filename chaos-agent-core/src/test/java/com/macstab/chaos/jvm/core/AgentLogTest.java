@@ -69,19 +69,44 @@ class AgentLogTest {
     final IllegalStateException failure = new IllegalStateException("boom");
 
     AgentLog.hold();
-    log.fine(() -> "first");
+    log.log(Level.INFO, () -> "first");
     log.log(Level.WARNING, failure, () -> "second");
-    assertThat(log.isLoggable(Level.FINEST)).as("every line is held").isTrue();
     assertThat(written).as("nothing reaches the logger while held").isEmpty();
 
     AgentLog.release();
 
     assertThat(written).extracting(LogRecord::getMessage).containsExactly("first", "second");
-    assertThat(written.get(0).getLevel()).isEqualTo(Level.FINE);
+    assertThat(written.get(0).getLevel()).isEqualTo(Level.INFO);
     assertThat(written.get(1).getThrown()).isSameAs(failure);
     assertThat(written.get(1).getLoggerName()).isEqualTo(NAME);
     assertThat(written.get(1).getSourceClassName()).isEqualTo(NAME);
     assertThat(AgentLog.holding()).isFalse();
+  }
+
+  @Test
+  @DisplayName(
+      "while held, a line below INFO is neither held nor built, so it never pushes out a WARNING")
+  void belowInfoIsNotHeld() {
+    final AgentLog log = AgentLog.named(NAME);
+    final java.util.concurrent.atomic.AtomicInteger built =
+        new java.util.concurrent.atomic.AtomicInteger();
+
+    AgentLog.hold();
+    log.warning(() -> "important");
+    for (int i = 0; i < AgentLog.HELD_LINES + 44; i++) {
+      log.fine(
+          () -> {
+            built.incrementAndGet();
+            return "noise";
+          });
+    }
+    assertThat(log.isLoggable(Level.FINE)).as("FINE while held").isFalse();
+    assertThat(log.isLoggable(Level.INFO)).as("INFO while held").isTrue();
+
+    AgentLog.release();
+
+    assertThat(written).extracting(LogRecord::getMessage).containsExactly("important");
+    assertThat(built).as("no FINE line was formatted").hasValue(0);
   }
 
   @Test
@@ -139,7 +164,7 @@ class AgentLogTest {
     final AgentLog log = AgentLog.named(NAME);
 
     AgentLog.hold();
-    log.fine(() -> "kept");
+    log.warning(() -> "kept");
     AgentLog.hold();
     AgentLog.release();
     AgentLog.release();
