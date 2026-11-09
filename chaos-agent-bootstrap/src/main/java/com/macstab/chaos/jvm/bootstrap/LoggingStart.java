@@ -26,7 +26,8 @@ final class LoggingStart {
   /**
    * Starts a daemon thread that runs {@code deferred} once {@code initialised} answers {@code true}
    * or {@code limit} has passed, with the dispatch depth raised: its work is the agent's own, never
-   * a target.
+   * a target. The start runs with the depth raised too, so a {@code THREAD_START} scenario of a
+   * startup plan never fails {@code premain} (L3).
    *
    * @param initialised whether the application has initialised JUL
    * @param limit how long to wait at most
@@ -56,7 +57,12 @@ final class LoggingStart {
             },
             "macstab-chaos-logging-start");
     waiter.setDaemon(true);
-    waiter.start();
+    BootstrapDispatcher.beginInternalCall();
+    try {
+      waiter.start();
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
     return waiter;
   }
 

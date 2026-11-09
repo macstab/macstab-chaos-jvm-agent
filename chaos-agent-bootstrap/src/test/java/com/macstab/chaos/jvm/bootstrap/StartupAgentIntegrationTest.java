@@ -141,6 +141,41 @@ class StartupAgentIntegrationTest {
       final String output = runProbe(plan, "thread").output();
       assertThat(output).contains("thread=rejected");
     }
+
+    @Test
+    @DisplayName("a reject without a name filter leaves premain's own thread start alone")
+    void unfilteredRejectReachesMain() throws Exception {
+      final String output = runProbe(threadStartReject(NamePattern.any()), "thread").output();
+
+      assertThat(output).contains("thread=rejected");
+    }
+
+    @Test
+    @DisplayName("a reject on the agent's macstab- thread names leaves premain alone")
+    void agentNamePrefixRejectReachesMain() throws Exception {
+      final String output =
+          runProbe(threadStartReject(NamePattern.prefix("macstab-")), "thread").output();
+
+      assertThat(output).contains("thread=started");
+    }
+
+    private ChaosPlan threadStartReject(final NamePattern threadName) {
+      return new ChaosPlan(
+          new ChaosPlan.Metadata("startup-thread-any", ""),
+          null,
+          List.of(
+              ChaosScenario.builder("thread-reject-any")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(
+                      new ChaosSelector.ThreadSelector(
+                          Set.of(OperationType.THREAD_START),
+                          ChaosSelector.ThreadKind.ANY,
+                          threadName,
+                          null))
+                  .effect(ChaosEffect.reject("chaos-thread-rejection"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build()));
+    }
   }
 
   @Nested
