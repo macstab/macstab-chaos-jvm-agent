@@ -399,6 +399,26 @@ class ChaosManagementTest {
   }
 
   @Test
+  @DisplayName("a plan that finished on its own is pruned at the next activation of any name")
+  void finishedPlansArePruned() {
+    final java.util.concurrent.atomic.AtomicInteger closed =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final java.util.Iterator<com.macstab.chaos.jvm.api.ChaosActivationHandle> plans =
+        java.util.List.of(
+                handle("plan:expired", closed, ChaosDiagnostics.ScenarioState.INACTIVE),
+                handle("plan:live", closed))
+            .iterator();
+    final ChaosManagement pruning = new ChaosManagement(scriptedControlPlane(plans::next));
+    pruning.activate(PLAN);
+
+    assertThat(pruning.activate(PLAN.replace("\"mgmt\"", "\"live\"")).status())
+        .isEqualTo("activated");
+
+    assertThat(closed).as("the expired plan is closed and forgotten").hasValue(1);
+    assertThat(pruning.stop("plan:expired").status()).isEqualTo("not-found");
+  }
+
+  @Test
   @DisplayName("a null plan is invalid; a rejection is 422 and an unmanaged stop 409 over HTTP")
   void nullPlanAndHttpStatuses() {
     assertThat(management.activate(null).status()).isEqualTo("invalid");

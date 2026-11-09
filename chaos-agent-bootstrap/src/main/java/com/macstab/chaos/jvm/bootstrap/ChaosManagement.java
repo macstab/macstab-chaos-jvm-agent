@@ -114,6 +114,7 @@ public final class ChaosManagement implements AutoCloseable {
     }
     // The name is claimed before activating, so a plan refused for its name never injects a fault.
     final String id = PLAN_PREFIX + plan.metadata().name();
+    pruneFinished(id);
     if (!activating.add(id)) {
       return new ActivationResponse("conflict", null, inProgress(id));
     }
@@ -170,6 +171,32 @@ public final class ChaosManagement implements AutoCloseable {
               : "plan rejected: stopped by a concurrent stop-all");
     }
     return new ActivationResponse("activated", handle.id(), null);
+  }
+
+  /**
+   * Forgets the plans that finished on their own (spent or expired) and closes them, so uniquely
+   * named, expiring plans do not pile up; as the MBean does. The plan named {@code activating} is
+   * left to the activation, which replaces it; a handle removed meanwhile by a stop or a
+   * replacement is left to whoever removed it.
+   *
+   * @param activating the handle id of the plan being activated
+   */
+  private void pruneFinished(final String activating) {
+    for (final Map.Entry<String, ChaosActivationHandle> entry : List.copyOf(handles.entrySet())) {
+      final ChaosActivationHandle handle = entry.getValue();
+      if (!entry.getKey().equals(activating)
+          && finished(handle)
+          && handles.remove(entry.getKey(), handle)) {
+        try {
+          handle.close();
+        } catch (final RuntimeException failure) {
+          LOGGER.log(
+              Level.WARNING,
+              failure,
+              () -> "[chaos-agent] could not close the finished plan " + entry.getKey());
+        }
+      }
+    }
   }
 
   /** A plan that has finished (stopped, or expired) no longer holds its name. */
