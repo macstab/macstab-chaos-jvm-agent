@@ -1590,7 +1590,7 @@ public final class DefectProbeMain {
       "com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool",
       "io.grpc.internal.ManagedChannelImpl$ChannelStreamProvider",
       "io.lettuce.core.RedisChannelHandler",
-      "io.netty.channel.AbstractChannel$AbstractUnsafe",
+      "io.netty.channel.nio.AbstractNioByteChannel",
       "io.netty.channel.nio.AbstractNioByteChannel$NioByteUnsafe",
       "io.netty.channel.epoll.AbstractEpollStreamChannel$EpollStreamUnsafe",
       "io.netty.channel.kqueue.AbstractKQueueStreamChannel$KQueueStreamUnsafe",

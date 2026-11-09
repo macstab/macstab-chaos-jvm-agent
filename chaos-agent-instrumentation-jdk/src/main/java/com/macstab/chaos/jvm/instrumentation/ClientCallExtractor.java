@@ -338,6 +338,21 @@ public final class ClientCallExtractor {
     }
   }
 
+  /**
+   * Returns the peer of a Netty channel ({@code Channel.remoteAddress()}, through the cached
+   * accessor).
+   *
+   * @param channel the channel
+   * @return the peer, or {@code null} when it is unconnected or cannot be read
+   */
+  public static @Nullable Object nettyChannelRemoteAddress(final Object channel) {
+    try {
+      return invoke(channel, "remoteAddress");
+    } catch (final Throwable unreadable) {
+      return null;
+    }
+  }
+
   private static @Nullable String stringOf(final Object target, final String accessor) {
     if (target == null) {
       return null;

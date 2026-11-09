@@ -132,16 +132,35 @@ final class ClientLibraryHooks {
                                             + ".ClientExecutionParams"))))));
   }
 
-  /** Netty channel flush (every transport) and stream-channel reads (NIO, epoll, kqueue). */
+  /**
+   * Netty channel writes (every transport) and stream-channel reads (NIO, epoll, kqueue). The write
+   * hook is {@code doWrite(ChannelOutboundBuffer)} on every {@code AbstractChannel} subtype that
+   * declares it, abstract or not (4.2: {@code AbstractNioByteChannel}, {@code
+   * AbstractNioMessageChannel}, {@code NioSocketChannel}, {@code LocalChannel}, ...; {@code
+   * NioDatagramChannel} inherits it): no override calls {@code super.doWrite}, so a write is
+   * evaluated once. The {@code io.netty.} prefix keeps the superclass walk off every other class.
+   */
   static AgentBuilder applyNettyTransformations(final AgentBuilder builder) {
     return builder
-        .type(ElementMatchers.named("io.netty.channel.AbstractChannel$AbstractUnsafe"))
+        .type(
+            ElementMatchers.nameStartsWith("io.netty.")
+                .and(
+                    ElementMatchers.hasSuperClass(
+                        ElementMatchers.named("io.netty.channel.AbstractChannel"))))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     advise(
-                        ClientCallAdvice.NettyFlush.class,
-                        ElementMatchers.named("flush0").and(ElementMatchers.takesArguments(0)))))
+                        ClientCallAdvice.NettyWrite.class,
+                        ElementMatchers.named("doWrite")
+                            .and(
+                                ElementMatchers.takesArguments(1)
+                                    .and(
+                                        ElementMatchers.takesArgument(
+                                            0,
+                                            ElementMatchers.named(
+                                                "io.netty.channel.ChannelOutboundBuffer"))))
+                            .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
         .type(ElementMatchers.named("io.netty.channel.nio.AbstractNioByteChannel$NioByteUnsafe"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->

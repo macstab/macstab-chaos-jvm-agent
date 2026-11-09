@@ -951,9 +951,12 @@ public enum OperationType {
   AWS_SDK_CALL,
 
   /**
-   * Fires before Netty flushes a channel's outbound buffer ({@code
-   * AbstractChannel.AbstractUnsafe.flush0()}), for every transport including the native epoll and
-   * kqueue ones that bypass {@code java.nio}. A reject throws {@link java.io.IOException}.
+   * Fires before Netty writes a channel's flushed outbound buffer ({@code
+   * doWrite(ChannelOutboundBuffer)} of the channel), for every transport including the native epoll
+   * and kqueue ones that bypass {@code java.nio}; an empty flush writes nothing and is not
+   * evaluated, and a buffer the socket takes in several rounds is evaluated once per round. A
+   * reject fails the flushed writes' futures with an {@link java.io.IOException} and closes the
+   * channel, as a real write error does. A delay sleeps the channel's event loop.
    *
    * <p>Use with {@link ChaosSelector.NettySelector}.
    */

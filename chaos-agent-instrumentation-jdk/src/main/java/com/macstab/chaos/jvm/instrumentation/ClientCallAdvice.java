@@ -218,19 +218,25 @@ final class ClientCallAdvice {
     }
   }
 
-  /** Netty {@code AbstractChannel.AbstractUnsafe.flush0()}, every transport. */
-  static final class NettyFlush {
+  /**
+   * Netty {@code doWrite(ChannelOutboundBuffer)} of every channel type that declares it, every
+   * transport. {@code AbstractUnsafe.flush0()} calls it only for a non-empty flushed buffer and
+   * catches what it throws into {@code handleWriteError}: a reject fails the flushed writes'
+   * futures with the {@code IOException} and closes the channel, as a real write error does. A
+   * buffer the socket takes in several rounds ({@code OP_WRITE}) is evaluated once per round.
+   */
+  static final class NettyWrite {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object unsafe) throws Throwable {
+    static void enter(@Advice.This final Object channel) throws Throwable {
       final Object remote;
       BootstrapDispatcher.beginInternalCall();
       try {
-        remote = ClientCallExtractor.nettyRemoteAddress(unsafe);
+        remote = ClientCallExtractor.nettyChannelRemoteAddress(channel);
       } finally {
         BootstrapDispatcher.endInternalCall();
       }
       BootstrapDispatcher.beforeClientCall(
-          OperationTags.NETTY_CHANNEL_WRITE, unsafe, null, null, remote);
+          OperationTags.NETTY_CHANNEL_WRITE, channel, null, null, remote);
     }
   }
 

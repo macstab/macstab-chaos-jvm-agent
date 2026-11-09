@@ -1213,13 +1213,15 @@ The client libraries below are hooked by class name and never loaded by the agen
 | `redis`     | `RedisSelector`     | `REDIS_COMMAND`                                | `commandPattern` — upper-case command name (`GET`, `HSET`)                               | Jedis `Connection.sendCommand(CommandArguments)` (not the connection's own set-up — `HELLO`, `AUTH`, `CLIENT SETINFO`, `SELECT` in `initializeFromClientConfig` — nor a pool's validation `PING` / activation in `ConnectionFactory` / `JedisFactory`), Lettuce `RedisChannelHandler.dispatch(RedisCommand)` | `JedisConnectionException` / `RedisCommandTimeoutException`                                     |
 | `jdbc`      | `JdbcSelector`      | `R2DBC_STATEMENT_EXECUTE` (with the JDBC ops)  | `targetPattern` does not apply (R2DBC statements do not expose their SQL)                | `io.r2dbc.spi.Statement.execute()` in any driver; a proxy delegating to the driver is evaluated once    | `R2dbcTransientResourceException`, synchronously from `execute()`                               |
 | `awsSdk`    | `AwsSdkSelector`    | `AWS_SDK_CALL`                                 | `servicePattern` (`s3`, `dynamodb`: the request's package), `operationPattern` (`GetObject`) | AWS SDK v2 `BaseSyncClientHandler` / `BaseAsyncClientHandler.execute`, before signing and sending       | `SdkClientException`                                                                            |
-| `netty`     | `NettySelector`     | `NETTY_CHANNEL_WRITE`, `NETTY_CHANNEL_READ`    | `remoteCidr`, `remotePort` — the channel's peer                                          | Netty `AbstractChannel.AbstractUnsafe.flush0()` (every transport); NIO / epoll / kqueue stream reads   | `IOException` through the pipeline (writes only; a reject on reads is rejected at validation)   |
+| `netty`     | `NettySelector`     | `NETTY_CHANNEL_WRITE`, `NETTY_CHANNEL_READ`    | `remoteCidr`, `remotePort` — the channel's peer                                          | Netty `doWrite(ChannelOutboundBuffer)` of every channel type that declares it (every transport; not for an empty flush; once per write round); NIO / epoll / kqueue stream reads | writes: the flushed writes' futures fail with an `IOException` and the channel closes, as on a real write error; a reject on reads is rejected at validation |
 
 ```json
 { "type": "messaging", "operations": ["MESSAGE_SEND"], "destinationPattern": { "mode": "EXACT", "value": "orders" } }
 { "type": "rpc", "operations": ["RPC_CALL"], "methodPattern": { "mode": "PREFIX", "value": "payments.Ledger/" } }
 { "type": "awsSdk", "operations": ["AWS_SDK_CALL"], "servicePattern": { "mode": "EXACT", "value": "s3" } }
 ```
+
+A delay on a hook that runs on an event loop or a synchronization context (a Netty write, a gRPC call opening its stream) holds that thread: every other channel or call it serves waits too.
 
 ---
 

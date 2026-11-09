@@ -35,6 +35,7 @@ public final class ClientLibraryProbeMain {
       case "r2dbc-execute" -> r2dbcExecute();
       case "aws-list-buckets" -> awsListBuckets();
       case "netty-write" -> nettyWrite();
+      case "netty-write-reject" -> nettyWriteReject();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
     DefectProbeMain.printCounts();
@@ -384,6 +385,66 @@ public final class ClientLibraryProbeMain {
     } finally {
       group.shutdownGracefully(0, 1, java.util.concurrent.TimeUnit.SECONDS).sync();
     }
+  }
+
+  /**
+   * A rejected Netty write on a socket channel (after an empty flush, which writes nothing) and on
+   * a connected datagram channel, whose {@code doWrite} is inherited from {@code
+   * AbstractNioMessageChannel}: each write's future, and whether the channel closed.
+   */
+  private static void nettyWriteReject() throws Exception {
+    final io.netty.channel.EventLoopGroup group =
+        new io.netty.channel.MultiThreadIoEventLoopGroup(
+            1, io.netty.channel.nio.NioIoHandler.newFactory());
+    try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+        java.net.DatagramSocket peer =
+            new java.net.DatagramSocket(0, InetAddress.getByName("127.0.0.1"))) {
+      final io.netty.channel.Channel socket =
+          new io.netty.bootstrap.Bootstrap()
+              .group(group)
+              .channel(io.netty.channel.socket.nio.NioSocketChannel.class)
+              .handler(new io.netty.channel.ChannelInboundHandlerAdapter())
+              .connect("127.0.0.1", server.getLocalPort())
+              .sync()
+              .channel();
+      try (Socket accepted = server.accept()) {
+        socket.flush();
+        reportWrite(
+            "socket",
+            socket.writeAndFlush(io.netty.buffer.Unpooled.wrappedBuffer(new byte[] {1, 2, 3})),
+            socket);
+      }
+      final io.netty.channel.Channel datagram =
+          new io.netty.bootstrap.Bootstrap()
+              .group(group)
+              .channel(io.netty.channel.socket.nio.NioDatagramChannel.class)
+              .handler(new io.netty.channel.ChannelInboundHandlerAdapter())
+              .connect(new java.net.InetSocketAddress("127.0.0.1", peer.getLocalPort()))
+              .sync()
+              .channel();
+      reportWrite(
+          "datagram",
+          datagram.writeAndFlush(io.netty.buffer.Unpooled.wrappedBuffer(new byte[] {1, 2, 3})),
+          datagram);
+    } finally {
+      group.shutdownGracefully(0, 1, java.util.concurrent.TimeUnit.SECONDS).sync();
+    }
+  }
+
+  private static void reportWrite(
+      final String key,
+      final io.netty.channel.ChannelFuture write,
+      final io.netty.channel.Channel channel) {
+    // Bounded waits: before the fix the write's future never completed.
+    final boolean done = write.awaitUninterruptibly(2, java.util.concurrent.TimeUnit.SECONDS);
+    System.out.println(key + ".done=" + done);
+    if (done && write.cause() != null) {
+      report(key, write.cause());
+    }
+    System.out.println(
+        key
+            + ".closed="
+            + channel.closeFuture().awaitUninterruptibly(2, java.util.concurrent.TimeUnit.SECONDS));
   }
 
   /**

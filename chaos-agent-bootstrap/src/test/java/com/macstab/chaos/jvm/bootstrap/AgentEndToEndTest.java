@@ -1775,6 +1775,29 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName(
+        "Netty: a rejected write fails its future with an IOException and closes the channel,"
+            + " for a socket and a datagram channel; an empty flush is not evaluated")
+    void nettyWriteReject() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          runReject(
+              "netty",
+              new ChaosSelector.NettySelector(
+                  Set.of(OperationType.NETTY_CHANNEL_WRITE), "127.0.0.0/8", null),
+              "netty-write-reject");
+      for (final String channel : List.of("socket", "datagram")) {
+        assertThat(result.value(channel + ".done")).as(channel).isEqualTo("true");
+        assertThat(result.value(channel + ".type")).as(channel).isEqualTo("java.io.IOException");
+        assertThat(result.value(channel + ".message")).as(channel).isEqualTo("netty down");
+        assertThat(result.value(channel + ".closed")).as(channel).isEqualTo("true");
+      }
+      assertThat(result.longValue("matched.netty"))
+          .as("one evaluation per written buffer, none for the empty flush")
+          .isEqualTo(2L);
+      assertThat(result.output()).doesNotContain("Unexpected exception in the selector loop");
+    }
+
+    @Test
     @DisplayName("Netty: a channel flush is matched by peer CIDR")
     void nettyWrite() throws Exception {
       final ChildJvmProbe.ProbeResult result =
