@@ -53,7 +53,9 @@ jobs:
         with:
           entrypoint: /bin/sh
           workdir: /home/runner/work/${{ github.repository }}/${{ github.repository }}
-          args: -c "pwd && cp /configs/$CONFIG_FILE .releaserc && git config --global --add safe.directory $GITHUB_WORKSPACE && npx semantic-release --branches $RELEASE_BRANCH"
+          # The image's config without @semantic-release/changelog: CHANGELOG.md is written by hand
+          # (RELEASE.md), and the plugin would prepend a generated section for the same version.
+          args: -c "pwd && jq '.plugins |= map(select(((arrays | .[0]) // .) != env.SKIP_PLUGIN))' /configs/$CONFIG_FILE > .releaserc && git config --global --add safe.directory $GITHUB_WORKSPACE && npx semantic-release --branches $RELEASE_BRANCH"
         env:
           GITHUB_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -61,6 +63,7 @@ jobs:
           GH_URL: https://github.com/${{ github.repository }}.git
           RELEASE_BRANCH: main
           CONFIG_FILE: .releaserc-gradle.json
+          SKIP_PLUGIN: '@semantic-release/changelog'
           DEBUG: semantic-release:*
 
       - name: Merge the release back into develop
