@@ -89,9 +89,12 @@ public enum OperationType {
   // ── Executor operations ─────────────────────────────────────────────────────
 
   /**
-   * Fires when a task is submitted to an {@link java.util.concurrent.ExecutorService} via {@code
-   * submit()}, {@code execute()}, or {@code invokeAll()}. Chaos here can delay or reject task
-   * acceptance before the task enters the work queue.
+   * Fires when a task is submitted through {@code execute()} or {@code submit()} (and so {@code
+   * invokeAll()}) of a {@link java.util.concurrent.ThreadPoolExecutor}, a {@link
+   * java.util.concurrent.ScheduledThreadPoolExecutor} or the virtual-thread-per-task executor, once
+   * per call. Chaos here can delay or reject task acceptance before the task enters the work queue.
+   * A {@code ForkJoinPool} (also the common pool and {@code CompletableFuture.*Async}) is not
+   * hooked. An STPE's own {@code execute} / {@code submit} is not a {@code SCHEDULE_SUBMIT}.
    */
   EXECUTOR_SUBMIT,
 

@@ -2884,6 +2884,117 @@ class AgentEndToEndTest {
     }
   }
 
+  @Nested
+  @DisplayName("every funnel of an operation reaches its hook")
+  class Funnels {
+
+    @Test
+    @DisplayName(
+        "socket-adaptor: a socket channel's adaptor connects, reads and writes as SOCKET_*")
+    void socketAdaptor() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "socket-adaptor");
+      assertSoftly(
+          softly -> {
+            softly.assertThat(result.value("read")).isEqualTo("true");
+            softly.assertThat(result.longValue("connect")).as("SOCKET_CONNECT").isEqualTo(1L);
+            softly.assertThat(result.longValue("readMatched")).as("SOCKET_READ").isEqualTo(1L);
+            softly.assertThat(result.longValue("write")).as("SOCKET_WRITE").isEqualTo(1L);
+          });
+    }
+
+    @Test
+    @DisplayName("ssl-server-accept: SSLServerSocket.accept is one SOCKET_ACCEPT")
+    void sslServerAccept() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "ssl-server-accept");
+      assertThat(result.value("accepted")).isEqualTo("SSLSocketImpl");
+      assertThat(result.longValue("accept")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("adaptor-accept-timeout: an adaptor accept is one SOCKET_ACCEPT, timed or not")
+    void adaptorAcceptTimeout() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "adaptor-accept-timeout");
+      assertThat(result.longValue("timed")).as("SO_TIMEOUT 5 s").isEqualTo(1L);
+      assertThat(result.longValue("untimed")).as("SO_TIMEOUT 0").isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("jdbc-batch: executeBatch and executeLargeBatch are one JDBC_STATEMENT_EXECUTE")
+    void jdbcBatch() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlanOnClasspath(
+              DefectProbeMain.class, "jdbc-batch", System.getProperty("chaos.test.jdbcClasspath"));
+      assertSoftly(
+          softly -> {
+            softly.assertThat(result.value("statementRows")).isEqualTo("2");
+            softly.assertThat(result.longValue("statementBatch")).isEqualTo(1L);
+            softly.assertThat(result.value("preparedRows")).isEqualTo("2");
+            softly.assertThat(result.longValue("preparedBatch")).isEqualTo(1L);
+            softly.assertThat(result.value("largeRows")).isEqualTo("2");
+            softly.assertThat(result.longValue("largeBatch")).isEqualTo(1L);
+          });
+    }
+
+    @Test
+    @DisplayName(
+        "executor-submit-kinds: STPE and virtual-thread executor execute/submit are one"
+            + " EXECUTOR_SUBMIT, no SCHEDULE_SUBMIT")
+    void executorSubmitKinds() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "executor-submit-kinds");
+      assertSoftly(
+          softly -> {
+            for (final String call :
+                List.of(
+                    "stpeSubmit",
+                    "stpeSubmitCallable",
+                    "stpeExecute",
+                    "vtSubmit",
+                    "vtSubmitCallable",
+                    "vtExecute")) {
+              softly.assertThat(result.longValue(call + ".submit")).as(call).isEqualTo(1L);
+              softly.assertThat(result.longValue(call + ".schedule")).as(call).isZero();
+              softly
+                  .assertThat(result.longValue(call + ".vtStart"))
+                  .as(call)
+                  .isEqualTo(call.startsWith("vt") ? 1L : 0L);
+            }
+          });
+    }
+
+    @Test
+    @DisplayName(
+        "executor-submit-suppress: a suppressed STPE or virtual-thread submit completes with null")
+    void executorSubmitSuppress() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "executor-submit-suppress");
+      assertSoftly(
+          softly -> {
+            softly.assertThat(result.value("stpeRunnable")).isEqualTo("null");
+            softly.assertThat(result.value("stpeCallable")).isEqualTo("null");
+            softly.assertThat(result.value("vtRunnable")).isEqualTo("null");
+            softly.assertThat(result.value("vtCallable")).isEqualTo("null");
+            softly.assertThat(result.value("cancelled")).isEqualTo("false");
+            softly.assertThat(result.value("ran")).isEqualTo("0");
+            softly.assertThat(result.longValue("applied")).isEqualTo(4L);
+          });
+    }
+
+    @Test
+    @DisplayName(
+        "session-tick-stpe-submit: a session's stpe.submit is one EXECUTOR_SUBMIT and one"
+            + " SCHEDULE_TICK")
+    void sessionTickOnStpeSubmit() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "session-tick-stpe-submit");
+      assertThat(result.longValue("submit")).isEqualTo(1L);
+      assertThat(result.longValue("tick")).as("the task still runs in the session").isEqualTo(1L);
+    }
+  }
+
   private static ChaosPlan plan(final ChaosScenario... scenarios) {
     return new ChaosPlan(new ChaosPlan.Metadata("end-to-end", ""), null, List.of(scenarios));
   }

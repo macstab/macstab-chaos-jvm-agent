@@ -186,7 +186,8 @@ final class NetworkHooks {
                 typeBuilder.visit(
                     advise(
                         SocketAdvice.SocketAcceptAdvice.class,
-                        ElementMatchers.named("accept").and(ElementMatchers.takesArguments(0)))))
+                        ElementMatchers.named("implAccept")
+                            .and(ElementMatchers.takesArguments(java.net.Socket.class)))))
         // Socket$SocketInputStream / Socket$SocketOutputStream are private inner classes loaded
         // as a side-effect of ByteBuddy retransforming java.net.Socket (JVMTI ClassFileLoadHook
         // is not re-entrant, so the inner-class loads escape the transformer). Target
@@ -270,7 +271,29 @@ final class NetworkHooks {
                             ElementMatchers.named("write")
                                 .and(
                                     ElementMatchers.takesArguments(
-                                        java.nio.ByteBuffer[].class, int.class, int.class)))))
+                                        java.nio.ByteBuffer[].class, int.class, int.class))))
+                    // The funnels of the channel's adaptor (channel.socket()) and its streams.
+                    .visit(
+                        advise(
+                            SocketAdvice.SocketChannelBlockingConnectAdvice.class,
+                            ElementMatchers.named("blockingConnect")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        java.net.SocketAddress.class, long.class))))
+                    .visit(
+                        advise(
+                            SocketAdvice.SocketChannelBlockingReadAdvice.class,
+                            ElementMatchers.named("blockingRead")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        byte[].class, int.class, int.class, long.class))))
+                    .visit(
+                        advise(
+                            SocketAdvice.SocketChannelBlockingWriteAdvice.class,
+                            ElementMatchers.named("blockingWriteFully")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        byte[].class, int.class, int.class)))))
         .type(
             ElementMatchers.isSubTypeOf(java.nio.channels.ServerSocketChannel.class)
                 .and(ElementMatchers.not(ElementMatchers.isAbstract()))
@@ -278,10 +301,17 @@ final class NetworkHooks {
                 .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                typeBuilder.visit(
-                    advise(
-                        SocketAdvice.SocketChannelAcceptAdvice.class,
-                        ElementMatchers.named("accept").and(ElementMatchers.takesArguments(0)))))
+                typeBuilder
+                    .visit(
+                        advise(
+                            SocketAdvice.SocketChannelAcceptAdvice.class,
+                            ElementMatchers.named("accept").and(ElementMatchers.takesArguments(0))))
+                    // The adaptor's accept with a timeout (ssc.socket().accept(), SO_TIMEOUT > 0).
+                    .visit(
+                        advise(
+                            SocketAdvice.ServerSocketChannelBlockingAcceptAdvice.class,
+                            ElementMatchers.named("blockingAccept")
+                                .and(ElementMatchers.takesArguments(long.class)))))
         .type(ElementMatchers.named("java.nio.channels.spi.AbstractInterruptibleChannel"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->

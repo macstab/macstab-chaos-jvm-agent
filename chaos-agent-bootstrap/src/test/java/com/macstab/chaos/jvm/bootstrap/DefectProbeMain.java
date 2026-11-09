@@ -156,6 +156,13 @@ public final class DefectProbeMain {
       case "dns-literal" -> dnsLiteral();
       case "dns-literal-answers" -> dnsLiteralAnswers();
       case "socket-double-close" -> socketDoubleClose();
+      case "socket-adaptor" -> socketAdaptor();
+      case "ssl-server-accept" -> sslServerAccept();
+      case "adaptor-accept-timeout" -> adaptorAcceptTimeout();
+      case "jdbc-batch" -> jdbcBatch();
+      case "executor-submit-kinds" -> executorSubmitKinds();
+      case "executor-submit-suppress" -> executorSubmitSuppress();
+      case "session-tick-stpe-submit" -> sessionTickStpeSubmit();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
     printCounts();
@@ -3318,6 +3325,277 @@ public final class DefectProbeMain {
       }
     } finally {
       current.setContextClassLoader(previous);
+    }
+  }
+
+  /** A JVM-scoped scenario that delays by 1 ms and is always active. */
+  private static ChaosActivationHandle activateDelay(
+      final String id, final ChaosSelector selector) {
+    return ChaosPlatform.current()
+        .activate(
+            ChaosScenario.builder(id)
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(selector)
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+  }
+
+  /** A selector for the client side of a loopback connection to {@code port}. */
+  private static ChaosSelector toPort(final OperationType operation, final int port) {
+    return new ChaosSelector.NetworkSelector(
+        Set.of(operation), NamePattern.any(), "127.0.0.1/32", port, null, null);
+  }
+
+  /**
+   * A socket channel's adaptor ({@code channel.socket()}): its connect, one read of its input
+   * stream and one write of its output stream, each counted once.
+   */
+  private static void socketAdaptor() throws Exception {
+    final byte[] payload = new byte[100];
+    try (java.net.ServerSocket server =
+        new java.net.ServerSocket(0, 2, InetAddress.getByName("127.0.0.1"))) {
+      final int port = server.getLocalPort();
+      final ChaosActivationHandle connect =
+          activateDelay("adaptor-connect", toPort(OperationType.SOCKET_CONNECT, port));
+      final ChaosActivationHandle read =
+          activateDelay("adaptor-read", toPort(OperationType.SOCKET_READ, port));
+      final ChaosActivationHandle write =
+          activateDelay("adaptor-write", toPort(OperationType.SOCKET_WRITE, port));
+      final java.util.concurrent.CompletableFuture<String> peer = serve(server, payload);
+      try (java.nio.channels.SocketChannel channel = java.nio.channels.SocketChannel.open()) {
+        final java.net.Socket socket = channel.socket();
+        socket.connect(new InetSocketAddress("127.0.0.1", port), 5_000);
+        System.out.println("read=" + (socket.getInputStream().read(new byte[100]) > 0));
+        socket.getOutputStream().write(new byte[10]);
+      }
+      System.out.println("peer=" + peer.get(5, TimeUnit.SECONDS));
+      System.out.println("connect=" + connect.matchedCount());
+      System.out.println("readMatched=" + read.matchedCount());
+      System.out.println("write=" + write.matchedCount());
+    }
+  }
+
+  /** {@code SSLServerSocket.accept()}: the JDK's TLS server socket overrides {@code accept}. */
+  private static void sslServerAccept() throws Exception {
+    final ChaosActivationHandle accept =
+        activateDelay("ssl-accept", ChaosSelector.network(Set.of(OperationType.SOCKET_ACCEPT)));
+    try (java.net.ServerSocket server =
+        javax.net.ssl.SSLServerSocketFactory.getDefault()
+            .createServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
+      acceptOne(server);
+    }
+    System.out.println("accept=" + accept.matchedCount());
+  }
+
+  /**
+   * A server socket channel's adaptor ({@code ssc.socket().accept()}) with an accept timeout and
+   * without one: each accept counted once.
+   */
+  private static void adaptorAcceptTimeout() throws Exception {
+    try (java.nio.channels.ServerSocketChannel channel =
+        java.nio.channels.ServerSocketChannel.open()) {
+      channel.bind(new InetSocketAddress("127.0.0.1", 0));
+      final java.net.ServerSocket adaptor = channel.socket();
+      try (ChaosActivationHandle timed =
+          activateDelay(
+              "accept-timed", ChaosSelector.network(Set.of(OperationType.SOCKET_ACCEPT)))) {
+        adaptor.setSoTimeout(5_000);
+        acceptOne(adaptor);
+        System.out.println("timed=" + timed.matchedCount());
+      }
+      try (ChaosActivationHandle untimed =
+          activateDelay(
+              "accept-untimed", ChaosSelector.network(Set.of(OperationType.SOCKET_ACCEPT)))) {
+        adaptor.setSoTimeout(0);
+        acceptOne(adaptor);
+        System.out.println("untimed=" + untimed.matchedCount());
+      }
+    }
+  }
+
+  /** Accepts one connection a client thread opens to {@code server}. */
+  private static void acceptOne(final java.net.ServerSocket server) throws Exception {
+    final int port = server.getLocalPort();
+    final java.util.concurrent.CompletableFuture<Void> client =
+        java.util.concurrent.CompletableFuture.runAsync(
+            () -> {
+              try (java.net.Socket socket = new java.net.Socket("127.0.0.1", port)) {
+                socket.getInputStream().read();
+              } catch (final java.io.IOException closed) {
+                // the server closes the connection
+              }
+            });
+    try (java.net.Socket accepted = server.accept()) {
+      System.out.println("accepted=" + accepted.getClass().getSimpleName());
+    }
+    client.get(5, TimeUnit.SECONDS);
+  }
+
+  /**
+   * {@code executeBatch} of a {@code Statement} and a {@code PreparedStatement} and {@code
+   * executeLargeBatch}, each of two rows, on H2: each batch counted once.
+   */
+  private static void jdbcBatch() throws Exception {
+    try (Connection connection = DriverManager.getConnection("jdbc:h2:mem:batch");
+        Statement statement = connection.createStatement()) {
+      statement.execute("CREATE TABLE t (id INT)");
+      try (PreparedStatement prepared = connection.prepareStatement("INSERT INTO t VALUES (?)");
+          ChaosActivationHandle batch =
+              activateDelay("batch", ChaosSelector.jdbc(OperationType.JDBC_STATEMENT_EXECUTE))) {
+        long before = batch.matchedCount();
+        statement.addBatch("INSERT INTO t VALUES (1)");
+        statement.addBatch("INSERT INTO t VALUES (2)");
+        System.out.println("statementRows=" + statement.executeBatch().length);
+        System.out.println("statementBatch=" + (batch.matchedCount() - before));
+        before = batch.matchedCount();
+        prepared.setInt(1, 3);
+        prepared.addBatch();
+        prepared.setInt(1, 4);
+        prepared.addBatch();
+        System.out.println("preparedRows=" + prepared.executeBatch().length);
+        System.out.println("preparedBatch=" + (batch.matchedCount() - before));
+        before = batch.matchedCount();
+        statement.addBatch("INSERT INTO t VALUES (5)");
+        statement.addBatch("INSERT INTO t VALUES (6)");
+        System.out.println("largeRows=" + statement.executeLargeBatch().length);
+        System.out.println("largeBatch=" + (batch.matchedCount() - before));
+      }
+    }
+  }
+
+  /**
+   * {@code execute} and {@code submit} of a {@code ScheduledThreadPoolExecutor} and of a
+   * virtual-thread-per-task executor under EXECUTOR_SUBMIT, SCHEDULE_SUBMIT and
+   * VIRTUAL_THREAD_START scenarios: prints the matches each call adds to each scenario.
+   */
+  private static void executorSubmitKinds() throws Exception {
+    final ChaosActivationHandle submit =
+        activateDelay("submit", ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)));
+    final ChaosActivationHandle schedule =
+        activateDelay("schedule", ChaosSelector.scheduling(Set.of(OperationType.SCHEDULE_SUBMIT)));
+    final ChaosActivationHandle vtStart =
+        activateDelay(
+            "vt-start",
+            ChaosSelector.thread(
+                Set.of(OperationType.VIRTUAL_THREAD_START), ChaosSelector.ThreadKind.VIRTUAL));
+    final java.util.concurrent.ScheduledThreadPoolExecutor stpe =
+        new java.util.concurrent.ScheduledThreadPoolExecutor(1);
+    try (ExecutorService virtual = Executors.newVirtualThreadPerTaskExecutor()) {
+      final Map<String, Call> calls = new java.util.LinkedHashMap<>();
+      calls.put("stpeSubmit", () -> stpe.submit(() -> {}).get(5, TimeUnit.SECONDS));
+      calls.put("stpeSubmitCallable", () -> stpe.submit(() -> "x").get(5, TimeUnit.SECONDS));
+      calls.put("stpeExecute", () -> runAndAwait(stpe));
+      calls.put("vtSubmit", () -> virtual.submit(() -> {}).get(5, TimeUnit.SECONDS));
+      calls.put("vtSubmitCallable", () -> virtual.submit(() -> "x").get(5, TimeUnit.SECONDS));
+      calls.put("vtExecute", () -> runAndAwait(virtual));
+      for (final Map.Entry<String, Call> call : calls.entrySet()) {
+        final long submits = submit.matchedCount();
+        final long schedules = schedule.matchedCount();
+        final long starts = vtStart.matchedCount();
+        call.getValue().run();
+        System.out.println(call.getKey() + ".submit=" + (submit.matchedCount() - submits));
+        System.out.println(call.getKey() + ".schedule=" + (schedule.matchedCount() - schedules));
+        System.out.println(call.getKey() + ".vtStart=" + (vtStart.matchedCount() - starts));
+      }
+    } finally {
+      stpe.shutdownNow();
+    }
+  }
+
+  /** {@code executor.execute} of a task that counts down a latch, then waits for it. */
+  private static void runAndAwait(final java.util.concurrent.Executor executor) throws Exception {
+    final CountDownLatch ran = new CountDownLatch(1);
+    executor.execute(ran::countDown);
+    if (!ran.await(5, TimeUnit.SECONDS)) {
+      throw new IllegalStateException("task never ran");
+    }
+  }
+
+  /**
+   * An EXECUTOR_SUBMIT suppress on a {@code ScheduledThreadPoolExecutor} and a
+   * virtual-thread-per-task executor: the task is replaced by a no-op and its future completes with
+   * {@code null}, not cancelled.
+   */
+  private static void executorSubmitSuppress() throws Exception {
+    final java.util.concurrent.atomic.AtomicInteger ran =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final java.util.concurrent.ScheduledThreadPoolExecutor stpe =
+        new java.util.concurrent.ScheduledThreadPoolExecutor(1);
+    try (ChaosActivationHandle suppress =
+            ChaosPlatform.current()
+                .activate(
+                    ChaosScenario.builder("suppress")
+                        .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                        .effect(ChaosEffect.suppress())
+                        .activationPolicy(ActivationPolicy.always())
+                        .build());
+        ExecutorService virtual = Executors.newVirtualThreadPerTaskExecutor()) {
+      final java.util.concurrent.Future<?> stpeRunnable =
+          stpe.submit((Runnable) ran::incrementAndGet);
+      final java.util.concurrent.Future<String> stpeCallable =
+          stpe.submit(
+              () -> {
+                ran.incrementAndGet();
+                return "ran";
+              });
+      final java.util.concurrent.Future<?> vtRunnable =
+          virtual.submit((Runnable) ran::incrementAndGet);
+      final java.util.concurrent.Future<String> vtCallable =
+          virtual.submit(
+              () -> {
+                ran.incrementAndGet();
+                return "ran";
+              });
+      System.out.println("stpeRunnable=" + stpeRunnable.get(5, TimeUnit.SECONDS));
+      System.out.println("stpeCallable=" + stpeCallable.get(5, TimeUnit.SECONDS));
+      System.out.println("vtRunnable=" + vtRunnable.get(5, TimeUnit.SECONDS));
+      System.out.println("vtCallable=" + vtCallable.get(5, TimeUnit.SECONDS));
+      System.out.println(
+          "cancelled="
+              + (stpeRunnable.isCancelled()
+                  || stpeCallable.isCancelled()
+                  || vtRunnable.isCancelled()
+                  || vtCallable.isCancelled()));
+      System.out.println("ran=" + ran.get());
+      System.out.println("applied=" + suppress.appliedCount());
+    } finally {
+      stpe.shutdownNow();
+    }
+  }
+
+  /**
+   * A session-scoped SCHEDULE_TICK and EXECUTOR_SUBMIT on {@code stpe.submit(r)} from the bound
+   * session: the submit is evaluated as EXECUTOR_SUBMIT and the task's run still as a tick of the
+   * session.
+   */
+  private static void sessionTickStpeSubmit() throws Exception {
+    final java.util.concurrent.ScheduledThreadPoolExecutor stpe =
+        new java.util.concurrent.ScheduledThreadPoolExecutor(1);
+    try (ChaosSession session = ChaosPlatform.current().openSession("tick-submit")) {
+      final ChaosActivationHandle tick =
+          session.activate(
+              ChaosScenario.builder("session-tick")
+                  .scope(ChaosScenario.ScenarioScope.SESSION)
+                  .selector(ChaosSelector.scheduling(Set.of(OperationType.SCHEDULE_TICK)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final ChaosActivationHandle submit =
+          session.activate(
+              ChaosScenario.builder("session-submit")
+                  .scope(ChaosScenario.ScenarioScope.SESSION)
+                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      try (ChaosSession.ScopeBinding binding = session.bind()) {
+        stpe.submit(() -> {}).get(5, TimeUnit.SECONDS);
+      }
+      System.out.println("tick=" + tick.matchedCount());
+      System.out.println("submit=" + submit.matchedCount());
+    } finally {
+      stpe.shutdownNow();
     }
   }
 

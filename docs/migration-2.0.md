@@ -51,6 +51,7 @@
 | 32 | Client rejects fail through the library's own failure channel | a test expects a rejected asynchronous client call (a gRPC future or async stub, a Kafka send, a Lettuce async command, a JDK `sendAsync`, an OkHttp `enqueue`, a Reactor Netty request, an R2DBC `execute()`) to throw from the call that starts it, or counts gRPC `RPC_CALL` evaluations at `ClientCall.start` | expect the failure in the future, observer, callback or publisher (§32) |
 | 33 | The JDK's own use of a general primitive is not a target (L3a) | a scenario with an unnarrowed selector expects to hit class loading, the `CompletableFuture` timers, `/dev/urandom`, the JDK `HttpClient`'s selector, JDK-private ThreadLocals, the serialization hooks, a pool worker's lock, or the agent's MBean; a test counts those evaluations | target your own code's calls; name `/dev/urandom` in a path pattern or a JDK `ThreadLocal` / `ThreadPoolExecutor$Worker` class in the pattern to reach it (§33) |
 | 34 | Method hooks never weave JDK classes; match-all method selectors are refused | a `MethodSelector` names a JDK class (`java.*`, `jdk.*`, `sun.*`, a platform-loader module), or pairs two match-all patterns such as `glob("*")` and `regex(".*")` | target your own classes; narrow the class or the method pattern (§34) |
+| 35 | `EXECUTOR_SUBMIT` covers scheduled and virtual-thread executors | a scenario counts or delays `EXECUTOR_SUBMIT` expecting only `ThreadPoolExecutor`, matches an STPE's `execute` / `submit` as `SCHEDULE_SUBMIT` | narrow by `executorClassPattern`; select the STPE submission as `EXECUTOR_SUBMIT` (§35) |
 
 ---
 
@@ -409,6 +410,13 @@ A scenario on a general primitive (file reads, ZIP inflation, direct buffers, GC
 
 - A `MethodSelector` no longer weaves classes of the bootstrap or platform class loader: `exact("java.util.HashMap")` with `exact("get")` was woven into every `HashMap.get` of the JVM, the agent's own included. Such a scenario now matches nothing. Application classes, also in `javax.*` packages on the class path, are woven as before.
 - The guard against weaving every method of every class refused only `ANY` for both patterns. A pattern that matches everything in another form now counts too: a `GLOB` of `*` characters only (`glob("*")`, `glob(null)`, `**`) and the `REGEX` `.*`, `^.*$` and `.*+`. Such a pair is refused at construction with `IllegalArgumentException` (`ConfigLoadException` when a plan is read). Narrow the class or the method pattern.
+
+## 35. `EXECUTOR_SUBMIT` covers scheduled and virtual-thread executors
+
+- `EXECUTOR_SUBMIT` was raised by `ThreadPoolExecutor.execute` only. It is now also raised once per `execute` / `submit` of a `ScheduledThreadPoolExecutor` (also behind `Executors.newScheduledThreadPool` / `newSingleThreadScheduledExecutor`) and of the virtual-thread-per-task executor (`Executors.newVirtualThreadPerTaskExecutor()`, `Executors.newThreadPerTaskExecutor(factory)`). An `EXECUTOR_SUBMIT` scenario without an `executorClassPattern` therefore counts, delays or rejects these submissions too; narrow it to `java.util.concurrent.ThreadPoolExecutor` to keep the 1.x reach.
+- An STPE's `execute` / `submit` is no longer a `SCHEDULE_SUBMIT` (it used to be, through the `schedule` it calls). Its task still fires `SCHEDULE_TICK`, and `schedule*` calls are still `SCHEDULE_SUBMIT`. Select the submission with an `ExecutorSelector` on `EXECUTOR_SUBMIT` instead.
+- A `suppress` on such a submission replaces the task with a no-op: the future completes with `null` and is not cancelled (a `ThreadPoolExecutor`'s `submit` future is cancelled, as before).
+- `ForkJoinPool` (the common pool, `CompletableFuture.*Async`, JDK 25's `ForkJoinPool.schedule*`) is not hooked for `EXECUTOR_SUBMIT`.
 
 ---
 

@@ -229,8 +229,16 @@ public final class BootstrapDispatcher {
    */
   public static final int SCOPE_JDK_COMPLETION = 30;
 
+  /**
+   * Scope of a {@code ScheduledThreadPoolExecutor} or virtual-thread-per-task executor {@code
+   * execute} / {@code submit}: one {@code EXECUTOR_SUBMIT} (the executor's {@code submit(Runnable)}
+   * goes through its own {@code submit(Callable)}), and the {@code schedule} an STPE carries it out
+   * with is not a {@code SCHEDULE_SUBMIT}.
+   */
+  public static final int SCOPE_EXECUTOR_SUBMIT = 31;
+
   /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
-  static final int SCOPE_COUNT = 31;
+  static final int SCOPE_COUNT = 32;
 
   /**
    * Enters a call-depth scope on the current thread.

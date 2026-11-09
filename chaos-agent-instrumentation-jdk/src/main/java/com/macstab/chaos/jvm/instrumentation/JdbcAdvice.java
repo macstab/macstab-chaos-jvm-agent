@@ -89,7 +89,8 @@ final class JdbcAdvice {
    * and Spring {@code JdbcTemplate}. The SQL text was bound at prepare time and is not available
    * here, so these calls report a {@code null} target: they match JDBC_STATEMENT_EXECUTE scenarios
    * whose target pattern is ANY. The SQL is visible to JDBC_PREPARED_STATEMENT scenarios at prepare
-   * time.
+   * time. Also intercepts {@code executeBatch()} / {@code executeLargeBatch()} of every {@code
+   * Statement}: one evaluation per batch, likewise without SQL text.
    */
   static final class PreparedStatementExecuteAdvice {
     @Advice.OnMethodEnter

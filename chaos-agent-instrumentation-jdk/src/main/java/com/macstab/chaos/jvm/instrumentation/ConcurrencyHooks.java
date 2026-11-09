@@ -133,6 +133,33 @@ final class ConcurrencyHooks {
                                         long.class, java.util.concurrent.TimeUnit.class)))));
   }
 
+  /**
+   * {@code execute} / {@code submit} of a ScheduledThreadPoolExecutor and of the
+   * virtual-thread-per- task executor ({@code java.util.concurrent.ThreadPerTaskExecutor}):
+   * EXECUTOR_SUBMIT, as a ThreadPoolExecutor's {@code execute}. ForkJoinPool (and its JDK 25 {@code
+   * schedule*}) is not hooked.
+   */
+  static AgentBuilder applyExecutorSubmitTransformations(final AgentBuilder builder) {
+    return builder
+        .type(
+            ElementMatchers.namedOneOf(
+                "java.util.concurrent.ScheduledThreadPoolExecutor",
+                "java.util.concurrent.ThreadPerTaskExecutor"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        advise(
+                            ExecutorAdvice.SubmitRunnableAdvice.class,
+                            ElementMatchers.namedOneOf("execute", "submit")
+                                .and(ElementMatchers.takesArgument(0, Runnable.class))))
+                    .visit(
+                        advise(
+                            ExecutorAdvice.SubmitCallableAdvice.class,
+                            ElementMatchers.named("submit")
+                                .and(ElementMatchers.takesArguments(Callable.class)))));
+  }
+
   /** ScheduledThreadPoolExecutor schedule / scheduleAtFixedRate / scheduleWithFixedDelay. */
   static AgentBuilder applyScheduledExecutorTransformations(final AgentBuilder builder) {
     return builder

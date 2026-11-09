@@ -270,6 +270,16 @@ public final class JdkInstrumentationInstaller {
         OperationType.EXECUTOR_WORKER_RUN,
         OperationType.EXECUTOR_SHUTDOWN,
         OperationType.EXECUTOR_AWAIT_TERMINATION),
+    /**
+     * {@code execute} / {@code submit} of a ScheduledThreadPoolExecutor and of the
+     * virtual-thread-per-task executor. Woven with SCHEDULE_SUBMIT too: an STPE's own {@code
+     * execute} / {@code submit} is an EXECUTOR_SUBMIT, never a SCHEDULE_SUBMIT, whatever else is
+     * woven.
+     */
+    EXECUTOR_SUBMIT(
+        ConcurrencyHooks::applyExecutorSubmitTransformations,
+        OperationType.EXECUTOR_SUBMIT,
+        OperationType.SCHEDULE_SUBMIT),
     SCHEDULED_EXECUTOR(
         ConcurrencyHooks::applyScheduledExecutorTransformations,
         OperationType.SCHEDULE_SUBMIT,
@@ -1110,7 +1120,14 @@ public final class JdkInstrumentationInstaller {
                         advise(
                             JdbcAdvice.StatementExecuteAdvice.class,
                             ElementMatchers.named("executeLargeUpdate")
-                                .and(ElementMatchers.takesArgument(0, String.class)))))
+                                .and(ElementMatchers.takesArgument(0, String.class))))
+                    // A batch of any Statement, prepared or not: one execution without SQL text.
+                    .visit(
+                        advise(
+                            JdbcAdvice.PreparedStatementExecuteAdvice.class,
+                            ElementMatchers.namedOneOf("executeBatch", "executeLargeBatch")
+                                .and(ElementMatchers.takesArguments(0))
+                                .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
         .type(
             ElementMatchers.isSubTypeOf(java.sql.PreparedStatement.class)
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))

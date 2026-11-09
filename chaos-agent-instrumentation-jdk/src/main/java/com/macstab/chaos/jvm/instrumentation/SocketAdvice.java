@@ -136,6 +136,141 @@ final class SocketAdvice {
     }
   }
 
+  // ── Socket adaptors: the funnels of channel.socket() and its streams (SOCKET_*) ──────────
+
+  /**
+   * Intercepts {@code SocketChannelImpl.blockingConnect(SocketAddress, long)}, the connect of a
+   * socket channel's adaptor ({@code channel.socket().connect}) (SOCKET_CONNECT). {@code
+   * Long.MAX_VALUE} nanoseconds is the adaptor's "no timeout".
+   */
+  static final class SocketChannelBlockingConnectAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object channel,
+        @Advice.Argument(value = 0, readOnly = false, typing = Assigner.Typing.DYNAMIC)
+            Object socketAddress,
+        @Advice.Argument(1) final long nanos)
+        throws Throwable {
+      socketAddress =
+          BootstrapDispatcher.beforeSocketConnect(
+              channel,
+              socketAddress,
+              nanos == Long.MAX_VALUE
+                  ? 0
+                  : (int) Math.min(Integer.MAX_VALUE, Math.max(1L, nanos / 1_000_000L)));
+    }
+  }
+
+  /**
+   * Intercepts {@code SocketChannelImpl.blockingRead(byte[], int, int, long)}, the read of a socket
+   * channel's input stream ({@code channel.socket().getInputStream()}, {@code
+   * Channels.newInputStream}) (SOCKET_READ), as {@link SocketReadAdvice}. {@code 0} nanoseconds is
+   * "no timeout".
+   */
+  static final class SocketChannelBlockingReadAdvice {
+    @Advice.OnMethodEnter
+    static boolean enter(
+        @Advice.This final Object channel,
+        @Advice.Argument(value = 2, readOnly = false) int len,
+        @Advice.Argument(3) final long nanos,
+        @Advice.FieldValue("remoteAddress") final java.net.SocketAddress remote)
+        throws Throwable {
+      final java.net.InetSocketAddress peer =
+          remote instanceof java.net.InetSocketAddress address ? address : null;
+      final int count =
+          BootstrapDispatcher.beforeSocketRead(
+              channel,
+              len,
+              peer == null ? null : peer.getAddress(),
+              peer == null ? 0 : peer.getPort(),
+              nanos <= 0L
+                  ? 0
+                  : (int) Math.min(Integer.MAX_VALUE, Math.max(1L, nanos / 1_000_000L)));
+      if (count < 0) {
+        len = -count - 1;
+        return true;
+      }
+      len = count;
+      return false;
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean corrupt,
+        @Advice.Argument(0) final byte[] buffer,
+        @Advice.Argument(1) final int offset,
+        @Advice.Return final int read) {
+      if (corrupt) {
+        BootstrapDispatcher.corruptBytes(buffer, offset, read);
+      }
+    }
+  }
+
+  /**
+   * Intercepts {@code SocketChannelImpl.blockingWriteFully(byte[], int, int)}, the write of a
+   * socket channel's output stream (SOCKET_WRITE), as {@link SocketWriteBulkAdvice}: a torn write
+   * sends its prefix, then resets the connection (linger 0, close) and fails as reset.
+   */
+  static final class SocketChannelBlockingWriteAdvice {
+    /** Returns the requested length when the write is torn, else {@code -1}. */
+    @Advice.OnMethodEnter
+    static int enter(
+        @Advice.This final Object channel,
+        @Advice.Argument(value = 2, readOnly = false) int len,
+        @Advice.FieldValue("remoteAddress") final java.net.SocketAddress remote)
+        throws Throwable {
+      final java.net.InetSocketAddress peer =
+          remote instanceof java.net.InetSocketAddress address ? address : null;
+      final int count =
+          BootstrapDispatcher.beforeSocketWrite(
+              channel,
+              len,
+              peer == null ? null : peer.getAddress(),
+              peer == null ? 0 : peer.getPort());
+      if (count >= 0 && count < len) {
+        final int requested = len;
+        len = count;
+        return requested;
+      }
+      return -1;
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.This final Object channel,
+        @Advice.Enter final int requested,
+        @Advice.Argument(2) final int len)
+        throws Throwable {
+      if (requested >= 0) {
+        // The agent's own option change and close: no scenario applies to them.
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          final java.nio.channels.SocketChannel socketChannel =
+              (java.nio.channels.SocketChannel) channel;
+          socketChannel.setOption(java.net.StandardSocketOptions.SO_LINGER, 0);
+          socketChannel.close();
+        } catch (final Throwable ignored) {
+          // The failure below is still thrown; only the peer's view degrades to a plain close.
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        throw BootstrapDispatcher.tornWriteFailure(len, requested);
+      }
+    }
+  }
+
+  /**
+   * Intercepts {@code ServerSocketChannelImpl.blockingAccept(long)}, the accept of a server socket
+   * channel's adaptor with an accept timeout (SOCKET_ACCEPT); without one the adaptor calls {@code
+   * accept()}, which {@link SocketChannelAcceptAdvice} intercepts.
+   */
+  static final class ServerSocketChannelBlockingAcceptAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object channel) throws Throwable {
+      BootstrapDispatcher.beforeSocketAccept(channel);
+    }
+  }
+
   /**
    * Intercepts {@code AbstractInterruptibleChannel.close()} of a socket channel (SOCKET_CLOSE),
    * while it is still open, so a {@code connectionReset()} can set linger 0 before it closes.
@@ -166,7 +301,10 @@ final class SocketAdvice {
     }
   }
 
-  /** Intercepts {@code ServerSocket.accept()}. */
+  /**
+   * Intercepts {@code ServerSocket.implAccept(Socket)}, which {@code ServerSocket.accept()} and the
+   * {@code accept()} of its subclasses ({@code SSLServerSocketImpl}) go through.
+   */
   static final class SocketAcceptAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object serverSocket) throws Throwable {
