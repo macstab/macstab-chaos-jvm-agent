@@ -155,7 +155,7 @@ Each benchmark variant has its own `@State` inner class that pre-activates a spe
 
 **`OneMatchNoEffectState`**: One scenario is activated targeting `JDBC_STATEMENT_EXECUTE` with `NamePattern.any()`, `ONE_SHOT_POLICY` (`ActivationPolicy.count(1)`) and a zero delay. `@Setup` spends its one application with one call and checks that the scenario is INACTIVE (it throws `IllegalStateException` otherwise), so every warmup and measurement call sees an exhausted scenario still registered for the operation.
 
-**`SessionMissState`**: A session-scoped scenario is activated on a session that is never joined on the calling thread. `ClientDispatch.evaluateJdbc()` calls `scopeContext.currentSessionId()` to get the current thread's session ID. If the current thread is not inside a session (`currentSessionId()` returns `null`), session-scoped scenarios are filtered out by `registry.match()` at the session-scope check. The scenario exists in the registry but never contributes. This measures the additional cost of the session scope check: approximately one `ThreadLocal.get()` call.
+**`SessionMissState`**: A session-scoped scenario is activated on a session that is never joined on the calling thread: the session is opened, and the scenario activated, on a thread of its own, because opening a session binds the opening thread to it (JMH runs `@Setup` on the benchmark thread, which earlier versions of this state left inside the session, so they measured an applied delay of zero). `ClientDispatch.evaluateJdbc()` calls `scopeContext.currentSessionId()` to get the current thread's session ID. If the current thread is not inside a session (`currentSessionId()` returns `null`), session-scoped scenarios are filtered out by `registry.match()` at the session-scope check. The scenario exists in the registry but never contributes. This measures the additional cost of the session scope check: approximately one `ThreadLocal.get()` call.
 
 **`TenScenariosState`**: Nine scenarios target `JDBC_STATEMENT_EXECUTE` with the non-matching regex of `OneScenarioNoMatchState`, and one targets it with `NamePattern.any()` and `ONE_SHOT_POLICY`, spent in `@Setup` like `OneMatchNoEffectState`. Every call evaluates the ten scenarios of its operation: nine regex non-matches and one exhausted scenario. This measures how the cost grows with the scenarios on one operation; scenarios on other operations are not evaluated at all (the operation index), as `ZeroScenariosState` against `OneScenarioNoMatchState` of `Phase4DispatchBenchmark` shows.
 
@@ -178,11 +178,11 @@ ChaosRuntimeBenchmark.baseline_noAgent                    avgt    5    0.548 ± 
 ChaosRuntimeBenchmark.agentInstalled_zeroScenarios        avgt    5    2.239 ±  0.159  ns/op
 ChaosRuntimeBenchmark.agentInstalled_oneScenario_noMatch  avgt    5   89.996 ±  2.395  ns/op
 ChaosRuntimeBenchmark.agentInstalled_oneMatch_noEffect    avgt    5   16.288 ±  0.331  ns/op
-ChaosRuntimeBenchmark.sessionIdMiss                       avgt    5  318.041 ±  8.067  ns/op
+ChaosRuntimeBenchmark.sessionIdMiss                       avgt    5   16.584 ±  0.720  ns/op
 ChaosRuntimeBenchmark.tenScenarios_oneMatch               avgt    5  294.819 ±  8.244  ns/op
 ```
 
-Every variant meets its target except `sessionIdMiss`: a session-scoped scenario costs a call outside its session about 316 ns over `zeroScenarios`, not under 20 ns. An exhausted scenario (16 ns) costs far less than one whose regex is evaluated (90 ns); the regex dominates `tenScenarios_oneMatch` (nine of them, 295 ns).
+Every variant meets its target: a session-scoped scenario costs a call outside its session about 14 ns over `zeroScenarios` (`sessionIdMiss` re-measured alone, after its setup was fixed to leave the benchmark thread outside the session; the 318 ns measured before were an applied zero delay). An exhausted scenario (16 ns) costs far less than one whose regex is evaluated (90 ns); the regex dominates `tenScenarios_oneMatch` (nine of them, 295 ns).
 
 ### 3.4 What the Targets Mean in Production Terms
 
@@ -229,7 +229,7 @@ The HTTP benchmark replicates all five non-baseline variants from `ChaosRuntimeB
 
 **`OneMatchNoEffectState`**: One HTTP scenario targeting `HTTP_CLIENT_SEND` with `NamePattern.any()` and `ONE_SHOT_POLICY`, spent in `@Setup` and checked INACTIVE: the scenario is registered but exhausted.
 
-**`SessionMissState`**: Session-scoped HTTP scenario. Current thread carries no session ID; the scenario is filtered out.
+**`SessionMissState`**: Session-scoped HTTP scenario, activated on a thread of its own as in section 3. Current thread carries no session ID; the scenario is filtered out.
 
 **`TenScenariosState`**: Nine scenarios targeting `HTTP_CLIENT_SEND` with the non-matching URL regex of `OneScenarioNoMatchState`, and one targeting it with `NamePattern.any()` and `ONE_SHOT_POLICY`, spent in `@Setup`. Every call evaluates the ten scenarios of its operation.
 
@@ -252,11 +252,11 @@ HttpClientBenchmark.baseline_noAgent                      avgt    5    0.752 ± 
 HttpClientBenchmark.agentInstalled_zeroScenarios          avgt    5    1.838 ±  0.040  ns/op
 HttpClientBenchmark.agentInstalled_oneScenario_noMatch    avgt    5   72.844 ±  1.687  ns/op
 HttpClientBenchmark.agentInstalled_oneMatch_noEffect      avgt    5   16.175 ±  1.286  ns/op
-HttpClientBenchmark.sessionIdMiss                         avgt    5  311.678 ±  9.651  ns/op
+HttpClientBenchmark.sessionIdMiss                         avgt    5   18.127 ±  0.494  ns/op
 HttpClientBenchmark.tenScenarios_oneMatch                 avgt    5  270.127 ± 38.956  ns/op
 ```
 
-As for JDBC, every variant meets its target except `sessionIdMiss` (about 310 ns over `zeroScenarios`).
+As for JDBC, every variant meets its target; `sessionIdMiss` costs about 16 ns over `zeroScenarios` (re-measured alone).
 
 The HTTP `oneScenario_noMatch` target is 50 ns higher than the JDBC equivalent (150 ns vs 100 ns) to leave room for a regex run against a longer string; measured, the URL regex fails sooner (73 ns) than the SQL one (90 ns).
 

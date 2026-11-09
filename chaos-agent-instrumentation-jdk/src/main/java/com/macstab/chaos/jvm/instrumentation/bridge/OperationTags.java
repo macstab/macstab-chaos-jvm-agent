@@ -45,6 +45,12 @@ public final class OperationTags {
   /** {@code EXECUTOR_SUBMIT}. */
   public static final String EXECUTOR_SUBMIT = "EXECUTOR_SUBMIT";
 
+  public static final String HTTP_CLIENT_SEND = "HTTP_CLIENT_SEND";
+
+  public static final String HTTP_CLIENT_SEND_ASYNC = "HTTP_CLIENT_SEND_ASYNC";
+
+  public static final String JDBC_CONNECTION_ACQUIRE = "JDBC_CONNECTION_ACQUIRE";
+
   /** {@code FILE_IO_CLOSE}. */
   public static final String FILE_IO_CLOSE = "FILE_IO_CLOSE";
 

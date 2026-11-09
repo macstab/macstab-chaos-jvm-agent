@@ -98,4 +98,22 @@ class JdbcTargetExtractorTest {
   void nullWithoutAPool() {
     assertThat(JdbcTargetExtractor.fromHikariPool(null)).isNull();
   }
+
+  /** A pool without getPoolName() and without a toString() of its own. */
+  static final class MissPool {}
+
+  @Test
+  @DisplayName("a pool type without getPoolName() is looked up once: the miss is cached")
+  @SuppressWarnings("unchecked") // the private cache, read by the test
+  void missIsCached() throws Exception {
+    assertThat(JdbcTargetExtractor.fromHikariPool(new MissPool()))
+        .isEqualTo(MissPool.class.getName());
+
+    final java.lang.reflect.Field field =
+        JdbcTargetExtractor.class.getDeclaredField("METHOD_CACHE");
+    field.setAccessible(true);
+    final java.util.Map<String, Object> cached =
+        ((ClassValue<java.util.Map<String, Object>>) field.get(null)).get(MissPool.class);
+    assertThat(cached).containsEntry("getPoolName", java.util.Optional.empty());
+  }
 }

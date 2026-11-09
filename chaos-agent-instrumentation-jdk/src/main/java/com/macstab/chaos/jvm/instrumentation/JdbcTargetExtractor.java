@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import java.lang.reflect.Method;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import org.jspecify.annotations.Nullable;
 
@@ -20,10 +21,12 @@ public final class JdbcTargetExtractor {
   // ClassValue keyed on the Class object (not its name) — see HttpUrlExtractor for the
   // shared rationale: a String cache keyed on class name collides across classloaders,
   // hands the wrong Method back, and pins loaders for JVM lifetime.
-  private static final ClassValue<ConcurrentHashMap<String, Method>> METHOD_CACHE =
+  // An empty Optional records a method the class does not have: a pool type without the accessor is
+  // searched once, not on every connection acquire.
+  private static final ClassValue<ConcurrentHashMap<String, Optional<Method>>> METHOD_CACHE =
       new ClassValue<>() {
         @Override
-        protected ConcurrentHashMap<String, Method> computeValue(final Class<?> type) {
+        protected ConcurrentHashMap<String, Optional<Method>> computeValue(final Class<?> type) {
           return new ConcurrentHashMap<>();
         }
       };
@@ -69,9 +72,10 @@ public final class JdbcTargetExtractor {
   private static @Nullable Object invoke(final Object target, final String methodName)
       throws Throwable {
     final Class<?> targetClass = target.getClass();
-    final ConcurrentHashMap<String, Method> perClass = METHOD_CACHE.get(targetClass);
-    Method method = perClass.get(methodName);
-    if (method == null) {
+    final ConcurrentHashMap<String, Optional<Method>> perClass = METHOD_CACHE.get(targetClass);
+    final Optional<Method> cached = perClass.get(methodName);
+    Method method = cached == null ? null : cached.orElse(null);
+    if (cached == null) {
       method = findMethod(targetClass, methodName);
       if (method != null) {
         // See HttpUrlExtractor for the full rationale: setAccessible can throw
@@ -84,8 +88,8 @@ public final class JdbcTargetExtractor {
         } catch (final java.lang.reflect.InaccessibleObjectException encapsulated) {
           // leave method un-accessible; invoke() may still succeed.
         }
-        perClass.put(methodName, method);
       }
+      perClass.put(methodName, Optional.ofNullable(method));
     }
     if (method == null) {
       return null;

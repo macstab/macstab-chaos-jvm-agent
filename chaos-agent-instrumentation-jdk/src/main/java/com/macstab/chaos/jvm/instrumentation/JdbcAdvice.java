@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import net.bytebuddy.asm.Advice;
 
 /**
@@ -34,6 +35,9 @@ final class JdbcAdvice {
   static final class HikariGetConnectionAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object pool) throws Throwable {
+      if (BootstrapDispatcher.idle(OperationTags.JDBC_CONNECTION_ACQUIRE)) {
+        return;
+      }
       final String poolName;
       BootstrapDispatcher.beginInternalCall();
       try {

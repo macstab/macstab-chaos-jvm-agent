@@ -210,6 +210,11 @@ final class ChaosBridge implements BridgeDelegate {
     runtime.decorateShutdownHook(hook);
   }
 
+  @Override
+  public boolean idle(final String operationTag) {
+    return runtime.idle(operationTag);
+  }
+
   /**
    * Invoked before an executor shutdown or await-termination call.
    *

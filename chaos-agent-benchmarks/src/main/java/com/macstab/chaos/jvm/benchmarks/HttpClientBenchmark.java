@@ -153,20 +153,31 @@ public class HttpClientBenchmark {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
-    /** Registers the session-scoped scenario before the trial. */
+    /**
+     * Registers the session-scoped scenario before the trial, from a thread of its own: opening a
+     * session binds the opening thread to it, and the benchmark thread must stay outside.
+     *
+     * @throws InterruptedException if the setup is interrupted
+     */
     @Setup(Level.Trial)
-    public void setup() {
+    public void setup() throws InterruptedException {
       runtime = new ChaosRuntime();
-      final var session = runtime.openSession("http-bench-session");
-      session.activate(
-          ChaosScenario.builder("http-session-miss")
-              .scope(ChaosScenario.ScenarioScope.SESSION)
-              .selector(
-                  ChaosSelector.httpClient(
-                      Set.of(OperationType.HTTP_CLIENT_SEND), NamePattern.any()))
-              .effect(ChaosEffect.delay(ZERO_DELAY))
-              .activationPolicy(ActivationPolicy.always())
-              .build());
+      final Thread opener =
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    final var session = runtime.openSession("http-bench-session");
+                    session.activate(
+                        ChaosScenario.builder("http-session-miss")
+                            .scope(ChaosScenario.ScenarioScope.SESSION)
+                            .selector(
+                                ChaosSelector.httpClient(
+                                    Set.of(OperationType.HTTP_CLIENT_SEND), NamePattern.any()))
+                            .effect(ChaosEffect.delay(ZERO_DELAY))
+                            .activationPolicy(ActivationPolicy.always())
+                            .build());
+                  });
+      opener.join();
       dispatcher = runtime.dispatcher();
     }
 

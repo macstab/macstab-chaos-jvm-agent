@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import net.bytebuddy.asm.Advice;
 import org.jspecify.annotations.Nullable;
 
@@ -217,6 +218,11 @@ final class HttpClientAdvice {
   static final class OkHttpChainAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object call) throws Throwable {
+      final boolean sync = BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_HTTP_SYNC_CALL);
+      if (BootstrapDispatcher.idle(
+          sync ? OperationTags.HTTP_CLIENT_SEND : OperationTags.HTTP_CLIENT_SEND_ASYNC)) {
+        return;
+      }
       final String url;
       BootstrapDispatcher.beginInternalCall();
       try {
@@ -224,7 +230,7 @@ final class HttpClientAdvice {
       } finally {
         BootstrapDispatcher.endInternalCall();
       }
-      if (BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_HTTP_SYNC_CALL)) {
+      if (sync) {
         BootstrapDispatcher.beforeHttpSend(url);
       } else {
         BootstrapDispatcher.beforeHttpSendAsync(url);
@@ -246,6 +252,9 @@ final class HttpClientAdvice {
         @Advice.Argument(0) final Object host, @Advice.Argument(1) final Object request)
         throws Throwable {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+        return;
+      }
+      if (BootstrapDispatcher.idle(OperationTags.HTTP_CLIENT_SEND)) {
         return;
       }
       final String url;
@@ -285,6 +294,9 @@ final class HttpClientAdvice {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
       }
+      if (BootstrapDispatcher.idle(OperationTags.HTTP_CLIENT_SEND)) {
+        return;
+      }
       final String url;
       try {
         BootstrapDispatcher.beginInternalCall();
@@ -318,6 +330,9 @@ final class HttpClientAdvice {
   static final class ReactorNettySubscribeAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
     static @Nullable Throwable enter(@Advice.FieldValue("config") final Object config) {
+      if (BootstrapDispatcher.idle(OperationTags.HTTP_CLIENT_SEND_ASYNC)) {
+        return null;
+      }
       final String url;
       BootstrapDispatcher.beginInternalCall();
       try {

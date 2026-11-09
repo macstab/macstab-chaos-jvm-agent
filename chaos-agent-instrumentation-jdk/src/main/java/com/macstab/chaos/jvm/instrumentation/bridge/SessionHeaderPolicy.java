@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.instrumentation.bridge;
 
 import java.util.List;
 import java.util.Locale;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Decides which hosts receive the {@code X-Chaos-Session} header. By default only hosts inside the
@@ -79,23 +80,43 @@ public final class SessionHeaderPolicy {
           || name.startsWith("fea")
           || name.startsWith("feb");
     }
-    final String[] parts = name.split("\\.", -1);
-    if (parts.length != 4) {
+    final int[] octets = ipv4Octets(name);
+    if (octets == null) {
       return false;
-    }
-    final int[] octets = new int[4];
-    for (int i = 0; i < 4; i++) {
-      try {
-        octets[i] = Integer.parseInt(parts[i]);
-      } catch (final NumberFormatException notAnAddress) {
-        return false;
-      }
     }
     return octets[0] == 10
         || octets[0] == 127
         || (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31)
         || (octets[0] == 192 && octets[1] == 168)
         || (octets[0] == 169 && octets[1] == 254);
+  }
+
+  /**
+   * The four octets of an IPv4 literal: four dot-separated runs of one to three ASCII digits, each
+   * 0 to 255. Read by hand: {@code Integer.parseInt} takes a sign and non-ASCII digits, and throws
+   * for every host name of four labels.
+   *
+   * @return the octets, or {@code null} when {@code name} is no IPv4 literal
+   */
+  private static int @Nullable [] ipv4Octets(final String name) {
+    final int[] octets = new int[4];
+    int octet = 0;
+    int digits = 0;
+    int value = 0;
+    for (int i = 0; i <= name.length(); i++) {
+      final char c = i == name.length() ? '.' : name.charAt(i);
+      if (c >= '0' && c <= '9' && digits < 3) {
+        value = value * 10 + (c - '0');
+        digits++;
+      } else if (c == '.' && digits > 0 && value <= 255 && octet < 4) {
+        octets[octet++] = value;
+        digits = 0;
+        value = 0;
+      } else {
+        return null;
+      }
+    }
+    return octet == 4 ? octets : null;
   }
 
   private static boolean matchesGlob(final String glob, final String name) {

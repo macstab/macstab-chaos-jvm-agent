@@ -9,6 +9,7 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
@@ -58,6 +59,8 @@ class BridgeGuardsTest {
           "exitScope",
           "inScope",
           "consumeScope",
+          // Whether advice may skip reading its target; guarded on its own (idleAnswers).
+          "idle",
           "tornWriteFailure",
           "corruptBytes",
           "corruptByte",
@@ -104,6 +107,46 @@ class BridgeGuardsTest {
     final ChaosRuntime runtime = new ChaosRuntime();
     try (AutoCloseable connected = JdkInstrumentationInstaller.connectDispatcher(runtime)) {
       assertPassThrough("without a scenario");
+    } finally {
+      runtime.close();
+    }
+  }
+
+  @Test
+  @DisplayName(
+      "idle is true wherever a call passes through, and false only when it may be a target")
+  void idleAnswers() throws Throwable {
+    assertThat(BootstrapDispatcher.idle(OperationTags.MESSAGE_RECEIVE)).as("no agent").isTrue();
+    BootstrapDispatcher.install(new Object(), null);
+    assertThat(BootstrapDispatcher.idle(OperationTags.MESSAGE_RECEIVE)).as("no handles").isTrue();
+    BootstrapDispatcher.install(new Object(), failingHandles(new Exception("delegate failure")));
+    assertThat(BootstrapDispatcher.idle(OperationTags.MESSAGE_RECEIVE))
+        .as("a delegate failure: evaluate as before")
+        .isFalse();
+    BootstrapDispatcher.install(null, null);
+
+    final ChaosRuntime runtime = new ChaosRuntime();
+    try (AutoCloseable connected = JdkInstrumentationInstaller.connectDispatcher(runtime)) {
+      assertThat(BootstrapDispatcher.idle(OperationTags.SCHEDULE_SUBMIT_PERIODIC)).isTrue();
+      runtime.activate(
+          ChaosScenario.builder("idle-schedule")
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(ChaosSelector.scheduling(Set.of(OperationType.SCHEDULE_SUBMIT)))
+              .effect(ChaosEffect.delay(Duration.ofSeconds(30)))
+              .activationPolicy(ActivationPolicy.always())
+              .build());
+      assertThat(BootstrapDispatcher.idle(OperationTags.SCHEDULE_SUBMIT_PERIODIC))
+          .as("a periodic submission is a SCHEDULE_SUBMIT")
+          .isFalse();
+      assertThat(BootstrapDispatcher.idle(OperationTags.MESSAGE_RECEIVE)).isTrue();
+      BootstrapDispatcher.beginInternalCall();
+      try {
+        assertThat(BootstrapDispatcher.idle(OperationTags.SCHEDULE_SUBMIT))
+            .as("agent work")
+            .isTrue();
+      } finally {
+        BootstrapDispatcher.endInternalCall();
+      }
     } finally {
       runtime.close();
     }

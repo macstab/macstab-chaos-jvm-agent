@@ -174,7 +174,7 @@ flowchart LR
   subgraph boot["bootstrap class loader"]
     direction TB
     JDK["JDK method<br/>e.g. SocketChannelImpl.write"] --> ADV["inlined @Advice"]
-    ADV --> BD["BootstrapDispatcher<br/>depth guard · 76 slots"]
+    ADV --> BD["BootstrapDispatcher<br/>depth guard · 77 slots"]
   end
   subgraph agent["agent class loader"]
     direction TB

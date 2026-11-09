@@ -188,6 +188,14 @@ public interface BridgeDelegate {
   void decorateShutdownHook(@Nullable Thread hook) throws Throwable;
 
   /**
+   * Returns whether no scenario is indexed for the operation {@code operationTag} names.
+   *
+   * @param operationTag an {@code OperationTags} name
+   * @return {@code true} when the call cannot be a target now
+   */
+  boolean idle(String operationTag);
+
+  /**
    * Called before an executor service's {@code shutdown} or {@code shutdownNow}.
    *
    * @param operation a tag identifying the shutdown variant ({@code "shutdown"} or {@code

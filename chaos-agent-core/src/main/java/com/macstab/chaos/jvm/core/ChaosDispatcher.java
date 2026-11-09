@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.Internal;
+import com.macstab.chaos.jvm.api.OperationType;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
@@ -275,6 +276,26 @@ public final class ChaosDispatcher {
    */
   public ProcessDispatch process() {
     return process;
+  }
+
+  /**
+   * Returns whether no scenario is indexed for the operation an operation tag names, so advice can
+   * return before reading its target. {@link #SCHEDULE_SUBMIT_PERIODIC} is a {@code
+   * SCHEDULE_SUBMIT}, {@link #TRANSFER_TO} a {@code FILE_IO_READ} and {@link #TRANSFER_FROM} a
+   * {@code FILE_IO_WRITE}; every other tag is an {@link OperationType} name.
+   *
+   * @param operationTag the tag
+   * @return {@code true} when no scenario is indexed for the operation
+   */
+  public boolean idle(final String operationTag) {
+    final OperationType operation =
+        switch (operationTag) {
+          case SCHEDULE_SUBMIT_PERIODIC -> OperationType.SCHEDULE_SUBMIT;
+          case TRANSFER_TO -> OperationType.FILE_IO_READ;
+          case TRANSFER_FROM -> OperationType.FILE_IO_WRITE;
+          default -> OperationType.valueOf(operationTag);
+        };
+    return engine.idle(operation);
   }
 
   /**

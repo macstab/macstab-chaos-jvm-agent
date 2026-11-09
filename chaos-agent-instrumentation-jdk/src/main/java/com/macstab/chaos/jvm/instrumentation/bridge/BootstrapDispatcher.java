@@ -510,7 +510,7 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeJdbcTransactionRollback()}. */
   public static final int BEFORE_JDBC_TRANSACTION_ROLLBACK = 51;
 
-  // ── Later handles (52-75) ──────────────────────────────────────────────────
+  // ── Later handles (52-76) ──────────────────────────────────────────────────
   /** Handle index for {@link #beforeThreadSleep(long)}. */
   public static final int BEFORE_THREAD_SLEEP = 52;
 
@@ -586,8 +586,11 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeProcessWait(Object, long)}. */
   public static final int BEFORE_PROCESS_WAIT = 75;
 
+  /** Handle index for {@link #idle(String)}. */
+  public static final int IDLE = 76;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 76;
+  public static final int HANDLE_COUNT = 77;
 
   /** The header that carries a session id between services; {@code ChaosSession.HEADER}. */
   public static final String SESSION_HEADER = "X-Chaos-Session";
@@ -1841,7 +1844,40 @@ public final class BootstrapDispatcher {
    * @return the session id, or {@code null} when nothing must be sent
    */
   public static @Nullable String sessionHeaderFor(final String host) {
-    return SessionHeaderPolicy.allows(host) ? currentSessionId() : null;
+    // The session first: outside a session (nearly every call) the host is never parsed.
+    final String sessionId = currentSessionId();
+    return sessionId != null && SessionHeaderPolicy.allows(host) ? sessionId : null;
+  }
+
+  /**
+   * Returns whether no scenario is indexed for the operation {@code operationTag} names: advice
+   * that reads its target reflectively returns before reading anything. Also {@code true} without
+   * an installed agent and inside the agent ({@code DEPTH > 0}), where every other entry point
+   * returns at once too. {@link OperationTags#SCHEDULE_SUBMIT_PERIODIC} is a {@code
+   * SCHEDULE_SUBMIT}. A delegate failure answers {@code false}: the call is then evaluated as
+   * before.
+   *
+   * @param operationTag an {@link OperationTags} name
+   * @return {@code true} when the call cannot be a target now
+   */
+  public static boolean idle(final String operationTag) {
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return true;
+    }
+    final MethodHandle[] h = handles;
+    final Object d = delegate;
+    if (d == null || h == null) {
+      return true;
+    }
+    depth[0]++;
+    try {
+      return (boolean) h[IDLE].invoke(d, operationTag);
+    } catch (final Throwable throwable) {
+      return false;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**

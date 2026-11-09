@@ -42,6 +42,31 @@ public final class ClientCallExtractor {
         }
       };
 
+  /**
+   * The enclosing-instance field ({@code this$0}) per Netty {@code Unsafe} class, found once; an
+   * empty Optional records a class without one.
+   */
+  private static final ClassValue<Optional<Field>> OUTER_INSTANCE =
+      new ClassValue<>() {
+        @Override
+        protected Optional<Field> computeValue(final Class<?> type) {
+          for (Class<?> declaring = type;
+              declaring != null;
+              declaring = declaring.getSuperclass()) {
+            try {
+              final Field outer = declaring.getDeclaredField("this$0");
+              outer.setAccessible(true);
+              return Optional.of(outer);
+            } catch (final NoSuchFieldException notHere) {
+              // look further up
+            } catch (final RuntimeException inaccessible) {
+              return Optional.empty();
+            }
+          }
+          return Optional.empty();
+        }
+      };
+
   /** gRPC's own failing stream, built for a rejected call ({@link #grpcFailingStream}). */
   private static final String GRPC_FAILING_STREAM = "io.grpc.internal.FailingClientStream";
 
@@ -369,18 +394,12 @@ public final class ClientCallExtractor {
    */
   public static @Nullable Object nettyRemoteAddress(final Object unsafe) {
     try {
-      for (Class<?> type = unsafe.getClass(); type != null; type = type.getSuperclass()) {
-        final Field outer;
-        try {
-          outer = type.getDeclaredField("this$0");
-        } catch (final NoSuchFieldException notHere) {
-          continue;
-        }
-        outer.setAccessible(true);
-        final Object channel = outer.get(unsafe);
-        return channel == null ? null : invoke(channel, "remoteAddress");
+      final Optional<Field> outer = OUTER_INSTANCE.get(unsafe.getClass());
+      if (outer.isEmpty()) {
+        return null;
       }
-      return null;
+      final Object channel = outer.get().get(unsafe);
+      return channel == null ? null : invoke(channel, "remoteAddress");
     } catch (final Throwable unreadable) {
       return null;
     }

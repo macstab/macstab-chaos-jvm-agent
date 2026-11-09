@@ -10,7 +10,9 @@ import org.jspecify.annotations.Nullable;
  * Advice for client libraries: Kafka, gRPC, Jedis, Lettuce, R2DBC, the AWS SDK for Java v2 and
  * Netty. Each reads what its selector matches (see {@link ClientCallExtractor}) and reports the
  * call through {@link BootstrapDispatcher#beforeClientCall}; a reject throws the library's own
- * exception. The libraries are matched by name and never loaded by the agent.
+ * exception. The libraries are matched by name and never loaded by the agent. Advice that reads its
+ * target reflectively returns first while no scenario is indexed for its operation ({@link
+ * BootstrapDispatcher#idle}), so the read is paid only when a scenario could match.
  */
 final class ClientCallAdvice {
   private ClientCallAdvice() {}
@@ -53,6 +55,9 @@ final class ClientCallAdvice {
   static final class KafkaPoll {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object consumer) throws Throwable {
+      if (BootstrapDispatcher.idle(OperationTags.MESSAGE_RECEIVE)) {
+        return;
+      }
       final String topics;
       BootstrapDispatcher.beginInternalCall();
       try {
@@ -78,6 +83,9 @@ final class ClientCallAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
     static @Nullable Throwable enter(
         @Advice.This final Object provider, @Advice.Argument(0) final Object method) {
+      if (BootstrapDispatcher.idle(OperationTags.RPC_CALL)) {
+        return null;
+      }
       final String fullMethodName;
       BootstrapDispatcher.beginInternalCall();
       try {
@@ -124,7 +132,8 @@ final class ClientCallAdvice {
     static void enter(
         @Advice.This final Object connection, @Advice.Argument(0) final Object arguments)
         throws Throwable {
-      if (BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_REDIS_SETUP)) {
+      if (BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_REDIS_SETUP)
+          || BootstrapDispatcher.idle(OperationTags.REDIS_COMMAND)) {
         return;
       }
       final String command;
@@ -168,6 +177,9 @@ final class ClientCallAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
     static @Nullable Throwable enter(
         @Advice.This final Object connection, @Advice.Argument(0) final Object commands) {
+      if (BootstrapDispatcher.idle(OperationTags.REDIS_COMMAND)) {
+        return null;
+      }
       final String command;
       BootstrapDispatcher.beginInternalCall();
       try {
@@ -255,7 +267,9 @@ final class ClientCallAdvice {
     static void enter(
         @Advice.This final Object handler, @Advice.Argument(0) final Object executionParams)
         throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_CLIENT)) {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_CLIENT)
+          || BootstrapDispatcher.idle(OperationTags.AWS_SDK_CALL)) {
+        // Idle: the scope is entered, so the exit advice's exitScope still balances it.
         return;
       }
       try {
@@ -292,6 +306,9 @@ final class ClientCallAdvice {
   static final class NettyWrite {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object channel) throws Throwable {
+      if (BootstrapDispatcher.idle(OperationTags.NETTY_CHANNEL_WRITE)) {
+        return;
+      }
       final Object remote;
       BootstrapDispatcher.beginInternalCall();
       try {
@@ -308,6 +325,9 @@ final class ClientCallAdvice {
   static final class NettyRead {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object unsafe) throws Throwable {
+      if (BootstrapDispatcher.idle(OperationTags.NETTY_CHANNEL_READ)) {
+        return;
+      }
       final Object remote;
       BootstrapDispatcher.beginInternalCall();
       try {

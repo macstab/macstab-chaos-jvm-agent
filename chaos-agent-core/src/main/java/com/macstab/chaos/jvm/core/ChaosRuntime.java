@@ -389,6 +389,16 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Delegates to {@link ChaosDispatcher#idle(String)}.
+   *
+   * @param operationTag the operation tag the bridge passes
+   * @return {@code true} when no scenario is indexed for the operation
+   */
+  public boolean idle(final String operationTag) {
+    return dispatcher.idle(operationTag);
+  }
+
+  /**
    * Delegates to {@link ExecutorDispatch#decorateShutdownHook}.
    *
    * @param hook the shutdown hook being registered

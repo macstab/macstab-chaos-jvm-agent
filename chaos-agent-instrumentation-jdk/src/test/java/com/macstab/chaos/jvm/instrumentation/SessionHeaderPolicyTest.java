@@ -44,6 +44,21 @@ class SessionHeaderPolicyTest {
   }
 
   @Test
+  @DisplayName("a four-label host is an internal address only as four plain octets of 0 to 255")
+  void fourLabelHostsAreReadAsOctetsByHand() {
+    // Integer.parseInt took a sign and non-ASCII digits, and no octet was bounded: each of these
+    // was an internal 10.x address and received the session.
+    for (final String notAnAddress :
+        List.of("+10.0.0.1", "\uff11\uff10.0.0.1", "10.0.0.256", "10.0.0.1000", "10.0..1")) {
+      assertThat(SessionHeaderPolicy.allows(notAnAddress)).as(notAnAddress).isFalse();
+    }
+    for (final String name : List.of("a.b.c.d", "10.b.c.d", "10.0.0.1x")) {
+      assertThat(SessionHeaderPolicy.allows(name)).as(name).isFalse();
+    }
+    assertThat(SessionHeaderPolicy.allows("010.0.0.255")).isTrue();
+  }
+
+  @Test
   @DisplayName("adds configured globs, and * allows every host")
   void configuredHosts() {
     SessionHeaderPolicy.setExtraHosts(List.of(" *.Staging.Example.com ", ""));
