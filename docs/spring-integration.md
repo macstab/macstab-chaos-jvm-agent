@@ -303,6 +303,8 @@ Attaching a JVM agent is a launch-time decision, so `macstab.chaos.enabled=true`
 
 Every other source — Spring Cloud Config, Consul, Vault, a config file fetched from a URL, any remote or runtime override — is ignored with a warning. The value is read as Spring binds a boolean: `true|false|1|0|yes|no|on|off`; any other value leaves chaos off with a warning. To allow such sources, set `macstab.chaos.allow-remote-enable=true` through a trusted source (the opt-in is itself subject to the same check). The same decision gates **both** this processor and `ChaosAutoConfiguration` (via `OnTrustedChaosEnablementCondition`), so an untrusted source cannot attach the agent through the auto-configuration either.
 
+**Spring AOT**: with ahead-of-time processing (`processAot`, `-Dspring.aot.enabled=true`, a native image), `OnTrustedChaosEnablementCondition` is evaluated when the application is built, so whether `ChaosAutoConfiguration` and its beans exist is fixed by the build's environment; the early attach of `ChaosAgentEnvironmentPostProcessor` still reads the switch at run time. Set `macstab.chaos.enabled` (and `macstab.chaos.allow-remote-enable`, if used) identically at AOT build and at run time: a build without the switch has no `ChaosControlPlane` bean even when the switch is set at run time.
+
 **Why the `ChaosAutoConfiguration.chaosControlPlane()` bean still exists**: `ChaosAgentEnvironmentPostProcessor` attaches the agent but does not register the `ChaosControlPlane` as a Spring bean. The bean in `ChaosAutoConfiguration` is still needed to:
 - Expose `ChaosControlPlane` as an injectable bean for application code and the Actuator endpoint.
 - Back off via `@ConditionalOnMissingBean` when user code provides its own control plane.

@@ -338,9 +338,9 @@ public void setup() {
 }
 
 @Benchmark
-public void agentInstalled_zeroScenarios(ZeroScenariosState state, Blackhole bh)
+public void agentInstalled_zeroScenarios(ZeroScenariosState state)
         throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute("SELECT 1"));
+    state.dispatcher.client().beforeJdbcStatementExecute("SELECT 1");
 }
 ```
 

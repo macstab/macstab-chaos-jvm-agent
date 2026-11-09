@@ -937,7 +937,8 @@ sequenceDiagram
   Note over HP: @Advice.OnMethodEnter fires<br/>before method body
   HP->>Advice: HikariGetConnectionAdvice.enter(this)
   activate Advice
-  Advice->>Advice: poolName = JdbcTargetExtractor<br/>  .fromHikariPool(pool)<br/>  → reflective getPoolName()
+  Note over Advice: BootstrapDispatcher.idle(JDBC_CONNECTION_ACQUIRE)<br/>→ true: return (no scenario indexed)
+  Advice->>Advice: poolName = JdbcTargetExtractor<br/>  .fromHikariPool(pool) (as agent work)<br/>  → getPoolName() if the pool type has one<br/>  → else its own toString()<br/>  → else the class name<br/>  (lookups ClassValue-cached per class)
   Advice->>BD: beforeJdbcConnectionAcquire(poolName)
   activate BD
   Note over BD: DEPTH.get() == 0<br/>DEPTH.set(1)

@@ -9,9 +9,11 @@ the HTTP client layer.
 
 The chaos agent intercepts the `SOCKET_CONNECT` operations to the downstream's port (WireMock on a
 free port) and throws `ConnectException` on the first two (`maxApplications` 2). Spring's
-`RestTemplate` wraps the raw `ConnectException` in a `ResourceAccessException` (which extends
-`IOException`). Resilience4j is configured to retry on `IOException`, so the first two of the 3
-allowed attempts fail and the third gets through because the chaos cap is exhausted.
+`RestTemplate` wraps the raw `ConnectException` in a `ResourceAccessException`, a
+`RestClientException` (an unchecked exception, not an `IOException`). Resilience4j retries it
+because `application.properties` names `ResourceAccessException` in `retryExceptions`, so the
+first two of the 3 allowed attempts fail and the third gets through because the chaos cap is
+exhausted.
 
 The test asserts that `GET /fetch` returns 200 with body `"pong"`, and that the scenario rejected
 the first two connects (it ends with its second application, so the third connect is neither
@@ -60,5 +62,6 @@ above `maxAttempts` and observe the exception propagate to the controller.
 
 Testing retry with real socket failures (not mocked `RestClientException`) validates the full
 exception wrapping path: `ConnectException` → `ResourceAccessException` → Resilience4j retry
-trigger. A mock-only test would miss a misconfigured `retryExceptions` list that omits
-`IOException`.
+trigger. A mock-only test would miss a misconfigured `retryExceptions` list that names only
+`ConnectException` or `IOException`: neither matches the `ResourceAccessException` the caller
+actually sees.

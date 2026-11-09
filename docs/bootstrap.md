@@ -50,7 +50,7 @@ Out of scope:
 
 ---
 
-# 2. Engineerural Context
+# 2. Architectural Context
 
 **Dependencies** (outbound):
 - `chaos-agent-core` (`ChaosRuntime`)
