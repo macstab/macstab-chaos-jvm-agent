@@ -8,6 +8,7 @@ import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.ChaosValidationException;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.io.IOException;
@@ -19,6 +20,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.Set;
+import javax.chaostest.NoMessageFault;
+import javax.chaostest.PrivateMessageFault;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -109,34 +112,39 @@ class DecisionExecutionTest {
     }
 
     @Test
-    @DisplayName("a class that is not a Throwable fails with IllegalArgumentException naming it")
+    @DisplayName("a class that is not a Throwable is refused at activation, naming it")
     void notAThrowable() {
-      inject("java.lang.String", "boom");
-
-      assertThatThrownBy(() -> runtime.beforeMethodEnter(SERVICE, "charge"))
-          .isInstanceOf(IllegalArgumentException.class)
-          .hasMessageContaining("does not extend Throwable")
+      assertThatThrownBy(() -> inject("java.lang.String", "boom"))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("not a Throwable")
           .hasMessageContaining("java.lang.String");
     }
 
     @Test
-    @DisplayName("a missing class fails with a RuntimeException that keeps the cause")
+    @DisplayName("a missing class is refused at activation, naming it")
     void missingClass() {
-      inject("java.lang.NoSuchChaosException", "boom");
-
-      assertThatThrownBy(() -> runtime.beforeMethodEnter(SERVICE, "charge"))
-          .isExactlyInstanceOf(RuntimeException.class)
-          .hasMessageContaining("failed to instantiate java.lang.NoSuchChaosException")
-          .hasCauseInstanceOf(ClassNotFoundException.class);
+      assertThatThrownBy(() -> inject("java.lang.NoSuchChaosException", "boom"))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("not found by the agent's class loader")
+          .hasMessageContaining("java.lang.NoSuchChaosException");
     }
 
     @Test
-    @DisplayName("a private (String) constructor is used, with the configured message")
+    @DisplayName("a class whose (String) constructor is private is refused at activation")
     void privateMessageConstructor() {
-      inject(PrivateMessageFault.class.getName(), "card declined");
+      assertThatThrownBy(() -> inject(PrivateMessageFault.class.getName(), "card declined"))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("no public (String) or no-argument constructor");
+      assertThat(PrivateMessageFault.of("x")).hasMessage("x");
+    }
+
+    @Test
+    @DisplayName("a public (String) constructor receives the configured message")
+    void messageConstructor() {
+      inject("java.lang.IllegalStateException", "card declined");
 
       assertThatThrownBy(() -> runtime.beforeMethodEnter(SERVICE, "charge"))
-          .isInstanceOf(PrivateMessageFault.class)
+          .isExactlyInstanceOf(IllegalStateException.class)
           .hasMessage("card declined");
     }
 
@@ -149,26 +157,6 @@ class DecisionExecutionTest {
           .isInstanceOf(NoMessageFault.class)
           .cause()
           .hasMessage("card declined");
-    }
-  }
-
-  /** An injectable fault whose only constructor is a private (String) one. */
-  static final class PrivateMessageFault extends RuntimeException {
-    private static final long serialVersionUID = 1L;
-
-    @SuppressWarnings("UnusedMethod") // constructed reflectively by the injection
-    private PrivateMessageFault(final String message) {
-      super(message);
-    }
-  }
-
-  /** An injectable fault with only a private no-arg constructor. */
-  static final class NoMessageFault extends RuntimeException {
-    private static final long serialVersionUID = 1L;
-
-    @SuppressWarnings("UnusedMethod") // constructed reflectively by the injection
-    private NoMessageFault() {
-      super();
     }
   }
 

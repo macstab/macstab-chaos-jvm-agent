@@ -867,6 +867,17 @@ class ChaosPlanMapperTest {
     }
 
     @Test
+    @DisplayName("an injected exception outside java. and javax. is refused while reading")
+    void injectedExceptionOutsideAllowlist() {
+      assertThatThrownBy(
+              () ->
+                  effect(
+                      "{\"type\": \"exceptionInjection\", \"exceptionClassName\":"
+                          + " \"jakarta.ws.rs.NotFoundException\", \"message\": \"boom\"}"))
+          .isInstanceOf(ConfigLoadException.class);
+    }
+
+    @Test
     @DisplayName("metaspace pressure retains its classes by default")
     void retain() {
       assertThat(effect("{\"type\": \"metaspacePressure\", \"generatedClassCount\": 10}"))

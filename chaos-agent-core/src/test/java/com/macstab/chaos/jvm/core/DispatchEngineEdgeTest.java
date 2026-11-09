@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.util.Set;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeoutException;
+import javax.chaostest.PreCausedException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -42,14 +43,6 @@ class DispatchEngineEdgeTest {
   }
 
   /** A Throwable whose only constructor sets its own cause, so a later initCause is refused. */
-  public static final class PreCausedException extends RuntimeException {
-    private static final long serialVersionUID = 1L;
-
-    public PreCausedException() {
-      super(new IllegalArgumentException("own cause"));
-    }
-  }
-
   @Nested
   @DisplayName("transferCount")
   class ReadCount {
@@ -123,7 +116,8 @@ class DispatchEngineEdgeTest {
       final Throwable failure =
           FailureFactory.injected(
               new ChaosEffect.ExceptionInjectionEffect(
-                  PreCausedException.class.getName(), "configured message", true));
+                  PreCausedException.class.getName(), "configured message", true),
+              FailureFactory.injectedConstructor(PreCausedException.class.getName()));
       assertThat(failure)
           .isInstanceOf(PreCausedException.class)
           .cause()

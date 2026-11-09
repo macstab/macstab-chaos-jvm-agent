@@ -1,8 +1,11 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosValidationException;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.io.IOException;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Modifier;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeoutException;
 import org.jspecify.annotations.Nullable;
@@ -473,56 +476,81 @@ final class FailureFactory {
   }
 
   /**
-   * Creates the exception an {@link ChaosEffect.ExceptionInjectionEffect} names, with its message.
-   * The class is loaded without initialisation: running {@code <clinit>} of a configured class
-   * while building the exception would make the injection a class-loading gadget (the package
-   * allow-list in {@code ExceptionInjectionEffect} is the primary gate).
+   * Resolves the exception class an {@link ChaosEffect.ExceptionInjectionEffect} names, through the
+   * agent's class loader and without initialising it: a public, non-abstract {@link Throwable}
+   * class with a public {@code (String)} or no-argument constructor. No access check is suppressed.
+   * The validator calls it to refuse a class at activation; the scenario's controller keeps the
+   * constructor it returns.
+   *
+   * @param className the class's binary name
+   * @return the {@code (String)} constructor, or the no-argument one when there is none
+   * @throws ChaosValidationException naming the class and why it cannot be injected
+   */
+  static Constructor<? extends Throwable> injectedConstructor(final String className) {
+    final Class<?> type;
+    try {
+      type = Class.forName(className, false, ChaosDispatcher.class.getClassLoader());
+    } catch (final ClassNotFoundException | LinkageError absent) {
+      throw new ChaosValidationException(
+          "exception class not found by the agent's class loader: " + className);
+    }
+    if (!Throwable.class.isAssignableFrom(type)) {
+      throw new ChaosValidationException("exception class is not a Throwable: " + className);
+    }
+    if (!Modifier.isPublic(type.getModifiers()) || Modifier.isAbstract(type.getModifiers())) {
+      throw new ChaosValidationException(
+          "exception class must be public and not abstract: " + className);
+    }
+    final Class<? extends Throwable> throwable = type.asSubclass(Throwable.class);
+    try {
+      return throwable.getConstructor(String.class);
+    } catch (final NoSuchMethodException noMessage) {
+      try {
+        return throwable.getConstructor();
+      } catch (final NoSuchMethodException none) {
+        throw new ChaosValidationException(
+            "exception class has no public (String) or no-argument constructor: " + className);
+      }
+    }
+  }
+
+  /**
+   * Creates the exception an {@link ChaosEffect.ExceptionInjectionEffect} names, with its message,
+   * through the constructor {@link #injectedConstructor} resolved at activation. Called for the
+   * winning contribution only.
    *
    * @param effect the effect
+   * @param constructor the class's {@code (String)} or no-argument constructor
    * @return the exception, trimmed to the call site, or without a stack trace when the effect asks
-   *     for none; a {@link RuntimeException} naming the class when it cannot be built
+   *     for none; a {@link RuntimeException} naming the class when its constructor fails
    */
-  static Throwable injected(final ChaosEffect.ExceptionInjectionEffect effect) {
+  static Throwable injected(
+      final ChaosEffect.ExceptionInjectionEffect effect,
+      final Constructor<? extends Throwable> constructor) {
+    final Throwable instance;
     try {
-      final Class<?> exClass =
-          Class.forName(effect.exceptionClassName(), false, ChaosDispatcher.class.getClassLoader());
-      if (!Throwable.class.isAssignableFrom(exClass)) {
-        return atCallSite(
-            new IllegalArgumentException(
-                "chaos-agent: configured exception class does not extend Throwable: "
-                    + effect.exceptionClassName()));
-      }
-      Throwable instance;
-      try {
-        final java.lang.reflect.Constructor<?> stringCtor =
-            exClass.getDeclaredConstructor(String.class);
-        stringCtor.setAccessible(true);
-        instance = (Throwable) stringCtor.newInstance(effect.message());
-      } catch (final NoSuchMethodException noMsg) {
+      if (constructor.getParameterCount() == 1) {
+        instance = constructor.newInstance(effect.message());
+      } else {
         // No (String) constructor: the message is kept as the cause, so the scenario that fired
         // stays visible in logs.
-        final java.lang.reflect.Constructor<?> noArgCtor = exClass.getDeclaredConstructor();
-        noArgCtor.setAccessible(true);
-        instance = (Throwable) noArgCtor.newInstance();
-        final String msg = effect.message();
-        if (msg != null && !msg.isEmpty()) {
-          try {
-            instance.initCause(new RuntimeException(msg));
-          } catch (final IllegalStateException alreadyInitialised) {
-            // The no-arg constructor set its own cause; it is kept.
-          }
+        instance = constructor.newInstance();
+        try {
+          instance.initCause(new RuntimeException(effect.message()));
+        } catch (final IllegalStateException alreadyInitialised) {
+          // The no-arg constructor set its own cause; it is kept.
         }
       }
-      if (!effect.withStackTrace()) {
-        instance.setStackTrace(new StackTraceElement[0]);
-        return instance;
-      }
-      return atCallSite(instance);
     } catch (final ReflectiveOperationException reflective) {
       return atCallSite(
           new RuntimeException(
               "chaos-agent: failed to instantiate " + effect.exceptionClassName(), reflective));
     }
+    if (!effect.withStackTrace()) {
+      instance.setStackTrace(new StackTraceElement[0]);
+      return instance;
+    }
+    return atCallSite(instance);
   }
 
   /**

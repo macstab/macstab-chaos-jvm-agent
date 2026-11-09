@@ -52,6 +52,7 @@
 | 33 | The JDK's own use of a general primitive is not a target (L3a) | a scenario with an unnarrowed selector expects to hit class loading, the `CompletableFuture` timers, `/dev/urandom`, the JDK `HttpClient`'s selector, JDK-private ThreadLocals, the serialization hooks, a pool worker's lock, or the agent's MBean; a test counts those evaluations | target your own code's calls; name `/dev/urandom` in a path pattern or a JDK `ThreadLocal` / `ThreadPoolExecutor$Worker` class in the pattern to reach it (§33) |
 | 34 | Method hooks never weave JDK classes; match-all method selectors are refused | a `MethodSelector` names a JDK class (`java.*`, `jdk.*`, `sun.*`, a platform-loader module), or pairs two match-all patterns such as `glob("*")` and `regex(".*")` | target your own classes; narrow the class or the method pattern (§34) |
 | 35 | `EXECUTOR_SUBMIT` covers scheduled and virtual-thread executors | a scenario counts or delays `EXECUTOR_SUBMIT` expecting only `ThreadPoolExecutor`, matches an STPE's `execute` / `submit` as `SCHEDULE_SUBMIT` | narrow by `executorClassPattern`; select the STPE submission as `EXECUTOR_SUBMIT` (§35) |
+| 36 | Injected exceptions are JDK classes, resolved at activation | an `ExceptionInjectionEffect` names a `jakarta.` or agent class, or a class that is abstract, not public, not a `Throwable` or has no public `(String)` / no-argument constructor | name a public JDK exception class (§36) |
 
 ---
 
@@ -417,6 +418,11 @@ A scenario on a general primitive (file reads, ZIP inflation, direct buffers, GC
 - An STPE's `execute` / `submit` is no longer a `SCHEDULE_SUBMIT` (it used to be, through the `schedule` it calls). Its task still fires `SCHEDULE_TICK`, and `schedule*` calls are still `SCHEDULE_SUBMIT`. Select the submission with an `ExecutorSelector` on `EXECUTOR_SUBMIT` instead.
 - A `suppress` on such a submission replaces the task with a no-op: the future completes with `null` and is not cancelled (a `ThreadPoolExecutor`'s `submit` future is cancelled, as before).
 - `ForkJoinPool` (the common pool, `CompletableFuture.*Async`, JDK 25's `ForkJoinPool.schedule*`) is not hooked for `EXECUTOR_SUBMIT`.
+
+## 36. Injected exceptions are JDK classes, resolved at activation
+
+- `ExceptionInjectionEffect` accepts `java.` and `javax.` class names only. A `jakarta.` or `com.macstab.chaos.jvm.` name is refused when the effect is built (`IllegalArgumentException`; `ConfigLoadException` when a plan is read). Inject the JDK exception the application handles (`java.io.IOException`, `java.sql.SQLException`, `java.lang.IllegalStateException`, …).
+- The class is resolved when the scenario is activated, not on the first intercepted call: a class the agent's class loader cannot find, a class that is not a `Throwable`, a non-public or abstract class (`java.lang.VirtualMachineError`) or one without a public `(String)` or no-argument constructor (`java.util.concurrent.CompletionException`) fails the activation with `ChaosValidationException`. 1.x threw an `IllegalArgumentException` or `RuntimeException` from the woven method instead.
 
 ---
 

@@ -7,6 +7,7 @@ import com.macstab.chaos.jvm.api.ChaosEvent;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException;
 import java.lang.instrument.Instrumentation;
+import java.lang.reflect.Constructor;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -117,6 +118,9 @@ final class ScenarioController {
   /** Base seed for PRNG draws; derived once from the scenario's randomSeed (or 0). */
   private final long baseSeed;
 
+  /** The constructor of an injected exception, resolved once; {@code null} for other effects. */
+  private final @Nullable Constructor<? extends Throwable> injectedException;
+
   ScenarioController(
       final ChaosScenario scenario,
       final String scopeKey,
@@ -173,6 +177,20 @@ final class ScenarioController {
     // window where a controller is ACTIVE with started=false is while start() delivers STARTED:
     // a call evaluated then is neither matched nor applied, so no effect precedes STARTED.
     this.state = ChaosDiagnostics.ScenarioState.REGISTERED;
+    this.injectedException =
+        scenario.effect() instanceof ChaosEffect.ExceptionInjectionEffect injection
+            ? FailureFactory.injectedConstructor(injection.exceptionClassName())
+            : null;
+  }
+
+  /**
+   * Returns the constructor of the exception an {@link ChaosEffect.ExceptionInjectionEffect}
+   * injects, resolved when this controller was created.
+   *
+   * @return the constructor; {@code null} when the effect injects no exception
+   */
+  @Nullable Constructor<? extends Throwable> injectedException() {
+    return injectedException;
   }
 
   /**

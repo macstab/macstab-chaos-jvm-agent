@@ -5,6 +5,8 @@
 
 Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
+* **api, core:** an `ExceptionInjectionEffect` may name `java.` and `javax.` classes only (`jakarta.` and `com.macstab.chaos.jvm.` are refused when the effect is built), and the class is resolved at activation: a class the agent's class loader cannot find, a non-`Throwable`, a non-public or abstract class (`VirtualMachineError`) or one without a public `(String)` or no-argument constructor (`CompletionException`) fails the activation with `ChaosValidationException` instead of throwing something else from the woven method ([migration §36](docs/migration-2.0.md#36-injected-exceptions-are-jdk-classes-resolved-at-activation)).
+
 * **instrumentation:** `EXECUTOR_SUBMIT` also covers `execute` / `submit` of a `ScheduledThreadPoolExecutor` and of the virtual-thread-per-task executor (`Executors.newVirtualThreadPerTaskExecutor()`), once per call; it covered `ThreadPoolExecutor.execute` only. An STPE's `execute` / `submit` is no longer a `SCHEDULE_SUBMIT` (its task still fires `SCHEDULE_TICK`), and a suppressed STPE or virtual-thread submission completes its future with `null` ([migration §35](docs/migration-2.0.md#35-executor_submit-covers-scheduled-and-virtual-thread-executors)).
 
 * **api, instrumentation:** method hooks never weave a JDK class (one of the bootstrap or platform class loader), whatever a `MethodSelector` names: `exact("java.util.HashMap")` + `get` was woven into every `HashMap.get` of the JVM. A `MethodSelector` whose class and method patterns both match everything is refused with `IllegalArgumentException`, now also for a `GLOB` of `*` only (`glob("*")`, `glob(null)`) and the `REGEX` `.*`, `^.*$` and `.*+`, not only `ANY` (migration §34).

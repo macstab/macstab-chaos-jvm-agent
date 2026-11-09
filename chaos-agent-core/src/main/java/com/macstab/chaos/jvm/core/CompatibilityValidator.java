@@ -489,9 +489,11 @@ final class CompatibilityValidator {
 
   private static void validateExceptionInjectionSelector(
       final ChaosEffect effect, final ChaosSelector selector) {
-    if (!(effect instanceof ChaosEffect.ExceptionInjectionEffect)) {
+    if (!(effect instanceof ChaosEffect.ExceptionInjectionEffect injection)) {
       return;
     }
+    // The class must be one the agent can throw: refused now, not when the method is called.
+    FailureFactory.injectedConstructor(injection.exceptionClassName());
     if (!(selector instanceof ChaosSelector.MethodSelector)) {
       throw new ChaosValidationException("ExceptionInjectionEffect requires MethodSelector");
     }

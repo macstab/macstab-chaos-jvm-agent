@@ -189,17 +189,23 @@ class ChaosEffectFactoriesTest {
     @Test
     @DisplayName("a class in any allowed package is accepted")
     void allowedPackages() {
-      final List<String> accepted =
-          List.of(
-              "java.io.IOException",
-              "javax.net.ssl.SSLException",
-              "jakarta.ws.Boom",
-              "com.macstab.chaos.jvm.X");
+      final List<String> accepted = List.of("java.io.IOException", "javax.net.ssl.SSLException");
       assertThat(accepted)
           .map(
               name ->
                   new ChaosEffect.ExceptionInjectionEffect(name, "m", true).exceptionClassName())
           .containsExactlyElementsOf(accepted);
+    }
+
+    @Test
+    @DisplayName("jakarta. and the agent's packages are no longer allowed")
+    void formerlyAllowedPackagesAreRefused() {
+      for (final String name : List.of("jakarta.ws.Boom", "com.macstab.chaos.jvm.X")) {
+        assertThatThrownBy(() -> new ChaosEffect.ExceptionInjectionEffect(name, "m", true))
+            .as(name)
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("allowed package");
+      }
     }
   }
 

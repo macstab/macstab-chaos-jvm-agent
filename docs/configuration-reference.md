@@ -132,7 +132,7 @@ If no source is present, the agent starts with no active scenarios. Programmatic
 - **Agent arguments** are set by the process launcher (CI scripts, test harness, Docker entrypoint). They are fully trusted; no further validation of their origin is performed.
 - **Environment variables** are subject to the same trust as the OS process environment. In containerized deployments, they originate from the Kubernetes secret/configmap injection path.
 - **Config files** are validated for path safety (no symlink traversal, no path outside a configured root) by `StartupConfigLoader` before reading.
-- **Exception class names** in `ExceptionInjectionEffect` are restricted to `java.`, `javax.`, `jakarta.`, and `com.macstab.chaos.jvm.` packages to prevent `Class.forName` from loading arbitrary attacker-controlled classes from a hostile config file.
+- **Exception class names** in `ExceptionInjectionEffect` are restricted to `java.` and `javax.` packages, so no plan makes the agent load an application or library class; the class is loaded without initialisation and only through public constructors.
 
 ---
 
@@ -1539,7 +1539,7 @@ The native library's DNS answer effects. `DNS_RESOLVE` fires before a lookup (de
 #### `exceptionInjection` — ExceptionInjectionEffect
 
 **JSON type:** `"exceptionInjection"`  
-**Purpose:** Throw an instance of any exception class at method entry before the method body executes. Only valid with `MethodSelector` + `METHOD_ENTER`. Uses `Unsafe.throwException` to bypass checked-exception enforcement.
+**Purpose:** Throw an instance of a JDK exception class at method entry before the method body executes. Only valid with `MethodSelector` + `METHOD_ENTER`. A checked exception is thrown as it is (a sneaky throw, which the compiler cannot check).
 
 **Fields:**
 
@@ -1547,9 +1547,11 @@ The native library's DNS answer effects. `DNS_RESOLVE` fires before a lookup (de
 |----------------------|---------|-------------------------------------------------|-------------------------------------------------------------------|
 | `exceptionClassName` | String  | Valid binary class name; allowed package prefix | Fully-qualified binary class name (e.g., `"java.io.IOException"`) |
 | `message`            | String  | non-blank                                       | Exception message                                                 |
-| `withStackTrace`     | boolean | default `true`                                  | `false` = no stack trace; lower overhead, less detectable         |
+| `withStackTrace`     | boolean | default `true`                                  | `false` = the stack trace its constructor filled is cleared       |
 
-**Allowed package prefixes:** `java.`, `javax.`, `jakarta.`, `com.macstab.chaos.jvm.`
+**Allowed package prefixes:** `java.`, `javax.` (any other name is refused when the effect is built: `IllegalArgumentException`, `ConfigLoadException` when a plan is read).
+
+**Resolved at activation:** the class is loaded through the agent's class loader without being initialised and must be a public, non-abstract `Throwable` with a public `(String)` or no-argument constructor; otherwise the activation fails with `ChaosValidationException` naming the class and the reason (not found by the agent's class loader, not a `Throwable`, not public or abstract such as `java.lang.VirtualMachineError`, no usable constructor such as `java.util.concurrent.CompletionException`). The `(String)` constructor receives the message; with only a no-argument one the message becomes the cause. The exception is built once per call, for the scenario that wins.
 
 **JSON example:**
 ```json

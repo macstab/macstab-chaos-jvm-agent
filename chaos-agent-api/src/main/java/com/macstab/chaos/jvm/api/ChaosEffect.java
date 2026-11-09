@@ -1087,13 +1087,16 @@ public sealed interface ChaosEffect
    * Injects an exception at the entry of a matched method, before the method body executes. Only
    * valid with {@link ChaosSelector.MethodSelector} using {@link OperationType#METHOD_ENTER}.
    *
-   * <p>The exception is instantiated via reflection using a (String) constructor when available, or
-   * the no-arg constructor otherwise. Both checked exceptions and Error subclasses
-   * (StackOverflowError, OutOfMemoryError) are supported — the runtime uses Unsafe.throwException
-   * to bypass compiler checked-exception enforcement.
+   * <p>The class must be in a {@code java.} or {@code javax.} package (checked here, {@link
+   * IllegalArgumentException}), and a public, non-abstract {@link Throwable} with a public {@code
+   * (String)} or no-argument constructor that the agent's class loader can see (checked at
+   * activation, {@link ChaosValidationException}). It is loaded without being initialised. The
+   * {@code (String)} constructor receives the message; with only a no-argument constructor the
+   * message becomes the cause. Checked exceptions and errors ({@code StackOverflowError}, {@code
+   * OutOfMemoryError}) are thrown as they are (a sneaky throw, which the compiler cannot check).
    *
-   * <p>When withStackTrace is false the exception is constructed without a stack trace, which is
-   * faster and not detectable by callers inspecting the stack trace.
+   * <p>When withStackTrace is false the exception's stack trace, filled by its constructor, is
+   * cleared before it is thrown.
    *
    * @param exceptionClassName binary name of the exception class to instantiate
    * @param message non-blank message passed to the exception constructor
@@ -1102,14 +1105,11 @@ public sealed interface ChaosEffect
   record ExceptionInjectionEffect(String exceptionClassName, String message, boolean withStackTrace)
       implements ChaosEffect {
     /**
-     * Package prefixes permitted for injected exception classes. Restricting to JDK and project
-     * packages removes {@code Class.forName} as a class-loading gadget: a malicious config file
-     * cannot coerce the runtime into initialising an arbitrary class under the attacker's control
-     * (e.g. one with a static initialiser performing a side effect). Extending the list is a
-     * deliberate decision — add only classes that are known to be safe to load.
+     * Package prefixes permitted for injected exception classes: the JDK's. A plan can name no
+     * application or library class, so no plan makes the agent load one.
      */
     private static final java.util.List<String> ALLOWED_PACKAGE_PREFIXES =
-        java.util.List.of("java.", "javax.", "jakarta.", "com.macstab.chaos.jvm.");
+        java.util.List.of("java.", "javax.");
 
     /**
      * Compiled binary class-name validator. Using a pre-compiled {@link java.util.regex.Pattern}
@@ -1130,7 +1130,7 @@ public sealed interface ChaosEffect
       }
       if (!isAllowedPackage(exceptionClassName)) {
         throw new IllegalArgumentException(
-            "exceptionClassName is not in an allowed package (java., javax., jakarta., com.macstab.chaos.jvm.): "
+            "exceptionClassName is not in an allowed package (java., javax.): "
                 + exceptionClassName);
       }
       if (message == null || message.isBlank()) {

@@ -339,7 +339,9 @@ final class DispatchEngine {
                   exceptionalCompletionEffect.message()));
     }
     if (effect instanceof ChaosEffect.ExceptionInjectionEffect injectionEffect) {
-      return new TerminalAction.Throw(() -> FailureFactory.injected(injectionEffect));
+      final java.lang.reflect.Constructor<? extends Throwable> constructor =
+          java.util.Objects.requireNonNull(controller.injectedException(), "injectedException");
+      return new TerminalAction.Throw(() -> FailureFactory.injected(injectionEffect, constructor));
     }
     if (effect instanceof ChaosEffect.ReturnValueCorruptionEffect corruptEffect) {
       // A void method, or a return type that cannot be loaded, has no value to corrupt.
