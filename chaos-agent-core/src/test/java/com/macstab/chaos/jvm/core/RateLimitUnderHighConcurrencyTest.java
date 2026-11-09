@@ -9,9 +9,12 @@ import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -71,23 +74,29 @@ class RateLimitUnderHighConcurrencyTest {
                 .build());
 
         final CountDownLatch startLatch = new CountDownLatch(1);
+        final List<Future<?>> futures = new ArrayList<>();
         final var executor = Executors.newFixedThreadPool(THREAD_COUNT);
         try {
           for (int i = 0; i < THREAD_COUNT; i++) {
-            executor.submit(
-                () -> {
-                  try {
-                    startLatch.await();
-                  } catch (final InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                  }
-                  runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-                });
+            futures.add(
+                executor.submit(
+                    () -> {
+                      try {
+                        startLatch.await();
+                      } catch (final InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                      }
+                      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                    }));
           }
           startLatch.countDown();
           executor.shutdown();
           assertThat(executor.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
+          // A worker that failed reports it here, not in a future nobody reads.
+          for (final Future<?> future : futures) {
+            future.get(15, TimeUnit.SECONDS);
+          }
         } finally {
           executor.shutdownNow();
         }
@@ -131,23 +140,29 @@ class RateLimitUnderHighConcurrencyTest {
                 .build());
 
         final CountDownLatch startLatch = new CountDownLatch(1);
+        final List<Future<?>> futures = new ArrayList<>();
         final var executor = Executors.newFixedThreadPool(THREAD_COUNT);
         try {
           for (int i = 0; i < THREAD_COUNT; i++) {
-            executor.submit(
-                () -> {
-                  try {
-                    startLatch.await();
-                  } catch (final InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                  }
-                  runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-                });
+            futures.add(
+                executor.submit(
+                    () -> {
+                      try {
+                        startLatch.await();
+                      } catch (final InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                      }
+                      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                    }));
           }
           startLatch.countDown();
           executor.shutdown();
           assertThat(executor.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
+          // A worker that failed reports it here, not in a future nobody reads.
+          for (final Future<?> future : futures) {
+            future.get(15, TimeUnit.SECONDS);
+          }
         } finally {
           executor.shutdownNow();
         }
@@ -197,23 +212,29 @@ class RateLimitUnderHighConcurrencyTest {
                 .build());
 
         final CountDownLatch startLatch = new CountDownLatch(1);
+        final List<Future<?>> futures = new ArrayList<>();
         final var executor = Executors.newFixedThreadPool(threads);
         try {
           for (int i = 0; i < threads; i++) {
-            executor.submit(
-                () -> {
-                  try {
-                    startLatch.await();
-                  } catch (final InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                  }
-                  runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-                });
+            futures.add(
+                executor.submit(
+                    () -> {
+                      try {
+                        startLatch.await();
+                      } catch (final InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                      }
+                      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                    }));
           }
           startLatch.countDown();
           executor.shutdown();
           assertThat(executor.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
+          // A worker that failed reports it here, not in a future nobody reads.
+          for (final Future<?> future : futures) {
+            future.get(15, TimeUnit.SECONDS);
+          }
         } finally {
           executor.shutdownNow();
         }

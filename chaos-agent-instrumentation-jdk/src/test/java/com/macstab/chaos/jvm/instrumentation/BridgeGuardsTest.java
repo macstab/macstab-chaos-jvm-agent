@@ -6,6 +6,7 @@ import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
@@ -13,9 +14,11 @@ import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.lang.reflect.RecordComponent;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.time.Duration;
@@ -25,13 +28,17 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinTask;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 /**
  * The two guards every bridge entry point opens with, over every entry point: without an installed
@@ -82,14 +89,25 @@ class BridgeGuardsTest {
   }
 
   @Test
+  // Same thread (the default): the guard is the DEPTH ThreadLocal of the thread that raised it.
+  @Timeout(10)
   @DisplayName("inside the agent's own work every entry point passes the call through (L3)")
   void passThroughInsideAgentWork() throws Exception {
     final ChaosRuntime runtime = new ChaosRuntime();
     try (AutoCloseable connected = JdkInstrumentationInstaller.connectDispatcher(runtime)) {
-      // A reject on every operation: any entry point that evaluated would throw.
-      for (final OperationType operation : EnumSet.allOf(OperationType.class)) {
-        activateRejectFor(runtime, operation);
+      // A scenario on every operation, with the effect it accepts first of a reject, an errno, a
+      // 30 s delay and a clock skew: an entry point that evaluated would throw, return something
+      // else, or wait.
+      final EnumSet<OperationType> covered = EnumSet.noneOf(OperationType.class);
+      for (final Map.Entry<OperationType, List<ChaosSelector>> operation :
+          selectorsByOperation().entrySet()) {
+        if (activateFor(runtime, operation.getKey(), operation.getValue())) {
+          covered.add(operation.getKey());
+        }
       }
+      final Set<OperationType> without = EnumSet.complementOf(covered);
+      without.remove(OperationType.LIFECYCLE);
+      assertThat(without).as("operations without an active scenario").isEmpty();
       BootstrapDispatcher.beginInternalCall();
       try {
         assertPassThrough("inside agent work");
@@ -331,17 +349,106 @@ class BridgeGuardsTest {
     return new Object();
   }
 
-  private static void activateRejectFor(final ChaosRuntime runtime, final OperationType operation) {
-    try {
-      runtime.activate(
-          ChaosScenario.builder("reject-" + operation)
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.jvmRuntime(Set.of(operation)))
-              .effect(ChaosEffect.delay(Duration.ofSeconds(30)))
-              .activationPolicy(ActivationPolicy.always())
-              .build());
-    } catch (final RuntimeException notApplicable) {
-      // not every operation takes this selector; the others are covered by the depth guard alone
+  /**
+   * Activates a scenario on {@code operation} with the first effect one of its selectors accepts: a
+   * reject, else an errno, else a 30 s delay.
+   *
+   * @return whether one was activated
+   */
+  private static boolean activateFor(
+      final ChaosRuntime runtime,
+      final OperationType operation,
+      final List<ChaosSelector> selectors) {
+    final List<ChaosEffect> effects = new ArrayList<>();
+    effects.add(ChaosEffect.reject("guard"));
+    for (final ChaosEffect.Errno errno : ChaosEffect.Errno.values()) {
+      effects.add(ChaosEffect.errno(errno));
     }
+    effects.add(ChaosEffect.delay(Duration.ofSeconds(30)));
+    // The clock reads take only a skew.
+    effects.add(ChaosEffect.skewClock(Duration.ofHours(1), ChaosEffect.ClockSkewMode.FIXED));
+    for (final ChaosEffect effect : effects) {
+      for (final ChaosSelector selector : selectors) {
+        try {
+          runtime.activate(
+              ChaosScenario.builder("guard-" + operation)
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(selector)
+                  .effect(effect)
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+          return true;
+        } catch (final RuntimeException refused) {
+          // this selector does not take this effect; try the next
+        }
+      }
+    }
+    return false;
+  }
+
+  // Copied from EffectReachesTheCallTest (chaos-agent-core): the modules share no test fixtures.
+
+  /** For each operation, the selectors (with no filter) that select only that operation. */
+  private static Map<OperationType, List<ChaosSelector>> selectorsByOperation() {
+    final Map<OperationType, List<ChaosSelector>> selectors = new EnumMap<>(OperationType.class);
+    for (final Class<?> type : ChaosSelector.class.getPermittedSubclasses()) {
+      for (final OperationType operation : OperationType.values()) {
+        ChaosSelector selector = unfiltered(type, operation, false);
+        if (selector == null) {
+          // A method selector needs one pattern that is not ANY: it names this test class.
+          selector = unfiltered(type, operation, true);
+        }
+        if (selector != null) {
+          selectors.computeIfAbsent(operation, any -> new ArrayList<>()).add(selector);
+        }
+      }
+    }
+    return selectors;
+  }
+
+  private static @Nullable ChaosSelector unfiltered(
+      final Class<?> type, final OperationType operation, final boolean nameProbe) {
+    final RecordComponent[] components = type.getRecordComponents();
+    if (components == null
+        || Arrays.stream(components).noneMatch(c -> c.getName().equals("operations"))) {
+      return null;
+    }
+    final Object[] arguments = new Object[components.length];
+    final Class<?>[] parameterTypes = new Class<?>[components.length];
+    boolean named = !nameProbe;
+    for (int index = 0; index < components.length; index++) {
+      parameterTypes[index] = components[index].getType();
+      if (components[index].getName().equals("operations")) {
+        arguments[index] = EnumSet.of(operation);
+      } else if (parameterTypes[index] == NamePattern.class) {
+        arguments[index] =
+            named ? NamePattern.any() : NamePattern.exact(BridgeGuardsTest.class.getName());
+        named = true;
+      } else {
+        arguments[index] = defaultValue(parameterTypes[index]);
+      }
+    }
+    try {
+      final Constructor<?> canonical = type.getDeclaredConstructor(parameterTypes);
+      canonical.setAccessible(true);
+      return (ChaosSelector) canonical.newInstance(arguments);
+    } catch (final InvocationTargetException rejected) {
+      return null;
+    } catch (final ReflectiveOperationException unreachable) {
+      throw new IllegalStateException(type.getName(), unreachable);
+    }
+  }
+
+  private static @Nullable Object defaultValue(final Class<?> type) {
+    if (type == boolean.class) {
+      return false;
+    }
+    if (type == int.class) {
+      return 0;
+    }
+    if (type == long.class) {
+      return 0L;
+    }
+    return null;
   }
 }

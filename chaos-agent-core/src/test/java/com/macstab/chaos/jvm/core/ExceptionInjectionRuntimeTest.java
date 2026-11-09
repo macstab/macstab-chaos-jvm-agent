@@ -90,11 +90,10 @@ class ExceptionInjectionRuntimeTest {
               .activationPolicy(ActivationPolicy.always())
               .build());
 
-      try {
-        runtime.beforeMethodEnter("com.example.Service", "doWork");
-      } catch (final RuntimeException e) {
-        assertThat(e.getStackTrace()).isEmpty();
-      }
+      assertThatThrownBy(() -> runtime.beforeMethodEnter("com.example.Service", "doWork"))
+          .isExactlyInstanceOf(RuntimeException.class)
+          .hasMessage("no-trace")
+          .satisfies(thrown -> assertThat(thrown.getStackTrace()).isEmpty());
     }
   }
 

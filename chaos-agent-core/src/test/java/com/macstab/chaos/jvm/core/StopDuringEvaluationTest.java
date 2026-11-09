@@ -10,9 +10,12 @@ import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
@@ -128,49 +131,56 @@ class StopDuringEvaluationTest {
         final AtomicInteger unexpectedErrors = new AtomicInteger(0);
         final AtomicInteger successfulEvals = new AtomicInteger(0);
 
+        final List<Future<?>> futures = new ArrayList<>();
         final var executor = Executors.newFixedThreadPool(THREAD_COUNT + 1);
         try {
           // Evaluation threads
           for (int i = 0; i < THREAD_COUNT; i++) {
-            executor.submit(
-                () -> {
-                  try {
-                    startLatch.await();
-                  } catch (final InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                  }
-                  for (int j = 0; j < ITERATIONS_PER_THREAD; j++) {
-                    try {
-                      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-                      successfulEvals.incrementAndGet();
-                    } catch (final Exception e) {
-                      // RejectedExecutionException from a reject effect is expected;
-                      // any other exception type is a bug.
-                      if (!(e instanceof java.util.concurrent.RejectedExecutionException)) {
-                        unexpectedErrors.incrementAndGet();
+            futures.add(
+                executor.submit(
+                    () -> {
+                      try {
+                        startLatch.await();
+                      } catch (final InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
                       }
-                    }
-                  }
-                });
+                      for (int j = 0; j < ITERATIONS_PER_THREAD; j++) {
+                        try {
+                          runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                          successfulEvals.incrementAndGet();
+                        } catch (final Exception e) {
+                          // RejectedExecutionException from a reject effect is expected;
+                          // any other exception type is a bug.
+                          if (!(e instanceof java.util.concurrent.RejectedExecutionException)) {
+                            unexpectedErrors.incrementAndGet();
+                          }
+                        }
+                      }
+                    }));
           }
 
           // Stop thread: calls stop() after a brief head start for evaluations
-          executor.submit(
-              () -> {
-                try {
-                  startLatch.await();
-                  Thread.sleep(2); // Let evaluations begin
-                } catch (final InterruptedException e) {
-                  Thread.currentThread().interrupt();
-                  return;
-                }
-                handle.stop();
-              });
+          futures.add(
+              executor.submit(
+                  () -> {
+                    try {
+                      startLatch.await();
+                      Thread.sleep(2); // Let evaluations begin
+                    } catch (final InterruptedException e) {
+                      Thread.currentThread().interrupt();
+                      return;
+                    }
+                    handle.stop();
+                  }));
 
           startLatch.countDown();
           executor.shutdown();
           assertThat(executor.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
+          // A worker that failed reports it here, not in a future nobody reads.
+          for (final Future<?> future : futures) {
+            future.get(15, TimeUnit.SECONDS);
+          }
         } finally {
           executor.shutdownNow();
         }
@@ -208,48 +218,55 @@ class StopDuringEvaluationTest {
 
         // Reader threads: each polls state repeatedly. A reversal (STOPPED → ACTIVE) is a bug.
         final int readers = 20;
+        final List<Future<?>> futures = new ArrayList<>();
         final var executor = Executors.newFixedThreadPool(readers + 1);
         try {
           for (int i = 0; i < readers; i++) {
-            executor.submit(
-                () -> {
-                  try {
-                    startLatch.await();
-                  } catch (final InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                  }
-                  // Read until STOPPED is seen, then keep reading: it must never revert.
-                  final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                  int readsAfterStop = 0;
-                  while (readsAfterStop < 50 && System.nanoTime() < deadline) {
-                    if (handle.state() == ChaosDiagnostics.ScenarioState.STOPPED) {
-                      readsAfterStop++;
-                    } else if (readsAfterStop > 0) {
-                      reversals.incrementAndGet();
-                    }
-                    Thread.yield();
-                  }
-                  if (readsAfterStop == 50) {
-                    sawStop.incrementAndGet();
-                  }
-                });
+            futures.add(
+                executor.submit(
+                    () -> {
+                      try {
+                        startLatch.await();
+                      } catch (final InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                      }
+                      // Read until STOPPED is seen, then keep reading: it must never revert.
+                      final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                      int readsAfterStop = 0;
+                      while (readsAfterStop < 50 && System.nanoTime() < deadline) {
+                        if (handle.state() == ChaosDiagnostics.ScenarioState.STOPPED) {
+                          readsAfterStop++;
+                        } else if (readsAfterStop > 0) {
+                          reversals.incrementAndGet();
+                        }
+                        Thread.yield();
+                      }
+                      if (readsAfterStop == 50) {
+                        sawStop.incrementAndGet();
+                      }
+                    }));
           }
 
-          executor.submit(
-              () -> {
-                try {
-                  startLatch.await();
-                } catch (final InterruptedException e) {
-                  Thread.currentThread().interrupt();
-                  return;
-                }
-                handle.stop();
-              });
+          futures.add(
+              executor.submit(
+                  () -> {
+                    try {
+                      startLatch.await();
+                    } catch (final InterruptedException e) {
+                      Thread.currentThread().interrupt();
+                      return;
+                    }
+                    handle.stop();
+                  }));
 
           startLatch.countDown();
           executor.shutdown();
           assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+          // A worker that failed reports it here, not in a future nobody reads.
+          for (final Future<?> future : futures) {
+            future.get(15, TimeUnit.SECONDS);
+          }
         } finally {
           executor.shutdownNow();
         }

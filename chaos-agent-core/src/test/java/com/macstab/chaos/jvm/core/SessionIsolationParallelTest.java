@@ -167,26 +167,32 @@ class SessionIsolationParallelTest {
 
         final int unboundThreads = 50;
         final CountDownLatch startLatch = new CountDownLatch(1);
+        final List<Future<?>> futures = new ArrayList<>();
         final var executor = Executors.newFixedThreadPool(unboundThreads);
         try {
           for (int t = 0; t < unboundThreads; t++) {
-            executor.submit(
-                () -> {
-                  try {
-                    startLatch.await();
-                  } catch (final InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                  }
-                  // No session.wrap() — this thread is unbound
-                  for (int i = 0; i < ITERATIONS_PER_THREAD; i++) {
-                    runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-                  }
-                });
+            futures.add(
+                executor.submit(
+                    () -> {
+                      try {
+                        startLatch.await();
+                      } catch (final InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                      }
+                      // No session.wrap() — this thread is unbound
+                      for (int i = 0; i < ITERATIONS_PER_THREAD; i++) {
+                        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                      }
+                    }));
           }
           startLatch.countDown();
           executor.shutdown();
           assertThat(executor.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
+          // A worker that failed reports it here, not in a future nobody reads.
+          for (final Future<?> future : futures) {
+            future.get(15, TimeUnit.SECONDS);
+          }
         } finally {
           executor.shutdownNow();
         }

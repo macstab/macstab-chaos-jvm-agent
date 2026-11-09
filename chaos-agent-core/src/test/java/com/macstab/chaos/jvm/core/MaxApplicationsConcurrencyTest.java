@@ -25,6 +25,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
@@ -67,25 +68,31 @@ class MaxApplicationsConcurrencyTest {
               .build());
 
       final CountDownLatch startLatch = new CountDownLatch(1);
+      final List<Future<?>> futures = new ArrayList<>();
       final var executor = Executors.newFixedThreadPool(THREAD_COUNT);
       try {
         for (int i = 0; i < THREAD_COUNT; i++) {
-          executor.submit(
-              () -> {
-                try {
-                  startLatch.await();
-                } catch (final InterruptedException e) {
-                  Thread.currentThread().interrupt();
-                  return;
-                }
-                // Each thread triggers one evaluation; if a non-no-op runnable is returned the
-                // effect was applied. We measure applied count via diagnostics after the run.
-                runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-              });
+          futures.add(
+              executor.submit(
+                  () -> {
+                    try {
+                      startLatch.await();
+                    } catch (final InterruptedException e) {
+                      Thread.currentThread().interrupt();
+                      return;
+                    }
+                    // Each thread triggers one evaluation; if a non-no-op runnable is returned the
+                    // effect was applied. We measure applied count via diagnostics after the run.
+                    runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                  }));
         }
         startLatch.countDown();
         executor.shutdown();
         assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        // A worker that failed reports it here, not in a future nobody reads.
+        for (final Future<?> future : futures) {
+          future.get(15, TimeUnit.SECONDS);
+        }
       } finally {
         executor.shutdownNow();
       }
@@ -195,8 +202,10 @@ class MaxApplicationsConcurrencyTest {
   class ThreadLocalConcurrency {
 
     @Test
-    @DisplayName("100 threads suppressing ThreadLocal.get() — no StackOverflowError, no corruption")
-    void hundredThreadsConcurrentThreadLocalSuppressNoCrash() throws Exception {
+    @DisplayName(
+        "100 threads suppressing ThreadLocal.get(): every call is suppressed, without a"
+            + " StackOverflowError")
+    void everyConcurrentThreadLocalGetIsSuppressed() throws Exception {
       try (ChaosRuntime runtime = new ChaosRuntime()) {
         final int threadCount = 100;
         final int opsPerThread = 50;
@@ -217,6 +226,7 @@ class MaxApplicationsConcurrencyTest {
         final CountDownLatch go = new CountDownLatch(1);
         final AtomicInteger errors = new AtomicInteger(0);
         final AtomicInteger stackOverflows = new AtomicInteger(0);
+        final AtomicInteger suppressed = new AtomicInteger(0);
         final List<Thread> threads = new ArrayList<>();
 
         for (int i = 0; i < threadCount; i++) {
@@ -235,7 +245,9 @@ class MaxApplicationsConcurrencyTest {
                         }
                         try {
                           for (int op = 0; op < opsPerThread; op++) {
-                            runtime.beforeThreadLocalGet(tl);
+                            if (runtime.beforeThreadLocalGet(tl)) {
+                              suppressed.incrementAndGet();
+                            }
                             tl.set("v-" + op);
                           }
                         } catch (StackOverflowError soe) {
@@ -250,6 +262,7 @@ class MaxApplicationsConcurrencyTest {
         go.countDown();
         for (final Thread t : threads) {
           t.join(5000);
+          assertThat(t.isAlive()).as("%s finished", t.getName()).isFalse();
         }
 
         try {
@@ -257,6 +270,9 @@ class MaxApplicationsConcurrencyTest {
               .as("reentrancy fix must hold under concurrency — no StackOverflowError")
               .isZero();
           assertThat(errors.get()).as("no unexpected exceptions").isZero();
+          assertThat(suppressed)
+              .as("every get() is suppressed")
+              .hasValue(threadCount * opsPerThread);
         } finally {
           handle.stop();
         }
