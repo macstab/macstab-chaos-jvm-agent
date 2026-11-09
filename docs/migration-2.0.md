@@ -57,6 +57,7 @@
 | 38 | The event log line is quoted and escaped | you parse the `com.macstab.chaos.jvm` log lines (`type=… scenarioId=… attributes={k=v}`) | read the quoted, escaped form (§38) |
 | 39 | A gate read from JSON needs `maxBlock` | a plan file, an HTTP or JMX plan, or `@WithChaos` JSON has a `gate` without `maxBlock` | set `maxBlock` (§39) |
 | 40 | The JFR field `description` is `message` | a JFR query, a JMC view or a `RecordedEvent.getString("description")` reads `com.macstab.chaos.jvm.ScenarioLifecycle` | read `message` (§40) |
+| 41 | A test's sessions and listeners end with it | a test opens a session or adds a listener through the injected `ChaosControlPlane` and a later test relies on it | open or add it again in that test, or through `ChaosPlatform.current()` (§41) |
 
 ---
 
@@ -442,7 +443,7 @@ A scenario on a general primitive (file reads, ZIP inflation, direct buffers, GC
 
 ## 39. A gate read from JSON needs `maxBlock`
 
-`ChaosPlanMapper` refuses a `gate` effect without `maxBlock` with `ConfigLoadException` ("gate needs maxBlock"), whatever the JSON source: the plan file, inline or Base64 startup JSON, the HTTP and JMX management endpoints and `@WithChaos`. A gate is released only through its `ChaosActivationHandle`, which the author of a JSON plan never holds, so a gate without a bound held every caller until the scenario was stopped. `ChaosEffect.gate(null)` through the Java API is unchanged.
+`ChaosPlanMapper` refuses a `gate` effect without `maxBlock` with `ConfigLoadException` ("gate needs maxBlock"), whatever the JSON source: the plan file, inline or Base64 startup JSON, the HTTP and JMX management endpoints and `@WithChaos` (which reports it as `IllegalArgumentException`, its cause the `ConfigLoadException`). A gate is released only through its `ChaosActivationHandle`, which the author of a JSON plan never holds, so a gate without a bound held every caller until the scenario was stopped. `ChaosEffect.gate(null)` through the Java API is unchanged.
 
 Before (1.x): `{"type": "gate"}` held the matched calls with nothing to release them. Now give the gate its bound, for example `{"type": "gate", "maxBlock": "PT30S"}`, or activate it through the Java API and call `handle.release()`.
 
@@ -454,6 +455,12 @@ The seed default is unchanged and now stated exactly: an `activationPolicy` that
 The `com.macstab.chaos.jvm.ScenarioLifecycle` event's field `description` is renamed `message`: it held the event's message (`ChaosEvent.message()`), never a description of the scenario. A query or view that reads `description` reads `message` instead, for example `jfr print --events com.macstab.chaos.jvm.ScenarioLifecycle` shows `message = "scenario started"`.
 
 `com.macstab.chaos.jvm.EffectApplied` gained `match` and `delayNanos`; the other fields are unchanged.
+
+## 41. A test's sessions and listeners end with it
+
+The `TrackingChaosControlPlane` a test extension injects as `ChaosControlPlane` releases everything the test created through it, not only the scenarios it activated: `stopTracked()` also closes the sessions opened with `openSession` and removes the event listeners added with `addEventListener`. The testkit `ChaosAgentExtension` does so after each test, the Spring Boot 3/4, Micronaut and Quarkus extensions after the test class. A listener the test removed itself is left alone. The control plane bean that an application context (Spring, Micronaut) or a Quarkus application gets keeps the application's listeners and sessions (`new TrackingChaosControlPlane(delegate, false)`); only what it activated is stopped.
+
+Before (1.x): a listener added in one test kept receiving the events of every later test in the JVM, and a session opened through the injected plane stayed open. Now add the listener, or open the session, in each test that needs it, or through `ChaosPlatform.current()` when it must outlive the test.
 
 ---
 

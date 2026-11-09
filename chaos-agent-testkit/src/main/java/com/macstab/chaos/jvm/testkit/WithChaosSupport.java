@@ -6,6 +6,7 @@ import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
+import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.AnnotatedElement;
@@ -26,15 +27,17 @@ public final class WithChaosSupport {
   private WithChaosSupport() {}
 
   /**
-   * Activates the scenarios of every {@link WithChaos} on {@code element}: session-scoped ones in
-   * {@code session}, JVM-scoped ones on {@code controlPlane}.
+   * Activates the plan of every {@link WithChaos} on {@code element}: its session-scoped scenarios
+   * as one plan in {@code session}, its JVM-scoped ones as one plan on {@code controlPlane}. Both
+   * keep the plan's metadata and observability settings.
    *
    * @param element the test class or method
    * @param controlPlane the control plane for JVM-scoped scenarios
    * @param session the test's session for session-scoped scenarios
-   * @return the handles of the activated scenarios, for the caller to close when the test ends
+   * @return the handles of the activated plans, for the caller to close when the test ends
    * @throws IllegalArgumentException if an annotation names neither or both JSON sources, the
-   *     resource does not exist, or the JSON is invalid
+   *     resource does not exist, or the JSON is invalid (with its line and column); the handles
+   *     already activated are closed first, and a failure to close one is suppressed in it
    */
   public static List<ChaosActivationHandle> activate(
       final AnnotatedElement element,
@@ -44,15 +47,23 @@ public final class WithChaosSupport {
     try {
       for (final WithChaos annotation :
           AnnotationSupport.findRepeatableAnnotations(element, WithChaos.class)) {
-        for (final ChaosScenario scenario : plan(annotation, element).scenarios()) {
-          handles.add(
-              scenario.scope() == ChaosScenario.ScenarioScope.SESSION
-                  ? session.activate(scenario)
-                  : controlPlane.activate(scenario));
+        final ChaosPlan plan = plan(annotation, element);
+        final ChaosPlan jvm = scoped(plan, ChaosScenario.ScenarioScope.JVM);
+        final ChaosPlan inSession = scoped(plan, ChaosScenario.ScenarioScope.SESSION);
+        if (jvm != null) {
+          handles.add(controlPlane.activate(jvm));
+        }
+        if (inSession != null) {
+          handles.add(session.activate(inSession));
         }
       }
     } catch (final RuntimeException failure) {
-      close(handles);
+      // The activation failure is what the test reports; a failing rollback must not replace it.
+      try {
+        close(handles);
+      } catch (final RuntimeException closeFailure) {
+        failure.addSuppressed(closeFailure);
+      }
       throw failure;
     }
     return handles;
@@ -62,6 +73,8 @@ public final class WithChaosSupport {
    * Closes handles returned by {@link #activate}, continuing past failures.
    *
    * @param handles the handles; may be {@code null}
+   * @throws RuntimeException the first failure to close a handle, with the later ones suppressed in
+   *     it
    */
   public static void close(final @Nullable List<ChaosActivationHandle> handles) {
     if (handles == null) {
@@ -74,6 +87,8 @@ public final class WithChaosSupport {
       } catch (final RuntimeException failure) {
         if (first == null) {
           first = failure;
+        } else {
+          first.addSuppressed(failure);
         }
       }
     }
@@ -81,6 +96,23 @@ public final class WithChaosSupport {
     if (first != null) {
       throw first;
     }
+  }
+
+  /**
+   * The part of {@code plan} with scenarios of {@code scope}, with the plan's metadata and
+   * observability; the plan itself when all its scenarios have that scope, {@code null} when none
+   * has.
+   */
+  private static @Nullable ChaosPlan scoped(
+      final ChaosPlan plan, final ChaosScenario.ScenarioScope scope) {
+    final List<ChaosScenario> scenarios =
+        plan.scenarios().stream().filter(scenario -> scenario.scope() == scope).toList();
+    if (scenarios.isEmpty()) {
+      return null;
+    }
+    return scenarios.size() == plan.scenarios().size()
+        ? plan
+        : new ChaosPlan(plan.metadata(), plan.observability(), scenarios);
   }
 
   private static ChaosPlan plan(final WithChaos annotation, final AnnotatedElement element) {
@@ -91,8 +123,13 @@ public final class WithChaosSupport {
           "@WithChaos on " + element + " needs exactly one of value (JSON) and resource");
     }
     final String json = inline ? annotation.value() : readResource(annotation.resource(), element);
-    // By structure, not substring: a scenario whose id mentioned "scenarios" was read as a plan.
-    return ChaosPlanMapper.readPlanOrScenarios(json, "@WithChaos");
+    try {
+      // By structure, not substring: a scenario whose id mentioned "scenarios" was read as a plan.
+      return ChaosPlanMapper.readPlanOrScenarios(json, "@WithChaos");
+    } catch (final ConfigLoadException invalid) {
+      // The message names the line and column of a parse failure.
+      throw new IllegalArgumentException(invalid.getMessage(), invalid);
+    }
   }
 
   private static String readResource(final String resource, final AnnotatedElement element) {

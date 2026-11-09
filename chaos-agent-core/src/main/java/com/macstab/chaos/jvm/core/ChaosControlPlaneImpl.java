@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.logging.Level;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -764,9 +765,16 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   private static void destroyQuietly(final ScenarioController controller) {
     try {
       controller.destroy();
-    } catch (final RuntimeException ignored) {
+    } catch (final RuntimeException failure) {
       // The replaced controller had already finished; a failure while releasing its remaining
       // resources must not fail the new activation.
+      AgentLog.named(AgentLog.AGENT)
+          .log(
+              Level.WARNING,
+              failure,
+              () ->
+                  "[chaos-agent] could not release the replaced scenario "
+                      + controller.scenario().id());
     }
   }
 
@@ -783,15 +791,31 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     }
     try {
       registry.unregister(controller);
-    } catch (final RuntimeException ignored) {
+    } catch (final RuntimeException failure) {
       // Best-effort rollback: a failure here must not mask the original exception reported by
       // the caller.
+      warnRollbackFailure(controller, "unregister", failure);
     }
     try {
       controller.destroy();
-    } catch (final RuntimeException ignored) {
-      // Same rationale as above — swallow so the original failure propagates intact.
+    } catch (final RuntimeException failure) {
+      // Same rationale as above: logged, so the original failure propagates intact.
+      warnRollbackFailure(controller, "stop", failure);
     }
+  }
+
+  private static void warnRollbackFailure(
+      final ScenarioController controller, final String step, final RuntimeException failure) {
+    AgentLog.named(AgentLog.AGENT)
+        .log(
+            Level.WARNING,
+            failure,
+            () ->
+                "[chaos-agent] could not "
+                    + step
+                    + " scenario "
+                    + controller.scenario().id()
+                    + " while rolling back its failed activation");
   }
 
   private Map<String, String> runtimeDetails() {

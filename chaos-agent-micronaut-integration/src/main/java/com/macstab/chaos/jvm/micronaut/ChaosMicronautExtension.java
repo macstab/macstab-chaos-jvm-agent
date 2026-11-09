@@ -92,13 +92,14 @@ public final class ChaosMicronautExtension
 
   /**
    * Returns a tracking control plane for a test context's bean, released when its context closes or
-   * when the last running chaos test class ends.
+   * when the last running chaos test class ends. Only what it activated is released: the
+   * application's event listeners and sessions stay with the application.
    *
    * @param delegate the JVM-wide control plane
    * @return the tracking control plane
    */
   static TrackingChaosControlPlane contextPlane(final ChaosControlPlane delegate) {
-    final TrackingChaosControlPlane plane = new TrackingChaosControlPlane(delegate);
+    final TrackingChaosControlPlane plane = new TrackingChaosControlPlane(delegate, false);
     CONTEXT_PLANES.add(plane);
     return plane;
   }

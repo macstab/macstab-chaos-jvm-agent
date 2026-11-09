@@ -825,6 +825,90 @@ class ControlPlaneLifecycleTest {
   }
 
   @Nested
+  @DisplayName("A replaced scenario")
+  class ReplacedScenario {
+
+    @Test
+    @DisplayName(
+        "an expired scenario failing to release its stressor when replaced is logged once as a"
+            + " WARNING; the new activation succeeds")
+    void releaseFailureIsLogged() {
+      // The first scenario expires between its STARTED event and its started flag: a scenario
+      // with its id activated from the STARTED listener then replaces it while it still holds
+      // its stressor, whose close fails.
+      final Instant start = Instant.parse("2026-01-01T00:00:00Z");
+      final AtomicReference<Instant> now = new AtomicReference<>(start);
+      final Clock clock =
+          new Clock() {
+            @Override
+            public java.time.ZoneId getZone() {
+              return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(final java.time.ZoneId zone) {
+              return this;
+            }
+
+            @Override
+            public Instant instant() {
+              return now.get();
+            }
+          };
+      final IllegalStateException releaseFailure = new IllegalStateException("cannot release");
+      final AtomicInteger built = new AtomicInteger();
+      final ChaosControlPlaneImpl plane =
+          new ChaosControlPlaneImpl(
+              clock,
+              com.macstab.chaos.jvm.api.ChaosMetricsSink.NOOP,
+              new StressorFactory(java.util.Optional::empty) {
+                @Override
+                ManagedStressor createIfNeeded(
+                    final ChaosEffect effect,
+                    final boolean allowDestructiveEffects,
+                    final java.util.function.Consumer<String> onEnd) {
+                  return built.getAndIncrement() == 0
+                      ? () -> {
+                        throw releaseFailure;
+                      }
+                      : () -> {};
+                }
+              });
+      final AtomicReference<ChaosActivationHandle> replacement = new AtomicReference<>();
+      final AtomicInteger startedEvents = new AtomicInteger();
+      plane.addEventListener(
+          event -> {
+            if (event.type() == ChaosEvent.Type.STARTED && startedEvents.getAndIncrement() == 0) {
+              now.set(start.plus(Duration.ofMinutes(2)));
+              replacement.set(
+                  plane.activate(submitScenario("replaced", ActivationPolicy.always())));
+            }
+          });
+      try (LogCapture log = LogCapture.agent()) {
+        final ChaosActivationHandle expired =
+            plane.activate(
+                submitScenario(
+                    "replaced",
+                    ActivationPolicy.builder()
+                        .activeUntil(start.plus(Duration.ofMinutes(1)))
+                        .build()));
+
+        assertThat(expired.state()).isEqualTo(ChaosDiagnostics.ScenarioState.STOPPED);
+        assertThat(replacement.get().state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+        final List<java.util.logging.LogRecord> warnings =
+            log.records().stream()
+                .filter(record -> record.getLevel() == java.util.logging.Level.WARNING)
+                .toList();
+        assertThat(warnings).hasSize(1);
+        assertThat(warnings.get(0).getMessage()).startsWith("[chaos-agent] ").contains("replaced");
+        assertThat(warnings.get(0).getThrown()).isSameAs(releaseFailure);
+      } finally {
+        plane.close();
+      }
+    }
+  }
+
+  @Nested
   @DisplayName("listeners")
   class Listeners {
 

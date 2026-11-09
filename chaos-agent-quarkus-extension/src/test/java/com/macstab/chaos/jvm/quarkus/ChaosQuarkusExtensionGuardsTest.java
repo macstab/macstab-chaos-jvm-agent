@@ -20,6 +20,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtensionContext;
@@ -112,15 +117,39 @@ class ChaosQuarkusExtensionGuardsTest {
   }
 
   @Test
-  @DisplayName("a method's JVM handle failing to close is swallowed after the test")
+  @DisplayName("a method's JVM handle failing to close is logged once as a WARNING, not thrown")
   void failingMethodHandle() throws Exception {
     final ExtensionContext method =
         context(new HashMap<>(), null, fixture("jvmScoped"), classContext());
     extension.beforeTestExecution(method);
+    final List<LogRecord> records = new CopyOnWriteArrayList<>();
+    final Handler handler =
+        new Handler() {
+          @Override
+          public void publish(final LogRecord logRecord) {
+            records.add(logRecord);
+          }
 
-    assertThatCode(() -> extension.afterTestExecution(method)).doesNotThrowAnyException();
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    final Logger logger = Logger.getLogger(ChaosQuarkusExtension.class.getName());
+    logger.addHandler(handler);
+    try {
+      assertThatCode(() -> extension.afterTestExecution(method)).doesNotThrowAnyException();
+    } finally {
+      logger.removeHandler(handler);
+    }
+
     assertThat(controlPlane.activated).containsExactly("guard-jvm");
     assertThat(controlPlane.closeAttempts).isEqualTo(1);
+    assertThat(records).hasSize(1);
+    assertThat(records.get(0).getLevel()).isEqualTo(Level.WARNING);
+    assertThat(records.get(0).getMessage()).startsWith("[chaos-agent] ").contains("guard-jvm");
+    assertThat(records.get(0).getThrown()).hasMessage("cannot stop guard-jvm");
   }
 
   @Test

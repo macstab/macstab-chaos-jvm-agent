@@ -68,7 +68,8 @@ com.macstab.chaos.jvm.testkit.ChaosAgentExtension
 @BeforeEach:
   TrackingChaosControlPlane tracker = new TrackingChaosControlPlane(ChaosPlatform.installLocally())
   — ChaosPlatform.installLocally() is idempotent; returns the same ChaosRuntime across tests
-  — TrackingChaosControlPlane wraps the real control plane to record JVM-scoped handle activations
+  — TrackingChaosControlPlane wraps the real control plane to record JVM-scoped handle activations,
+    and the sessions opened and event listeners added through it
   ChaosSession session = tracker.openSession(testDisplayName)
   — session ID is a UUID; displayName is the test method display name
   — no scenario is active yet: the test's own @BeforeEach methods run without chaos
@@ -88,8 +89,11 @@ Around the test method (beforeTestExecution → test method → afterTestExecuti
   tracker.stopTracked()
   — closes (stops and unregisters) any JVM-scoped handles activated via controlPlane.activate()
     during the test, so the next test can activate the same ids
+  — then closes the sessions opened via controlPlane.openSession() and removes the listeners
+    added via controlPlane.addEventListener() (a listener the test removed itself is skipped)
   — runs in finally block: executes even if session.close() throws
-  — prevents JVM-scoped scenario leakage into subsequent tests
+  — a failure to release one of them is logged as a [chaos-agent] WARNING and the rest are released
+  — prevents JVM-scoped scenario, session and listener leakage into subsequent tests
 ```
 
 ## Parameter Resolution
@@ -102,7 +106,7 @@ Parameters of any other type are not resolved by this extension (JUnit delegates
 
 The framework test extensions leave a parameter to the framework's own resolver where that resolver claims it, so JUnit never sees two resolvers for one parameter: the Spring Boot `ChaosAgentExtension` the parameters Spring autowires (an autowired test constructor, `@Autowired`, `@Value`, `@Qualifier`), `ChaosQuarkusExtension` every constructor parameter (Quarkus resolves them all), and `ChaosMicronautExtension` the `ChaosControlPlane` of a `@MicronautTest` class unless it sets `resolveParameters = false`. The framework then injects its `ChaosControlPlane` bean. `ChaosMicronautExtension` finds `@MicronautTest` by name, so it also works without micronaut-test on the class path.
 
-Scenarios activated through an injected `ChaosControlPlane` bean are released like a framework extension's own: in a `@MicronautChaosTest` and a `@QuarkusChaosTest` the bean is a tracking control plane, and what a test activates through it is stopped when the last running chaos test class ends, or when the application context (Micronaut) or the application (Quarkus) stops. In a Quarkus test the bean is produced in Quarkus's class loader and `ChaosQuarkusExtension` runs in the system class loader: the producer reaches the extension through the system class loader, and the two share the api because it is a parent-first artifact. A runner that does not put the test class path on the system class loader gets the untracked control plane and one `[chaos-agent]` warning.
+Scenarios activated through an injected `ChaosControlPlane` bean are released like a framework extension's own: in a `@MicronautChaosTest` and a `@QuarkusChaosTest` the bean is a tracking control plane, and what a test activates through it is stopped when the last running chaos test class ends, or when the application context (Micronaut) or the application (Quarkus) stops. The listeners and sessions the application adds through the bean are the application's and stay (`new TrackingChaosControlPlane(delegate, false)`); the plane a framework extension injects into a test releases them after the test class, as the testkit's does after each test. In a Quarkus test the bean is produced in Quarkus's class loader and `ChaosQuarkusExtension` runs in the system class loader: the producer reaches the extension through the system class loader, and the two share the api because it is a parent-first artifact. A runner that does not put the test class path on the system class loader gets the untracked control plane and one `[chaos-agent]` warning.
 
 **`ChaosDiagnostics` is not injectable.** Obtain it via `controlPlane.diagnostics()`:
 ```java
@@ -183,7 +187,7 @@ A `JVM`-scoped scenario id has one owner at a time. The testkit activates class-
 
 A class-level `@WithChaos` applies to the class's `@Nested` classes too: the testkit activates the enclosing classes' scenarios, outermost first, for each nested test; the other extensions keep the outer class's scenarios active, in the session the nested classes share, while they run.
 
-An annotation with neither or both of `value` and `resource`, a missing resource or invalid JSON fails the test before it runs (`IllegalArgumentException`, or the parser's `ConfigLoadException` with line and column); scenarios already activated for that test are stopped first. The Quarkus extension's older `@ChaosScenario` annotation still works but is deprecated for removal in 3.0: it knows only a few selectors and effect shorthands, while `@WithChaos` covers every selector, effect and policy field.
+An annotation with neither or both of `value` and `resource`, a missing resource or invalid JSON fails the test before it runs with `IllegalArgumentException` (for invalid JSON its message names the line and column, and its cause is the parser's `ConfigLoadException`); scenarios already activated for that test are stopped first, and a failure to stop one is suppressed in that exception. Each annotation's plan keeps its name and observability settings: its `SESSION` scenarios are activated as one plan in the test's session, its `JVM` scenarios as one plan on the control plane. The Quarkus extension's older `@ChaosScenario` annotation still works but is deprecated for removal in 3.0: it knows only a few selectors and effect shorthands, while `@WithChaos` covers every selector, effect and policy field.
 
 `WithChaosSupport.activate(element, controlPlane, session)` does the work and is public, for extensions of other frameworks.
 

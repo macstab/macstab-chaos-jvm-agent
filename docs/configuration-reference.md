@@ -560,7 +560,7 @@ Exceptions produced on purpose by an effect (`reject`, `exceptionInjection`, exc
 
 ## 9.4 `GateEffect` Timeout
 
-`GateEffect(maxBlock=null)` blocks the matched operation's thread indefinitely until `handle.release()` (or `stop()`/`close()`) is called. Only the Java API can build one: `release()` needs the handle, so a plan read from JSON (a plan file, HTTP, JMX, `@WithChaos`) refuses a `gate` without `maxBlock` with `ConfigLoadException`. `release()` re-arms the gate: later matching calls block again until the next release. `release()` on a non-gate scenario or on a scenario that is not ACTIVE is a no-op. If the test fails to call `release()`, the application thread is permanently blocked. Use `maxBlock` to set a safety timeout. The testkit extensions call `stopTracked()` which releases all tracked handles in `afterEach`/`afterAll`.
+`GateEffect(maxBlock=null)` blocks the matched operation's thread indefinitely until `handle.release()` (or `stop()`/`close()`) is called. Only the Java API can build one: `release()` needs the handle, so a plan read from JSON (a plan file, HTTP, JMX, `@WithChaos`) refuses a `gate` without `maxBlock` with `ConfigLoadException` (`@WithChaos`: `IllegalArgumentException` with that cause). `release()` re-arms the gate: later matching calls block again until the next release. `release()` on a non-gate scenario or on a scenario that is not ACTIVE is a no-op. If the test fails to call `release()`, the application thread is permanently blocked. Use `maxBlock` to set a safety timeout. The testkit extensions call `stopTracked()` which releases all tracked handles in `afterEach`/`afterAll`.
 
 ---
 

@@ -69,19 +69,26 @@ class ChaosArcProducerTestModeTest {
   }
 
   @Test
-  @DisplayName("a scenario activated through the injected plane ends with the last chaos class")
+  @DisplayName(
+      "a scenario activated through the injected plane ends with the last chaos class; its"
+          + " listeners stay")
   void injectedActivationIsReleasedAfterTheClass() throws Exception {
     final ChaosQuarkusExtension extension = new ChaosQuarkusExtension();
     final ExtensionContext classContext = classContext();
     try (URLClassLoader quarkusLoader = quarkusLikeLoader()) {
       extension.beforeAll(classContext);
       final ChaosControlPlane plane = produce(quarkusLoader);
+      final com.macstab.chaos.jvm.api.ChaosEventListener listener = event -> {};
+      plane.addEventListener(listener);
       plane.activate(scenario("quarkus-injected"));
       assertThat(ChaosPlatform.current().diagnostics().scenario("quarkus-injected")).isPresent();
 
       extension.afterAll(classContext);
 
       assertThat(ChaosPlatform.current().diagnostics().scenario("quarkus-injected")).isEmpty();
+      assertThat(plane.removeEventListener(listener))
+          .as("the application's listener is the application's")
+          .isTrue();
     }
   }
 

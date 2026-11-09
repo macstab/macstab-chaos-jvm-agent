@@ -98,7 +98,8 @@ class ChaosAgentExtensionGuardsTest {
 
   @Test
   @DisplayName(
-      "scenarios activated through a context bean end when the last running chaos class ends")
+      "scenarios activated through a context bean end when the last running chaos class ends;"
+          + " its listeners stay")
   void contextBeanActivationEndsWithTheLastClass() {
     final ExtensionContext first = context();
     final ExtensionContext second = context();
@@ -107,6 +108,8 @@ class ChaosAgentExtensionGuardsTest {
     final ChaosControlPlane bean =
         ChaosAgentExtension.contextPlane(
             com.macstab.chaos.jvm.bootstrap.ChaosPlatform.installLocally());
+    final com.macstab.chaos.jvm.api.ChaosEventListener listener = event -> {};
+    bean.addEventListener(listener);
     bean.activate(
         com.macstab.chaos.jvm.api.ChaosScenario.builder("context-bean-jvm")
             .selector(
@@ -120,6 +123,9 @@ class ChaosAgentExtensionGuardsTest {
 
     extension.afterAll(second);
     assertThat(beanScenario()).isEmpty();
+    assertThat(bean.removeEventListener(listener))
+        .as("the application's listener is the application's")
+        .isTrue();
   }
 
   private static Optional<?> beanScenario() {

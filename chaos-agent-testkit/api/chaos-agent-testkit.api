@@ -38,6 +38,7 @@ public final class com/macstab/chaos/jvm/testkit/ChaosTestKit
 
 public final class com/macstab/chaos/jvm/testkit/TrackingChaosControlPlane implements com/macstab/chaos/jvm/api/ChaosControlPlane
   public method <init>(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;)V
+  public method <init>(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;Z)V
   public method activate(Lcom/macstab/chaos/jvm/api/ChaosPlan;)Lcom/macstab/chaos/jvm/api/ChaosActivationHandle;
   public method activate(Lcom/macstab/chaos/jvm/api/ChaosScenario;)Lcom/macstab/chaos/jvm/api/ChaosActivationHandle;
   public method addEventListener(Lcom/macstab/chaos/jvm/api/ChaosEventListener;)V

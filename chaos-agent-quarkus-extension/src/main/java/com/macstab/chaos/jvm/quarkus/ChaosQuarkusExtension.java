@@ -19,6 +19,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.AfterTestExecutionCallback;
@@ -104,14 +106,15 @@ public final class ChaosQuarkusExtension
 
   /**
    * Returns a tracking control plane for the application's bean, released when the application
-   * stops or when the last running chaos test class ends. Called by {@link ChaosArcProducer} in a
-   * test, through the system class loader that loaded this extension; not for application code.
+   * stops or when the last running chaos test class ends. Only what it activated is released: the
+   * application's event listeners and sessions stay. Called by {@link ChaosArcProducer} in a test,
+   * through the system class loader that loaded this extension; not for application code.
    *
    * @param delegate the JVM-wide control plane
    * @return the tracking control plane
    */
   public static ChaosControlPlane contextPlane(final ChaosControlPlane delegate) {
-    final TrackingChaosControlPlane plane = new TrackingChaosControlPlane(delegate);
+    final TrackingChaosControlPlane plane = new TrackingChaosControlPlane(delegate, false);
     CONTEXT_PLANES.add(plane);
     return plane;
   }
@@ -237,8 +240,8 @@ public final class ChaosQuarkusExtension
 
   /**
    * Stops each handle in the list in a best-effort manner. A {@link RuntimeException} from any
-   * individual {@link ChaosActivationHandle#close()} is swallowed so that it cannot mask a real
-   * test failure and so that sibling handles are always released.
+   * individual {@link ChaosActivationHandle#close()} is logged as a {@code WARNING} and not thrown,
+   * so that it cannot mask a real test failure and so that sibling handles are always released.
    */
   private static void stopHandlesSafely(final List<ChaosActivationHandle> handles) {
     if (handles == null) {
@@ -248,8 +251,13 @@ public final class ChaosQuarkusExtension
       try {
         // close() also unregisters the scenario, so the next test can reuse its id.
         handle.close();
-      } catch (final RuntimeException ignored) {
-        // best-effort teardown — an exception here must not mask a real test failure
+      } catch (final RuntimeException failure) {
+        // Best-effort teardown: an exception here must not mask a real test failure.
+        Logger.getLogger(ChaosQuarkusExtension.class.getName())
+            .log(
+                Level.WARNING,
+                failure,
+                () -> "[chaos-agent] failed to stop scenario " + handle.id() + " after the test");
       }
     }
   }
