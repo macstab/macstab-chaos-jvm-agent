@@ -275,6 +275,12 @@ final class DispatchEngine {
       return new TerminalAction.DnsRewrite(rewriteEffect.host());
     }
     if (effect instanceof ChaosEffect.RedirectEffect redirectEffect) {
+      // A peer that is no InetSocketAddress (a Unix-domain connect) has no port, and a TCP
+      // endpoint cannot replace it; an unresolved InetSocketAddress keeps its port and is
+      // redirected.
+      if (context.remotePort() == InvocationContext.UNKNOWN) {
+        return new TerminalAction.NotApplicable();
+      }
       return new TerminalAction.Redirect(redirectEffect);
     }
     if (effect instanceof ChaosEffect.TornWriteEffect) {

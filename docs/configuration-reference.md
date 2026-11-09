@@ -1487,7 +1487,7 @@ The native library's DNS answer effects. `DNS_RESOLVE` fires before a lookup (de
 |--------------|--------------------|---------------|--------------------------------------------------------------------------------------------------------------------------------|
 | `dnsAnswer`  | `DnsAnswerEffect`  | `DNS_ANSWER`  | `override` (IP literals answered instead — also when the real lookup failed: `OVERRIDE`), `family` (`IPV4`/`IPV6`, keep one; an empty result is `UnknownHostException`: `FILTER_FAMILY`), `shuffle` (`SHUFFLE`), `limit` (keep the first n: `LIMIT`); applied in that order, at least one set |
 | `dnsRewrite` | `DnsRewriteEffect` | `DNS_RESOLVE` | `host` — the name resolved instead of the requested one (`REWRITE`)                                                           |
-| `redirect`   | `RedirectEffect`   | `SOCKET_CONNECT` | `host`, optional `port` — a `Socket` or `SocketChannel` connects there instead of the endpoint it asked for; without `port` the requested port is kept. `ChaosEffect.redirect("standby.internal", 5432)`, JSON `{"type": "redirect", "host": "standby.internal", "port": 5432}` |
+| `redirect`   | `RedirectEffect`   | `SOCKET_CONNECT` | `host`, optional `port` — a `Socket` or `SocketChannel` connects there instead of the endpoint it asked for; without `port` the requested port is kept. A Unix-domain connect (a `UnixDomainSocketAddress` peer) is not redirected and counts no application: a TCP endpoint cannot replace it. `ChaosEffect.redirect("standby.internal", 5432)`, JSON `{"type": "redirect", "host": "standby.internal", "port": 5432}` |
 
 ```json
 { "type": "dns", "operations": ["DNS_ANSWER"], "hostnamePattern": { "mode": "EXACT", "value": "db.internal" } }

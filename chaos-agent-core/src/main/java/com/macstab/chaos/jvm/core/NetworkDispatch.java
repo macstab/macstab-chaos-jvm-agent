@@ -168,7 +168,8 @@ public final class NetworkDispatch {
           redirect.host(),
           redirect.port() != null
               ? redirect.port()
-              : inetSocketAddress == null ? 0 : inetSocketAddress.getPort());
+              // Redirected only with a known port, so the peer is an InetSocketAddress.
+              : java.util.Objects.requireNonNull(inetSocketAddress, "redirected peer").getPort());
     }
     if (decision.terminalAction() instanceof TerminalAction.Timeout timeout) {
       // A peer that never answers the SYN: the connect waits out its own timeout, then fails.

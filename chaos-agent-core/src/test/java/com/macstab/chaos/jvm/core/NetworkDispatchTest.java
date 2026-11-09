@@ -317,6 +317,28 @@ class NetworkDispatchTest {
     }
 
     @Test
+    @DisplayName("a redirect leaves a Unix-domain connect alone and counts no application")
+    void redirectSkipsUnixEndpoint() throws Throwable {
+      final com.macstab.chaos.jvm.api.ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("redirect-any")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.network(Set.of(OperationType.SOCKET_CONNECT)))
+                  .effect(ChaosEffect.redirect("127.0.0.1", 9999))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+
+      assertThat(runtime.beforeSocketConnect(null, UnixDomainSocketAddress.of("/tmp/app.sock"), 0))
+          .isNull();
+      assertThat(handle.appliedCount()).isZero();
+      assertThat(
+              runtime.beforeSocketConnect(
+                  new Socket(), InetSocketAddress.createUnresolved("db", 5432), 0))
+          .isEqualTo(new InetSocketAddress("127.0.0.1", 9999));
+      assertThat(handle.appliedCount()).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("a redirect waits out a composed delay before naming the new endpoint")
     void delayBeforeRedirect() throws Throwable {
       delayThen(

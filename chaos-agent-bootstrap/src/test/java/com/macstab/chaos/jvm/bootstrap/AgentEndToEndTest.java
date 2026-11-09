@@ -2480,6 +2480,15 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName("a redirect of every connect leaves a Unix-domain connect alone")
+    void redirectSkipsUnixDomainConnects() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "redirect-unix-domain");
+      assertThat(result.value("unixConnect")).isEqualTo("ok");
+      assertThat(result.value("tcpRedirected")).isEqualTo("true");
+    }
+
+    @Test
     @DisplayName("socket channels are sockets: peer filters, trickle, corrupt, torn, reset")
     void socketChannels() throws Exception {
       final ChildJvmProbe.ProbeResult result =

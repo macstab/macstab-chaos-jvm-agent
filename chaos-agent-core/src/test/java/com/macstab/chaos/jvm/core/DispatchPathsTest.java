@@ -215,17 +215,22 @@ class DispatchPathsTest {
   class Network {
 
     @Test
-    @DisplayName("a redirect without a port of a non-IP address connects on port 0")
-    void redirectWithoutPortOfUnixAddress() throws Throwable {
+    @DisplayName("a redirect without a port keeps the port of an unresolved address")
+    void redirectWithoutPortKeepsThePort() throws Throwable {
       activate(
           "redirect",
           ChaosSelector.network(Set.of(OperationType.SOCKET_CONNECT)),
           ChaosEffect.redirect("127.0.0.1"));
       final InetSocketAddress target =
-          runtime.beforeSocketConnect(null, UnixDomainSocketAddress.of("/tmp/chaos.sock"), 100);
+          runtime.beforeSocketConnect(
+              null, InetSocketAddress.createUnresolved("db.internal", 5432), 100);
       assertThat(target).isNotNull();
       assertThat(target.getHostString()).isEqualTo("127.0.0.1");
-      assertThat(target.getPort()).isZero();
+      assertThat(target.getPort()).isEqualTo(5432);
+      assertThat(
+              runtime.beforeSocketConnect(null, UnixDomainSocketAddress.of("/tmp/chaos.sock"), 100))
+          .as("a Unix-domain peer is not redirected")
+          .isNull();
     }
 
     @Test

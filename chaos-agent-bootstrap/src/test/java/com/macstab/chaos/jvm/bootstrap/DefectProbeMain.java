@@ -119,6 +119,7 @@ public final class DefectProbeMain {
       case "hook-coverage" -> hookCoverage();
       case "close-shutdown-wait" -> closeShutdownAndWait();
       case "redirect" -> redirect();
+      case "redirect-unix-domain" -> redirectUnixDomain();
       case "udp-dns" -> udpAndReverseDns();
       case "pool-queue-reject" -> poolQueueReject();
       case "queue-poll-suppress" -> queuePollSuppress();
@@ -1486,6 +1487,64 @@ public final class DefectProbeMain {
       }
       printApplied(redirect);
     }
+  }
+
+  /**
+   * A redirect of every connect (any host, any port) to a TCP server, then a Unix-domain connect: a
+   * TCP endpoint cannot replace a Unix-domain peer, so the connect must reach its own server.
+   * Prints {@code unixConnect=ok} or the exception, and whether a TCP connect is still redirected.
+   */
+  private static void redirectUnixDomain() throws Exception {
+    final Path directory = Files.createTempDirectory("uds");
+    final java.net.UnixDomainSocketAddress address =
+        java.net.UnixDomainSocketAddress.of(directory.resolve("s.sock"));
+    try (java.net.ServerSocket tcp =
+            new java.net.ServerSocket(0, 2, InetAddress.getByName("127.0.0.1"));
+        java.nio.channels.ServerSocketChannel unix =
+            java.nio.channels.ServerSocketChannel.open(java.net.StandardProtocolFamily.UNIX)) {
+      unix.bind(address);
+      final int deadPort;
+      try (java.net.ServerSocket probe = new java.net.ServerSocket(0)) {
+        deadPort = probe.getLocalPort();
+      }
+      try (ChaosActivationHandle ignored =
+          ChaosPlatform.current()
+              .activate(
+                  ChaosScenario.builder("redirect-any")
+                      .selector(
+                          new ChaosSelector.NetworkSelector(
+                              Set.of(OperationType.SOCKET_CONNECT),
+                              NamePattern.any(),
+                              null,
+                              null,
+                              null,
+                              null))
+                      .effect(ChaosEffect.redirect("127.0.0.1", tcp.getLocalPort()))
+                      .build())) {
+        String outcome;
+        try (java.nio.channels.SocketChannel client =
+                java.nio.channels.SocketChannel.open(java.net.StandardProtocolFamily.UNIX);
+            java.nio.channels.SocketChannel accepted = connectAndAccept(client, unix, address)) {
+          outcome = accepted == null ? "not accepted" : "ok";
+        } catch (final Exception failure) {
+          outcome = failure.getClass().getName();
+        }
+        System.out.println("unixConnect=" + outcome);
+        try (java.net.Socket socket = new java.net.Socket("127.0.0.1", deadPort);
+            java.net.Socket accepted = tcp.accept()) {
+          System.out.println("tcpRedirected=" + (socket.getPort() == tcp.getLocalPort()));
+        }
+      }
+    }
+  }
+
+  private static java.nio.channels.SocketChannel connectAndAccept(
+      final java.nio.channels.SocketChannel client,
+      final java.nio.channels.ServerSocketChannel server,
+      final java.net.SocketAddress address)
+      throws java.io.IOException {
+    client.connect(address);
+    return server.accept();
   }
 
   /**

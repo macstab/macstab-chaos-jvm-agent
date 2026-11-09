@@ -893,7 +893,8 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Connects to another endpoint than the one the application asked for.
+   * Connects to another endpoint than the one the application asked for. A Unix-domain connect is
+   * not redirected (a TCP endpoint cannot replace it) and counts no application.
    *
    * @param host the host to connect to instead; non-blank
    * @param port the port to connect to instead, {@code 1..65535}; {@code null} keeps the requested
