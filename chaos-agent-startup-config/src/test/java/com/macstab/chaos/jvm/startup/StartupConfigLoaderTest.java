@@ -446,6 +446,127 @@ class StartupConfigLoaderTest {
   }
 
   @Nested
+  @DisplayName("plan file stamps")
+  class PlanFileStamps {
+
+    /** A ConfigMap volume: plan.json -> ..data/plan.json, ..data -> ..ts. */
+    private Path configMap(final String json) throws Exception {
+      final Path volume = Files.createDirectories(tempDir.resolve("configmap"));
+      final Path version = Files.createDirectories(volume.resolve("..2026_10_30_12_00_00.1"));
+      Files.writeString(version.resolve("plan.json"), json);
+      Files.createSymbolicLink(volume.resolve("..data"), version.getFileName());
+      return Files.createSymbolicLink(volume.resolve("plan.json"), Path.of("..data", "plan.json"));
+    }
+
+    @Test
+    @DisplayName("the stamp of a file is the one its read records")
+    void stampMatchesRead() throws Exception {
+      final Path file = Files.writeString(tempDir.resolve("plan.json"), writeSampleJson("p"));
+
+      final StartupConfigLoader.PlanFileStamp stamp =
+          StartupConfigLoader.statPlanFile(file.toString()).orElseThrow();
+      final StartupConfigLoader.PlanFile read =
+          StartupConfigLoader.readPlanFile(file.toString()).orElseThrow();
+
+      assertThat(stamp)
+          .isEqualTo(
+              new StartupConfigLoader.PlanFileStamp(
+                  read.target(), read.lastModified(), read.size(), read.fileKey()));
+    }
+
+    @Test
+    @DisplayName("a missing file has no stamp and no read")
+    void missingFile() {
+      final String missing = tempDir.resolve("absent.json").toString();
+
+      assertThat(StartupConfigLoader.statPlanFile(missing)).isEmpty();
+      assertThat(StartupConfigLoader.readPlanFile(missing)).isEmpty();
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    @DisplayName("a ConfigMap stamp names the file inside the timestamped directory")
+    void configMapStamp() throws Exception {
+      final Path link = configMap(writeSampleJson("p"));
+
+      assertThat(StartupConfigLoader.statPlanFile(link.toString()).orElseThrow().target())
+          .isEqualTo(
+              link.getParent()
+                  .toAbsolutePath()
+                  .normalize()
+                  .resolve("..2026_10_30_12_00_00.1")
+                  .resolve("plan.json"));
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    @DisplayName("a ..data link to a removed directory is a missing file")
+    void danglingConfigMap() throws Exception {
+      final Path link = configMap(writeSampleJson("p"));
+      final Path version = link.getParent().resolve("..2026_10_30_12_00_00.1");
+      Files.delete(version.resolve("plan.json"));
+      Files.delete(version);
+
+      assertThat(StartupConfigLoader.statPlanFile(link.toString())).isEmpty();
+      assertThat(StartupConfigLoader.readPlanFile(link.toString())).isEmpty();
+      assertThatThrownBy(() -> StartupConfigLoader.loadPlanFromFile(link.toString()))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("does not exist");
+    }
+
+    @Test
+    @DisplayName("a file removed between its checks and its read is a missing file")
+    void removedBeforeTheRead() throws Exception {
+      final Path file = Files.writeString(tempDir.resolve("plan.json"), writeSampleJson("p"));
+
+      final Optional<StartupConfigLoader.PlanFile> read =
+          StartupConfigLoader.readPlanFile(
+              file.toString(),
+              Set.of("posix"),
+              path -> {
+                try {
+                  Files.deleteIfExists(path);
+                } catch (final java.io.IOException failure) {
+                  throw new java.io.UncheckedIOException(failure);
+                }
+                return "me";
+              },
+              "me");
+
+      assertThat(read).isEmpty();
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    @DisplayName("a link outside the ConfigMap layout is refused by the stamp too")
+    void otherLinkRefused() throws Exception {
+      final Path real = Files.writeString(tempDir.resolve("real.json"), writeSampleJson("p"));
+      final Path link = Files.createSymbolicLink(tempDir.resolve("plan.json"), real);
+
+      assertThatThrownBy(() -> StartupConfigLoader.statPlanFile(link.toString()))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("symbolic link");
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    @DisplayName("a stamp whose attributes cannot be read is a load failure")
+    void unreadableAttributes() throws Exception {
+      assumeFalse("root".equals(System.getProperty("user.name")), "root traverses mode 000");
+      final Path directory = Files.createDirectories(tempDir.resolve("closed"));
+      final Path file = Files.writeString(directory.resolve("plan.json"), writeSampleJson("p"));
+      Files.setPosixFilePermissions(directory, Set.of());
+      try {
+        assertThatThrownBy(() -> StartupConfigLoader.statPlanFile(file.toString()))
+            .isInstanceOf(ConfigLoadException.class)
+            .hasMessageContaining("failed to read the attributes");
+      } finally {
+        Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("rwx------"));
+      }
+    }
+  }
+
+  @Nested
   @DisplayName("file ownership")
   class FileOwnership {
 

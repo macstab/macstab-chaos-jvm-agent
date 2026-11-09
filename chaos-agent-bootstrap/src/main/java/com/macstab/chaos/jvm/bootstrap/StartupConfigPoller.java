@@ -4,6 +4,7 @@ import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.core.DefaultChaosActivationHandle;
+import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import com.macstab.chaos.jvm.startup.AgentSettings;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
@@ -92,21 +93,28 @@ public final class StartupConfigPoller implements AutoCloseable {
   /** The current plan's observability settings; {@code null} before the first plan. */
   private com.macstab.chaos.jvm.api.ChaosPlan.@Nullable Observability observed;
 
-  /**
-   * What identifies the file's contents for change detection: the regular file actually read (a
-   * Kubernetes ConfigMap update replaces it), its modification time, size and file key.
-   */
-  private record Stamp(Path target, FileTime lastModified, long size, @Nullable Object fileKey) {}
-
   /** A read whose file was modified this recently may still be in the middle of a write. */
   private static final long PROVISIONAL_MILLIS = 20L;
 
+  /**
+   * The provisional window of a whole-second modification time: a file system that stores whole
+   * seconds gives an edit in the same second the same stamp.
+   */
+  private static final long WHOLE_SECOND_PROVISIONAL_MILLIS = 1_000L;
+
   // Confined to the poll thread: written at start before the schedule begins (which
   // happens-before every tick), then only by pollOnce, whose runs never overlap.
-  private @Nullable Stamp lastStamp;
+  /** The stamp of the applied contents; while it is unchanged the file is not read. */
+  private StartupConfigLoader.@Nullable PlanFileStamp lastStamp;
+
+  /** The stamp of contents that can never apply; while it is unchanged the file is not read. */
+  private StartupConfigLoader.@Nullable PlanFileStamp failedStamp;
+
   private byte @Nullable [] lastDigest;
   private byte @Nullable [] failedDigest;
-  private boolean provisional;
+
+  /** Until then (epoch millis) the file is read on every tick even if its stamp did not change. */
+  private long provisionalUntil;
 
   /** Whether a missing file has been reported since it disappeared. */
   private boolean missingReported;
@@ -189,7 +197,7 @@ public final class StartupConfigPoller implements AutoCloseable {
     if (baseline != null) {
       lastStamp = stampOf(baseline);
       lastDigest = digest(baseline.json());
-      provisional = isRecent(baseline.lastModified());
+      provisionalUntil = provisionalUntil(baseline.lastModified());
     }
     applyDiff(initialPlan.scenarios(), initialPlan.observability());
     // Reported before the first tick can run, so a tick's own report is never overwritten.
@@ -197,10 +205,11 @@ public final class StartupConfigPoller implements AutoCloseable {
         .ifPresent(
             reports -> reports.statusOk(initialPlan.scenarios().size(), "file:" + configPath));
     // The future is not needed: pollOnce() catches every Throwable, so the schedule never ends
-    // with a failure that the future would report; close() stops the scheduler.
+    // with a failure that the future would report; close() stops the scheduler. A fixed delay:
+    // ticks delayed by a slow read are not run back to back to catch up.
     @SuppressWarnings("FutureReturnValueIgnored")
     final Object unused =
-        scheduler.scheduleAtFixedRate(
+        scheduler.scheduleWithFixedDelay(
             this::pollOnce, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
   }
 
@@ -253,15 +262,32 @@ public final class StartupConfigPoller implements AutoCloseable {
 
   void pollOnce() {
     try {
-      final Optional<StartupConfigLoader.PlanFile> file = readCurrentFile();
+      // The stamp first: a file whose stamp did not change is not read, so a file the JVM may no
+      // longer read (chmod changes the change time only) and a large file cost one stat per tick.
+      final Optional<StartupConfigLoader.PlanFileStamp> stamp =
+          internally(() -> StartupConfigLoader.statPlanFile(configPath.toString()));
+      if (stamp.isPresent()) {
+        missingOnce = false;
+        if (System.currentTimeMillis() >= provisionalUntil) {
+          if (stamp.get().equals(lastStamp)) {
+            recovered();
+            return;
+          }
+          if (stamp.get().equals(failedStamp)) {
+            return;
+          }
+        }
+      }
+      // Also empty when the file went away between the stat and the read.
+      final Optional<StartupConfigLoader.PlanFile> file =
+          stamp.isEmpty() ? Optional.empty() : internally(this::readCurrentFile);
       if (file.isEmpty()) {
         handleMissingFile();
         return;
       }
-      missingOnce = false;
       reloadIfChanged(file.get());
     } catch (final Throwable throwable) {
-      // Catch Throwable, not Exception: ScheduledExecutorService.scheduleAtFixedRate silently
+      // Catch Throwable, not Exception: ScheduledExecutorService.scheduleWithFixedDelay silently
       // suppresses all future executions if the task throws anything, including Errors. Log here
       // and keep the scheduler alive, also after an Error (a StackOverflowError, an
       // OutOfMemoryError): the next tick retries, while a rethrow would end the watching for good.
@@ -281,6 +307,22 @@ public final class StartupConfigPoller implements AutoCloseable {
     return StartupConfigLoader.readPlanFile(configPath.toString());
   }
 
+  /** File I/O of the poller's own, which scenarios on the application's file I/O do not see. */
+  private static <T> T internally(final InternalIo<T> io) throws IOException {
+    BootstrapDispatcher.beginInternalCall();
+    try {
+      return io.run();
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
+  }
+
+  /** A file operation of the poller's own. */
+  @FunctionalInterface
+  private interface InternalIo<T> {
+    T run() throws IOException;
+  }
+
   /**
    * Test seam (U-72 c1): runs {@code hook} on the poll thread before each read of the plan file, so
    * a test can fail a tick the way a broken file system or the JVM would.
@@ -294,19 +336,16 @@ public final class StartupConfigPoller implements AutoCloseable {
   /**
    * Reloads when the contents changed. A new stamp with the same contents (a touch, a ConfigMap
    * re-sync) only updates the stamp. Contents that already failed to parse are not parsed again
-   * until they change. A file read within {@value #PROVISIONAL_MILLIS} ms of its modification may
-   * be mid-write, so it is read again on the next tick even if its stamp did not change.
+   * until they change. A file read within {@value #PROVISIONAL_MILLIS} ms of its modification (one
+   * second for a whole-second modification time) may be mid-write, so it is read again on the next
+   * tick even if its stamp did not change; the window counts from when the stamp was first seen at
+   * the latest, so a modification time ahead of the clock does not keep it open.
    */
   private void reloadIfChanged(final StartupConfigLoader.PlanFile file) throws IOException {
-    final Stamp stamp = stampOf(file);
-    if (!provisional && stamp.equals(lastStamp)) {
-      recovered();
-      return;
-    }
+    final StartupConfigLoader.PlanFileStamp stamp = stampOf(file);
     final byte[] digest = digest(file.json());
     if (java.util.Arrays.equals(digest, lastDigest)) {
-      lastStamp = stamp;
-      provisional = isRecent(file.lastModified());
+      settle(stamp);
       recovered();
       return;
     }
@@ -319,10 +358,12 @@ public final class StartupConfigPoller implements AutoCloseable {
     final java.nio.file.attribute.BasicFileAttributes after;
     try {
       after =
-          Files.readAttributes(
-              file.target(),
-              java.nio.file.attribute.BasicFileAttributes.class,
-              LinkOption.NOFOLLOW_LINKS);
+          internally(
+              () ->
+                  Files.readAttributes(
+                      file.target(),
+                      java.nio.file.attribute.BasicFileAttributes.class,
+                      LinkOption.NOFOLLOW_LINKS));
     } catch (final java.nio.file.NoSuchFileException swappedAway) {
       // A ConfigMap swap removed the directory just read: the next tick reads the new one.
       return;
@@ -345,13 +386,15 @@ public final class StartupConfigPoller implements AutoCloseable {
       // retried.
       if (isDeterministic(failure)) {
         failedDigest = digest;
+        failedStamp = stamp;
+        provisionalUntil = provisionalUntil(stamp.lastModified());
       }
       throw failure;
     }
-    lastStamp = stamp;
+    settle(stamp);
     lastDigest = digest;
     failedDigest = null;
-    provisional = isRecent(file.lastModified());
+    failedStamp = null;
     lastLoggedFailure = null;
     missingReported = false;
     ChaosReports.current()
@@ -374,6 +417,7 @@ public final class StartupConfigPoller implements AutoCloseable {
     }
     lastLoggedFailure = null;
     failedDigest = null;
+    failedStamp = null;
     final int scenarios;
     synchronized (this) {
       scenarios = activeScenarios.size();
@@ -429,6 +473,7 @@ public final class StartupConfigPoller implements AutoCloseable {
       observe(Set.of(), null);
     }
     lastStamp = null;
+    failedStamp = null;
     lastDigest = null;
     failedDigest = null;
     // The status file is gone: a failure after the file comes back is reported again.
@@ -442,12 +487,33 @@ public final class StartupConfigPoller implements AutoCloseable {
             + ")");
   }
 
-  private static Stamp stampOf(final StartupConfigLoader.PlanFile file) {
-    return new Stamp(file.target(), file.lastModified(), file.size(), file.fileKey());
+  private static StartupConfigLoader.PlanFileStamp stampOf(
+      final StartupConfigLoader.PlanFile file) {
+    return new StartupConfigLoader.PlanFileStamp(
+        file.target(), file.lastModified(), file.size(), file.fileKey());
   }
 
-  private static boolean isRecent(final FileTime lastModified) {
-    return System.currentTimeMillis() - lastModified.toMillis() < PROVISIONAL_MILLIS;
+  /** Records the stamp of the applied contents; a new stamp opens its provisional window. */
+  private void settle(final StartupConfigLoader.PlanFileStamp stamp) {
+    if (!stamp.equals(lastStamp)) {
+      lastStamp = stamp;
+      provisionalUntil = provisionalUntil(stamp.lastModified());
+    }
+  }
+
+  /**
+   * The end of the window in which a file first seen now may still change under the same stamp:
+   * {@value #PROVISIONAL_MILLIS} ms after its modification ({@value
+   * #WHOLE_SECOND_PROVISIONAL_MILLIS} ms for a whole-second modification time), counted from now at
+   * the latest.
+   */
+  private static long provisionalUntil(final FileTime lastModified) {
+    final long modified = lastModified.toMillis();
+    final long window =
+        Math.floorMod(modified, 1_000L) == 0L
+            ? WHOLE_SECOND_PROVISIONAL_MILLIS
+            : PROVISIONAL_MILLIS;
+    return Math.min(modified, System.currentTimeMillis()) + window;
   }
 
   private static byte[] digest(final String json) {

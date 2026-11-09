@@ -140,6 +140,7 @@ public final class DefectProbeMain {
       case "jdk-send-async-reject" -> withHttpServer(DefectProbeMain::jdkSendAsyncReject);
       case "http-url-connection" -> withHttpServer(DefectProbeMain::httpUrlConnection);
       case "agent-owned-stressors" -> agentOwnedStressors();
+      case "plan-reload-under-file-reject" -> planReloadUnderFileReject();
       case "thread-local-leak-fork-join-gate" -> threadLocalLeakForkJoinGate();
       case "thread-local-leak-set-delay" -> threadLocalLeakSetDelay();
       case "session-thread-local-suppress" -> sessionThreadLocalSuppress();
@@ -2736,6 +2737,50 @@ public final class DefectProbeMain {
     } catch (final java.util.concurrent.ExecutionException failure) {
       System.out.println("future.type=" + failure.getCause().getClass().getName());
       System.out.println("future.message=" + failure.getCause().getMessage());
+    }
+  }
+
+  /**
+   * With a JVM-wide FILE_IO_READ reject active, rewrites the watched plan file ({@code
+   * chaos.test.planFile}) and waits for the poller to apply it. Prints the reloaded scenario's
+   * state ({@code reloaded=ACTIVE}, or {@code absent} after 10 s) and how often the reject matched.
+   */
+  private static void planReloadUnderFileReject() throws Exception {
+    final Path plan = Path.of(System.getProperty("chaos.test.planFile"));
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    try (ChaosActivationHandle reads =
+        plane.activate(
+            ChaosScenario.builder("file-read-reject")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_READ)))
+                .effect(ChaosEffect.reject("disk"))
+                .activationPolicy(ActivationPolicy.always())
+                .build())) {
+      // A few ticks over the unchanged plan, then a change the poller must read.
+      LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(300));
+      Files.writeString(
+          plan,
+          """
+          {"scenarios":[{"id":"reloaded","scope":"JVM",
+            "selector":{"type":"executor","operations":["EXECUTOR_SUBMIT"]},
+            "effect":{"type":"delay","minDelay":"PT0.001S","maxDelay":"PT0.001S"}}]}
+          """);
+      final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+      String state = "absent";
+      while (System.nanoTime() < deadline) {
+        state =
+            plane
+                .diagnostics()
+                .scenario("reloaded")
+                .map(report -> report.state().name())
+                .orElse("absent");
+        if (state.equals("ACTIVE")) {
+          break;
+        }
+        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(20));
+      }
+      System.out.println("reloaded=" + state);
+      System.out.println("readsMatched=" + reads.matchedCount());
     }
   }
 

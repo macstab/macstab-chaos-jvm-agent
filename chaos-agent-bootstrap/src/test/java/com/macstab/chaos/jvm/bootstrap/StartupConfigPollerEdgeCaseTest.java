@@ -222,25 +222,98 @@ class StartupConfigPollerEdgeCaseTest {
     verify(runtime, times(2)).activate(any(ChaosScenario.class));
   }
 
-  @Test
-  @DisplayName(
-      "a read whose modification time is not yet past is provisional: a same-stamp change"
-          + " is seen")
-  void provisionalReadSeesSameStampChange() throws Exception {
-    when(runtime.activate(any(ChaosScenario.class))).thenReturn(handle);
-    // A modification time ahead of the clock (a skewed file server) counts as just written.
-    final FileTime ahead = FileTime.fromMillis(System.currentTimeMillis() + 3_600_000L);
-    Files.setLastModifiedTime(config, ahead);
+  /** Starts the poller from a baseline read of the plan, as the agent does. */
+  private void startFromBaseline(final StartupConfigPoller started) {
     final StartupConfigLoader.PlanFile baseline =
         StartupConfigLoader.readPlanFile(config.toString()).orElseThrow();
-    poller("3600000").startWithInitialPlan(ChaosPlanMapper.read(baseline.json()), baseline);
+    started.startWithInitialPlan(ChaosPlanMapper.read(baseline.json()), baseline);
+  }
 
+  @Test
+  @DisplayName(
+      "a modification time ahead of the clock is read again only within 20 ms of its first sight")
+  void futureModificationTimeIsNotReadOnEveryTick() throws Exception {
+    when(runtime.activate(any(ChaosScenario.class))).thenReturn(handle);
+    // A skewed file server: an hour ahead, with a millisecond part (a whole second would get the
+    // window of a file system that stores whole seconds).
+    long aheadMillis = System.currentTimeMillis() + 3_600_000L;
+    if (aheadMillis % 1_000L == 0L) {
+      aheadMillis++;
+    }
+    final FileTime ahead = FileTime.fromMillis(aheadMillis);
+    Files.setLastModifiedTime(config, ahead);
+    final java.util.concurrent.atomic.AtomicInteger digested =
+        new java.util.concurrent.atomic.AtomicInteger();
+    poller = new StartupConfigPoller(config, runtime, 3_600_000L, digested::incrementAndGet);
+    startFromBaseline(poller);
+    Thread.sleep(50);
+
+    // Same size, same stamp: past the window, the poller does not read the file again.
     Files.writeString(config, planJson("b"));
     Files.setLastModifiedTime(config, ahead);
+    poller.pollOnce();
+    poller.pollOnce();
+
+    assertThat(digested).as("reads of new content after the window").hasValue(0);
+    verify(runtime, times(1)).activate(any(ChaosScenario.class));
+  }
+
+  @Test
+  @DisplayName("a same-size edit within the same whole second is applied")
+  void sameSecondEditIsApplied() throws Exception {
+    when(runtime.activate(any(ChaosScenario.class))).thenReturn(handle);
+    // Pin the clock to 20..300 ms past a whole second T: a read then is not within 20 ms of T,
+    // and the next tick still falls within T + 1 s.
+    while (System.currentTimeMillis() % 1_000L < 20L
+        || System.currentTimeMillis() % 1_000L >= 300L) {
+      Thread.sleep(5);
+    }
+    final long now = System.currentTimeMillis();
+    final FileTime wholeSecond = FileTime.fromMillis(now - now % 1_000L);
+    Files.setLastModifiedTime(config, wholeSecond);
+    poller("3600000").pollOnce();
+    verify(runtime, times(1)).activate(any(ChaosScenario.class));
+
+    // A file system storing whole seconds gives the edit the same stamp.
+    Files.writeString(config, planJson("b"));
+    Files.setLastModifiedTime(config, wholeSecond);
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+        System.currentTimeMillis() < wholeSecond.toMillis() + 900L, "the tick ran late");
     poller.pollOnce();
 
     verify(runtime, times(2)).activate(any(ChaosScenario.class));
     verify(handle).stop();
+  }
+
+  @Test
+  @org.junit.jupiter.api.condition.EnabledOnOs({
+    org.junit.jupiter.api.condition.OS.LINUX,
+    org.junit.jupiter.api.condition.OS.MAC
+  })
+  @DisplayName("an unreadable plan with an unchanged stamp is not read, so no read fails")
+  void unreadableUnchangedPlanIsNotRead() throws Exception {
+    org.junit.jupiter.api.Assumptions.assumeFalse(
+        "root".equals(System.getProperty("user.name")), "root reads a file of mode 000");
+    when(runtime.activate(any(ChaosScenario.class))).thenReturn(handle);
+    startFromBaseline(poller("3600000"));
+    final Set<java.nio.file.attribute.PosixFilePermission> mode =
+        Files.getPosixFilePermissions(config);
+    // chmod changes the change time only, not the modification time.
+    Files.setPosixFilePermissions(config, Set.of());
+    final String stderr;
+    try {
+      stderr =
+          StderrCapture.of(
+              () -> {
+                poller.pollOnce();
+                poller.pollOnce();
+              });
+    } finally {
+      Files.setPosixFilePermissions(config, mode);
+    }
+
+    assertThat(stderr).doesNotContain("config reload failed");
+    verify(runtime, times(1)).activate(any(ChaosScenario.class));
   }
 
   @Test
@@ -262,6 +335,33 @@ class StartupConfigPollerEdgeCaseTest {
     poller.pollOnce();
     verify(runtime, times(2)).activate(any(ChaosScenario.class));
     verify(handle).stop();
+  }
+
+  @Test
+  @org.junit.jupiter.api.condition.EnabledOnOs({
+    org.junit.jupiter.api.condition.OS.LINUX,
+    org.junit.jupiter.api.condition.OS.MAC
+  })
+  @DisplayName("a plan refused for good is not read again while its stamp is unchanged")
+  void refusedPlanIsNotReadAgain() throws Exception {
+    org.junit.jupiter.api.Assumptions.assumeFalse(
+        "root".equals(System.getProperty("user.name")), "root reads a file of mode 000");
+    write("{ broken");
+    poller("3600000");
+    final String firstTick = StderrCapture.of(poller::pollOnce);
+    final Set<java.nio.file.attribute.PosixFilePermission> mode =
+        Files.getPosixFilePermissions(config);
+    Files.setPosixFilePermissions(config, Set.of());
+    final String secondTick;
+    try {
+      secondTick = StderrCapture.of(poller::pollOnce);
+    } finally {
+      Files.setPosixFilePermissions(config, mode);
+    }
+
+    assertThat(firstTick).contains("config reload failed");
+    assertThat(secondTick).isEmpty();
+    org.mockito.Mockito.verifyNoInteractions(runtime);
   }
 
   @Test

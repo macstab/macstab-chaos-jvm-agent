@@ -172,6 +172,29 @@ class ConfigReloadTest {
   }
 
   @Test
+  @DisplayName(
+      "a ConfigMap whose ..data points at a removed directory is a missing file, not an error")
+  void danglingConfigMapDataIsMissing() throws Exception {
+    final Path volume = Files.createDirectories(tempDir.resolve("configmap"));
+    final Path first = Files.createDirectories(volume.resolve("..2026_10_30_12_00_00.1"));
+    Files.writeString(first.resolve("plan.json"), plan("first"));
+    Files.createSymbolicLink(volume.resolve("..data"), Path.of(first.getFileName().toString()));
+    Files.createSymbolicLink(volume.resolve("plan.json"), Path.of("..data", "plan.json"));
+    start(volume.resolve("plan.json"));
+    poller.pollOnce();
+
+    Files.delete(first.resolve("plan.json"));
+    Files.delete(first);
+    final String firstTick = StderrCapture.of(poller::pollOnce);
+    assertThat(firstTick).doesNotContain("config reload failed");
+    assertThat(state("first")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+
+    final String secondTick = StderrCapture.of(poller::pollOnce);
+    assertThat(secondTick).contains("config file removed: 1 scenario(s) stopped");
+    assertThat(state("first")).isNull();
+  }
+
+  @Test
   @DisplayName("any other symbolic link is still rejected")
   void otherSymlinkRejected() throws Exception {
     final Path real = tempDir.resolve("real.json");

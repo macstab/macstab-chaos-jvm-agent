@@ -2737,6 +2737,26 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName("a FILE_IO_READ reject does not fail the plan file's reloads")
+    void planReloadIgnoresFileReadReject() throws Exception {
+      final String mode = "plan-reload-under-file-reject";
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "initial",
+                      ChaosSelector.queue(Set.of(OperationType.QUEUE_PUT)),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              DefectProbeMain.class,
+              mode,
+              null,
+              "-Dmacstab.chaos.configWatchInterval=50",
+              "-Dchaos.test.planFile=" + tempDir.resolve(mode + "-plan.json"));
+      assertThat(result.value("reloaded")).isEqualTo("ACTIVE");
+      assertThat(result.output()).doesNotContain("config reload failed");
+    }
+
+    @Test
     @DisplayName("a FORK_JOIN_TASK_RUN gate does not hold the thread-local-leak planting")
     void threadLocalLeakIgnoresForkJoinGate() throws Exception {
       final ChildJvmProbe.ProbeResult result =

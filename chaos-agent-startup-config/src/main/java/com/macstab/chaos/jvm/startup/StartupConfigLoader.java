@@ -254,6 +254,19 @@ public final class StartupConfigLoader {
    * @throws ConfigLoadException if the file cannot be opened or read
    */
   private static String readFileContents(final Path path, final String originalFilePath) {
+    try {
+      return readContents(path, originalFilePath);
+    } catch (IOException exception) {
+      throw new ConfigLoadException(
+          "failed to read chaos plan config file: " + path,
+          fileSource(originalFilePath),
+          exception);
+    }
+  }
+
+  /** As {@link #readFileContents}, with the I/O failure left to the caller. */
+  private static String readContents(final Path path, final String originalFilePath)
+      throws IOException {
     try (final InputStream inputStream = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
       // Read at most one byte past the limit: the size check above ran on a stat, and a file that
       // grows before the read must not be loaded into memory in full.
@@ -264,11 +277,6 @@ public final class StartupConfigLoader {
             fileSource(originalFilePath));
       }
       return new String(content, StandardCharsets.UTF_8);
-    } catch (IOException exception) {
-      throw new ConfigLoadException(
-          "failed to read chaos plan config file: " + path,
-          fileSource(originalFilePath),
-          exception);
     }
   }
 
@@ -346,12 +354,34 @@ public final class StartupConfigLoader {
       final Set<String> supportedViews,
       final Function<Path, String> ownerOf,
       final String jvmUser) {
+    final Path target = validateAndResolveIfPresent(filePath, supportedViews, ownerOf, jvmUser);
+    if (target == null) {
+      throw new ConfigLoadException(
+          "config file does not exist: " + Path.of(filePath).toAbsolutePath().normalize(),
+          fileSource(filePath));
+    }
+    return target;
+  }
+
+  /**
+   * As {@link #validateAndResolvePath(String, Set, Function, String)}, but returns {@code null}
+   * when the configured path does not exist or a ConfigMap link points at a directory that is gone
+   * (a {@code ..data} swap in progress).
+   */
+  private static @Nullable Path validateAndResolveIfPresent(
+      final String filePath,
+      final Set<String> supportedViews,
+      final Function<Path, String> ownerOf,
+      final String jvmUser) {
     final Path path = Path.of(filePath).toAbsolutePath().normalize();
 
     if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
-      throw new ConfigLoadException("config file does not exist: " + path, fileSource(filePath));
+      return null;
     }
     final Path target = Files.isSymbolicLink(path) ? configMapTarget(path, filePath) : path;
+    if (!target.equals(path) && !Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+      return null;
+    }
     if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
       throw new ConfigLoadException(
           "config path is not a regular file: " + target, fileSource(filePath));
@@ -460,16 +490,32 @@ public final class StartupConfigLoader {
    */
   @Internal
   public static Optional<PlanFile> readPlanFile(final String filePath) {
-    final Path path = Path.of(filePath).toAbsolutePath().normalize();
-    if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+    return readPlanFile(
+        filePath,
+        Path.of(filePath).getFileSystem().supportedFileAttributeViews(),
+        StartupConfigLoader::ownerName,
+        System.getProperty("user.name", ""));
+  }
+
+  /**
+   * Test seam of {@link #readPlanFile(String)}, with the arguments of {@link
+   * #validateAndResolvePath(String, Set, Function, String)}: an owner lookup that removes the file
+   * models a file that goes away between its checks and its read.
+   */
+  static Optional<PlanFile> readPlanFile(
+      final String filePath,
+      final Set<String> supportedViews,
+      final Function<Path, String> ownerOf,
+      final String jvmUser) {
+    final Path target = validateAndResolveIfPresent(filePath, supportedViews, ownerOf, jvmUser);
+    if (target == null) {
       return Optional.empty();
     }
-    final Path target = validateAndResolvePath(filePath);
     try {
       final java.nio.file.attribute.BasicFileAttributes attributes =
           Files.readAttributes(
               target, java.nio.file.attribute.BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-      final String json = readFileContents(target, filePath);
+      final String json = readContents(target, filePath);
       return Optional.of(
           new PlanFile(
               target,
@@ -477,9 +523,59 @@ public final class StartupConfigLoader {
               attributes.lastModifiedTime(),
               attributes.size(),
               attributes.fileKey()));
+    } catch (final java.nio.file.NoSuchFileException vanished) {
+      // Removed after its checks (a ConfigMap swap, an editor's rename): a missing file.
+      return Optional.empty();
     } catch (final IOException unreadable) {
       throw new ConfigLoadException(
           "failed to read chaos plan config file: " + target, fileSource(filePath), unreadable);
+    }
+  }
+
+  /**
+   * What identifies a plan file's contents for change detection, taken without reading the file.
+   *
+   * @param target the regular file (inside the ConfigMap's timestamped directory, if any)
+   * @param lastModified the file's modification time
+   * @param size the file's size in bytes
+   * @param fileKey the file system's key of the file (inode), or {@code null}
+   */
+  @Internal
+  public record PlanFileStamp(
+      Path target,
+      java.nio.file.attribute.FileTime lastModified,
+      long size,
+      @Nullable Object fileKey) {}
+
+  /**
+   * Reads the stamp of a plan file, following the Kubernetes ConfigMap link as {@link
+   * #readPlanFile(String)} does, without opening the file or applying its trust checks (they apply
+   * when the file is read).
+   *
+   * @param filePath the configured path
+   * @return the stamp, or empty when the path, or the directory a ConfigMap link points at, does
+   *     not exist
+   * @throws ConfigLoadException if a link is not the ConfigMap layout or the attributes cannot be
+   *     read
+   */
+  @Internal
+  public static Optional<PlanFileStamp> statPlanFile(final String filePath) {
+    final Path path = Path.of(filePath).toAbsolutePath().normalize();
+    try {
+      final Path target = Files.isSymbolicLink(path) ? configMapTarget(path, filePath) : path;
+      final java.nio.file.attribute.BasicFileAttributes attributes =
+          Files.readAttributes(
+              target, java.nio.file.attribute.BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+      return Optional.of(
+          new PlanFileStamp(
+              target, attributes.lastModifiedTime(), attributes.size(), attributes.fileKey()));
+    } catch (final java.nio.file.NoSuchFileException missing) {
+      return Optional.empty();
+    } catch (final IOException unreadable) {
+      throw new ConfigLoadException(
+          "failed to read the attributes of chaos plan config file: " + path,
+          fileSource(filePath),
+          unreadable);
     }
   }
 

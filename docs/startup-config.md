@@ -232,9 +232,9 @@ MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL=500
 
 On every poll tick `StartupConfigPoller`:
 
-1. Resolves the file (following a Kubernetes ConfigMap link, see §3) and compares its stamp — the real file, modification time, size and file key — with the last successful read. An unchanged stamp is a no-op.
+1. Resolves the file (following a Kubernetes ConfigMap link, see §3) and compares its stamp — the real file, modification time, size and file key — with the last read that was applied or refused for good. An unchanged stamp is a no-op: the file is not opened, so an unchanged file the JVM can no longer read (`chmod 000`, which changes only the change time) is not a failure. A `..data` link pointing at a directory that is gone counts as a missing file.
 2. Otherwise reads it and compares a SHA-256 of the contents: an unchanged digest (a touch, a ConfigMap re-sync) only records the new stamp; contents that already failed to parse are not parsed again until they change.
-3. A read within 20 ms of the file's modification time is provisional: the writer may still be writing, so the next tick reads again even if the stamp did not change (a second write in the same timestamp tick is not missed).
+3. A read within 20 ms of the file's modification time is provisional: the writer may still be writing, so the next tick reads again even if the stamp did not change (a second write in the same timestamp tick is not missed). A whole-second modification time gets one second, because a file system that stores whole seconds gives a same-size edit within that second the same stamp. The window counts from when the stamp was first seen at the latest, so a modification time ahead of the clock (a skewed file server) is not read on every tick.
 4. If the file changed while it was being read, the tick is skipped and the next one retries.
 5. Parses the new plan and computes a structural diff against the currently active scenario set:
 
@@ -257,7 +257,8 @@ The poller only manages scenarios it activated itself (from the config file). Sc
 
 ## Implementation details
 
-- Single daemon thread named `chaos-config-poller`.
+- Single daemon thread named `chaos-config-poller`; ticks run with a fixed delay between them, so a slow read is not followed by ticks back to back.
+- The poller's own stat, read and re-check of the file are agent work: `FILE_IO` scenarios do not match them, so a `FILE_IO_READ` reject does not fail a reload.
 - Scheduler started by `startWithInitialPlan()` during agent initialization; stopped by `close()`.
 - `close()` stops the scheduler and stops and unregisters all managed scenarios.
 - The daemon thread does not prevent JVM shutdown.
