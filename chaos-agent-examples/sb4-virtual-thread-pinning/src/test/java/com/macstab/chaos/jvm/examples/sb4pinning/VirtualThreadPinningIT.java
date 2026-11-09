@@ -24,7 +24,7 @@ import org.springframework.web.client.RestClient;
 @ChaosTest(
     classes = VirtualThreadPinningApplication.class,
     webEnvironment = WebEnvironment.RANDOM_PORT,
-    properties = "macstab.chaos.contention.enabled=true")
+    properties = "example.pinning.enabled=true")
 class VirtualThreadPinningIT {
 
   private static final Logger log = LoggerFactory.getLogger(VirtualThreadPinningIT.class);

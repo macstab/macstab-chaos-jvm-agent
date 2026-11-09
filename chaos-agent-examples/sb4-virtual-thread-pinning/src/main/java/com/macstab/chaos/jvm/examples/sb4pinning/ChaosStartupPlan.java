@@ -30,7 +30,7 @@ public class ChaosStartupPlan implements ApplicationListener<ApplicationReadyEve
    */
   public ChaosStartupPlan(
       final ChaosControlPlane controlPlane,
-      @Value("${macstab.chaos.contention.enabled:false}") final boolean contentionEnabled) {
+      @Value("${example.pinning.enabled:false}") final boolean contentionEnabled) {
     this.controlPlane = controlPlane;
     this.contentionEnabled = contentionEnabled;
   }

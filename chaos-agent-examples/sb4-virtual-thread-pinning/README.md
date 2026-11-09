@@ -9,7 +9,7 @@ effectively reduces the carrier pool and starves other virtual threads waiting t
 
 `MetricsAggregator` uses `synchronized(lock)` intentionally: it represents a common production
 pattern where a service accumulates counters in a guarded `HashMap`. At startup, if
-`macstab.chaos.contention.enabled=true`, `ChaosStartupPlan` activates a
+`example.pinning.enabled=true`, `ChaosStartupPlan` activates a
 `VirtualThreadCarrierPinningEffect` that pins two of the virtual-thread carriers for 25 ms bursts,
 so the request handlers' virtual threads wait for a free carrier.
 
@@ -56,5 +56,5 @@ exactly which `synchronized` blocks cause pinning.
 
 ## Disabling chaos at runtime
 
-The `macstab.chaos.contention.enabled` property defaults to `false` so the service starts cleanly
+The `example.pinning.enabled` property defaults to `false` so the service starts cleanly
 without contention when used outside test scope.
