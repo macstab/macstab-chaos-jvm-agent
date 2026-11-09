@@ -161,6 +161,10 @@ public final class ClockDispatch {
    * @return the (possibly skewed) local-date-time to return to the caller
    */
   public java.time.LocalDateTime adjustLocalDateTimeNow(final java.time.LocalDateTime realValue) {
+    // Idle first: resolving the default zone clones the default TimeZone.
+    if (engine.idle(OperationType.LOCAL_DATE_TIME_NOW)) {
+      return realValue;
+    }
     return adjustLocalDateTimeNowInZone(realValue, java.time.ZoneId.systemDefault());
   }
 

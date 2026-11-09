@@ -403,6 +403,39 @@ class ClockSkewRuntimeTest {
     }
 
     @Test
+    @DisplayName(
+        "adjustLocalDateTimeNow without a scenario returns before resolving the default zone")
+    void adjustLocalDateTimeNowIdleAllocatesNothing() {
+      final java.lang.management.ThreadMXBean threads =
+          java.lang.management.ManagementFactory.getThreadMXBean();
+      org.junit.jupiter.api.Assumptions.assumeTrue(
+          threads instanceof com.sun.management.ThreadMXBean allocation
+              && allocation.isThreadAllocatedMemorySupported(),
+          "the JVM measures a thread's allocations");
+      final com.sun.management.ThreadMXBean allocation = (com.sun.management.ThreadMXBean) threads;
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final java.time.LocalDateTime real = java.time.LocalDateTime.of(2026, 4, 18, 12, 0, 0);
+        final int calls = 10_000;
+        for (int i = 0; i < calls; i++) {
+          runtime.adjustLocalDateTimeNow(real);
+        }
+        final long thread = Thread.currentThread().threadId();
+
+        java.time.LocalDateTime returned = java.time.LocalDateTime.MIN;
+        final long before = allocation.getThreadAllocatedBytes(thread);
+        for (int i = 0; i < calls; i++) {
+          returned = runtime.adjustLocalDateTimeNow(real);
+        }
+        final long allocated = allocation.getThreadAllocatedBytes(thread) - before;
+
+        assertThat(returned).isSameAs(real);
+
+        // ZoneId.systemDefault() clones the default TimeZone on every call.
+        assertThat(allocated).as("bytes allocated by %d idle calls", calls).isLessThan(calls);
+      }
+    }
+
+    @Test
     @DisplayName("adjustZonedDateTimeNow shifts the instant while preserving the original zone")
     void adjustZonedDateTimeNowShiftsAndPreservesZone() {
       try (ChaosRuntime runtime = new ChaosRuntime()) {
