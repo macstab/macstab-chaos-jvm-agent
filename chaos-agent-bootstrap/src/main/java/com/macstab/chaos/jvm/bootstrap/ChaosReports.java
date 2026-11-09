@@ -83,6 +83,9 @@ final class ChaosReports implements AutoCloseable {
 
   private static final long BATCH_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
 
+  /** How long {@link #close()} waits for the hits writer at most. */
+  static final long CLOSE_JOIN_MILLIS = 5_000L;
+
   private static final AgentLog LOGGER = AgentLog.named(ChaosReports.class.getName());
 
   private static volatile @Nullable ChaosReports current;
@@ -257,8 +260,10 @@ final class ChaosReports implements AutoCloseable {
       if (isOurs(status, supportedViews, ownerOf, jvmUser)) {
         Files.deleteIfExists(status);
       }
-    } catch (final IOException ignored) {
-      // a stale report is better than a failing poller
+    } catch (final IOException stale) {
+      // A stale report is better than a failing poller.
+      LOGGER.log(
+          Level.FINE, stale, () -> "[chaos-agent] cannot remove the status file in " + directory);
     } finally {
       BootstrapDispatcher.endInternalCall();
     }
@@ -395,10 +400,13 @@ final class ChaosReports implements AutoCloseable {
             Level.WARNING, failed, () -> "[chaos-agent] cannot write reports in " + directory);
       }
       if (staging != null) {
+        final Path left = staging;
         try {
-          Files.deleteIfExists(staging);
-        } catch (final IOException ignored) {
-          // nothing more to do
+          Files.deleteIfExists(left);
+        } catch (final IOException leftOver) {
+          // The write's own failure is reported above; the staging file is only left behind.
+          LOGGER.log(
+              Level.FINE, leftOver, () -> "[chaos-agent] cannot remove the staging file " + left);
         }
       }
     } finally {
@@ -416,7 +424,9 @@ final class ChaosReports implements AutoCloseable {
 
   /**
    * Stops the writer thread and waits for it, then writes the hits file a last time: once this
-   * returns, no write of these reports is still running or still to come.
+   * returns, no write of these reports is still running or still to come. A writer stuck in a write
+   * for longer than {@value #CLOSE_JOIN_MILLIS} ms (a hanging file system) is logged once at
+   * WARNING and left behind; the last write is then skipped, as it would wait for the same write.
    */
   @Override
   public void close() {
@@ -425,12 +435,24 @@ final class ChaosReports implements AutoCloseable {
     }
     runtime.removeLifecycleListener(hitCounter);
     LockSupport.unpark(hitsWriter);
+    boolean writerEnded = true;
     try {
-      hitsWriter.join();
+      hitsWriter.join(CLOSE_JOIN_MILLIS);
+      writerEnded = !hitsWriter.isAlive();
     } catch (final InterruptedException interrupted) {
       Thread.currentThread().interrupt();
     }
-    writeFinalHits();
+    if (writerEnded) {
+      writeFinalHits();
+    } else {
+      LOGGER.warning(
+          () ->
+              "[chaos-agent] the hits writer did not stop within "
+                  + CLOSE_JOIN_MILLIS
+                  + " ms (a write to "
+                  + directory
+                  + " blocks); the last hits are not written");
+    }
     if (current == this) {
       current = null;
     }

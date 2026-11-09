@@ -168,6 +168,54 @@ class ChaosReportsTest {
   }
 
   @Test
+  @DisplayName("a status file that cannot be removed is kept and traced at FINE")
+  @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+  void unremovableStatusIsTraced() throws Exception {
+    final Path directory = Files.createDirectories(tempDir.resolve("read-only"));
+    final ChaosReports reports = create("reports=on;reportsDir=" + directory, Map.of());
+    reports.statusOk(1, "inline");
+    final java.util.logging.Logger logger =
+        java.util.logging.Logger.getLogger(ChaosReports.class.getName());
+    final java.util.logging.Level levelBefore = logger.getLevel();
+    final List<java.util.logging.LogRecord> traced = new ArrayList<>();
+    final java.util.logging.Handler capture =
+        new java.util.logging.Handler() {
+          @Override
+          public void publish(final java.util.logging.LogRecord record) {
+            traced.add(record);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    logger.setLevel(java.util.logging.Level.FINE);
+    logger.addHandler(capture);
+    Files.setPosixFilePermissions(
+        directory, java.nio.file.attribute.PosixFilePermissions.fromString("r-xr-xr-x"));
+    try {
+      reports.removeStatus();
+    } finally {
+      Files.setPosixFilePermissions(
+          directory, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+      logger.removeHandler(capture);
+      logger.setLevel(levelBefore);
+    }
+
+    assertThat(directory.resolve(ChaosReports.STATUS_FILE)).exists();
+    assertThat(traced)
+        .singleElement()
+        .satisfies(
+            record -> {
+              assertThat(record.getLevel()).isEqualTo(java.util.logging.Level.FINE);
+              assertThat(record.getMessage()).startsWith("[chaos-agent] cannot remove the status");
+              assertThat(record.getThrown()).isInstanceOf(java.io.IOException.class);
+            });
+  }
+
+  @Test
   @DisplayName("an unwritable report directory or status path leaves no file behind and no error")
   void unwritableReports() throws Exception {
     final Path notADirectory = Files.writeString(tempDir.resolve("plain-file"), "x");
@@ -440,6 +488,7 @@ class ChaosReportsTest {
       // Unjoined, close returns at once; joining, it waits for the writer and so for this monitor.
       final long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
       while (closer.getState() != Thread.State.WAITING
+          && closer.getState() != Thread.State.TIMED_WAITING
           && closer.getState() != Thread.State.TERMINATED
           && System.nanoTime() < deadline) {
         Thread.onSpinWait();
@@ -448,6 +497,43 @@ class ChaosReportsTest {
     closer.join();
 
     assertThat(writerAliveAfterClose).as("the writer is joined by close").isFalse();
+  }
+
+  @Test
+  @DisplayName("close waits for a stuck hits writer only a bounded time, then returns")
+  void closeJoinIsBounded() throws Exception {
+    final ChaosReports reports = create("reports=on;reportsDir=" + tempDir, Map.of());
+    final Thread writer = (Thread) privateField(reports, "hitsWriter");
+    final Thread closer;
+    final boolean closedInTime;
+    // Holding the reports' monitor parks the writer inside writeHits for as long as it is held.
+    synchronized (reports) {
+      ((java.util.concurrent.atomic.AtomicBoolean) privateField(reports, "hitsDirty")).set(true);
+      java.util.concurrent.locks.LockSupport.unpark(writer);
+      awaitState(writer, Thread.State.BLOCKED);
+
+      closer = Thread.ofPlatform().start(reports::close);
+      closer.join(ChaosReports.CLOSE_JOIN_MILLIS + 10_000L);
+      closedInTime = !closer.isAlive();
+      assertThat(writer.isAlive()).as("the writer is still stuck").isTrue();
+    }
+    closer.join();
+
+    assertThat(closedInTime).as("close returned while the writer was stuck").isTrue();
+  }
+
+  @Test
+  @DisplayName("close on an interrupted thread returns and keeps the interrupt")
+  void closeKeepsTheInterrupt() {
+    final ChaosReports reports = create("reports=on;reportsDir=" + tempDir, Map.of());
+
+    Thread.currentThread().interrupt();
+    try {
+      reports.close();
+    } finally {
+      assertThat(Thread.interrupted()).as("the interrupt is kept").isTrue();
+    }
+    assertThat(ChaosReports.current()).isEmpty();
   }
 
   private static Object privateField(final ChaosReports reports, final String name)

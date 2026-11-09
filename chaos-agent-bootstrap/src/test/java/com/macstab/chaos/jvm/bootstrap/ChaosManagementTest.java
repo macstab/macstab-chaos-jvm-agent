@@ -419,6 +419,36 @@ class ChaosManagementTest {
   }
 
   @Test
+  @DisplayName("a finished plan that fails to close is still forgotten; the activation goes on")
+  void finishedPlanFailingToCloseIsForgotten() {
+    final java.util.concurrent.atomic.AtomicInteger closed =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final com.macstab.chaos.jvm.api.ChaosActivationHandle expired =
+        (com.macstab.chaos.jvm.api.ChaosActivationHandle)
+            java.lang.reflect.Proxy.newProxyInstance(
+                ChaosManagementTest.class.getClassLoader(),
+                new Class<?>[] {com.macstab.chaos.jvm.api.ChaosActivationHandle.class},
+                (proxy, method, args) ->
+                    switch (method.getName()) {
+                      case "id" -> "plan:expired";
+                      case "state" -> ChaosDiagnostics.ScenarioState.INACTIVE;
+                      case "close" -> throw new IllegalStateException("cannot close");
+                      case "equals" -> proxy == args[0];
+                      case "hashCode" -> System.identityHashCode(proxy);
+                      default -> null;
+                    });
+    final java.util.Iterator<com.macstab.chaos.jvm.api.ChaosActivationHandle> plans =
+        java.util.List.of(expired, handle("plan:live", closed)).iterator();
+    final ChaosManagement pruning = new ChaosManagement(scriptedControlPlane(plans::next));
+    pruning.activate(PLAN);
+
+    assertThat(pruning.activate(PLAN.replace("\"mgmt\"", "\"live\"")).status())
+        .isEqualTo("activated");
+
+    assertThat(pruning.stop("plan:expired").status()).isEqualTo("not-found");
+  }
+
+  @Test
   @DisplayName("a null plan is invalid; a rejection is 422 and an unmanaged stop 409 over HTTP")
   void nullPlanAndHttpStatuses() {
     assertThat(management.activate(null).status()).isEqualTo("invalid");
