@@ -188,12 +188,16 @@ snapshot workflow only runs after a successful build on `develop`.
 **Release tag exists but no GitHub Release** - semantic-release runs on main,
 not on tag. Check the `Semantic Release` workflow run for failures.
 
-**Javadoc deploy fails with "pages not enabled"** - enable
-`Settings -> Pages -> Source: GitHub Actions` once; subsequent deploys work.
+**Javadoc deploy fails with "pages not enabled"** - set the Pages source to the
+`gh-pages` branch once (`Settings -> Pages -> Source: Deploy from a branch`, see
+"Required GitHub Pages setting"); `deploy-javadoc.yml` pushes to that branch, so the
+"GitHub Actions" source would not serve it.
 
-**`./gradlew publish` fails locally** - expected if OSSRH credentials are
-not in `~/.gradle/gradle.properties`. The build script skips the OSSRH
-repo and signing tasks when credentials are absent.
+**`./gradlew publish` locally** - without OSSRH credentials in
+`~/.gradle/gradle.properties` the OSSRH repository is left out, and without a GitHub token
+(`GITHUB_ACTOR` / `GITHUB_TOKEN`, or `gpr.user` / `gpr.token`) so is GitHub Packages; the
+artifacts then go to `build/staging-deploy` only. A release version (no `-SNAPSHOT`) without a
+signing key fails before anything is uploaded (see "Gradle signing config").
 
 **Maven Central HTTP 401** - regenerate the token at
 https://central.sonatype.com/ -> Account -> Generate User Token.
