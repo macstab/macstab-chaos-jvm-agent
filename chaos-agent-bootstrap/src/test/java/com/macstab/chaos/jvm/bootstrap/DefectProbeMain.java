@@ -3033,7 +3033,7 @@ public final class DefectProbeMain {
   }
 
   /**
-   * Activates every thread-owning stressor while a JVM-wide THREAD_START reject and a 2 s
+   * Activates every thread-owning stressor while a JVM-wide THREAD_START reject and a 30 s
    * THREAD_SLEEP delay are active, and prints whether each activation succeeded ({@code
    * activated.<id>=ACTIVE} or the exception), how long the deadlock took to form and how many
    * collections the safepoint storm caused in one second. The probe itself never sleeps: it parks.
@@ -3062,7 +3062,7 @@ public final class DefectProbeMain {
                         ChaosSelector.ThreadKind.ANY,
                         NamePattern.any(),
                         null))
-                .effect(ChaosEffect.delay(Duration.ofSeconds(2)))
+                .effect(ChaosEffect.delay(Duration.ofSeconds(30)))
                 .activationPolicy(ActivationPolicy.always())
                 .build()));
     final Map<String, ChaosEffect> stressors = new java.util.LinkedHashMap<>();
@@ -3112,11 +3112,17 @@ public final class DefectProbeMain {
               "activated." + stressor.getKey() + "=" + failed.getClass().getSimpleName());
         }
       }
+      // Up to 10 s for a deadlock the participants form after 10 ms; a participant the user's
+      // 30 s THREAD_SLEEP delay reached could not form it in that time.
       final long deadlockStart = System.nanoTime();
-      while (ManagementFactory.getThreadMXBean().findDeadlockedThreads() == null
-          && System.nanoTime() - deadlockStart < TimeUnit.SECONDS.toNanos(5)) {
-        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(5));
+      boolean deadlocked = false;
+      while (!deadlocked && System.nanoTime() - deadlockStart < TimeUnit.SECONDS.toNanos(10)) {
+        deadlocked = ManagementFactory.getThreadMXBean().findDeadlockedThreads() != null;
+        if (!deadlocked) {
+          LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(5));
+        }
       }
+      System.out.println("deadlocked=" + deadlocked);
       System.out.println(
           "deadlockMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - deadlockStart));
       final long collectionsBefore = collections();
@@ -3195,7 +3201,7 @@ public final class DefectProbeMain {
   /**
    * Activates the thread-local-leak stressor, on another thread, while a gate holds every
    * FORK_JOIN_TASK_RUN: prints {@code threadLocalLeak=activated} and the milliseconds it took, or
-   * {@code threadLocalLeak=timeout} after 5 s.
+   * {@code threadLocalLeak=timeout} after 10 s.
    */
   private static void threadLocalLeakForkJoinGate() throws Exception {
     final ChaosControlPlane plane = ChaosPlatform.current();
@@ -3211,7 +3217,8 @@ public final class DefectProbeMain {
     final long start = System.nanoTime();
     final Thread activator =
         Thread.ofPlatform().daemon().start(() -> leak.set(plane.activate(threadLocalLeak())));
-    activator.join(5_000L);
+    // A planting the gate held would wait for gate.close(), so it never activates in this time.
+    activator.join(10_000L);
     final long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
     System.out.println("threadLocalLeak=" + (leak.get() != null ? "activated" : "timeout"));
     System.out.println("threadLocalLeakMillis=" + elapsedMillis);
@@ -3223,7 +3230,7 @@ public final class DefectProbeMain {
   }
 
   /**
-   * Activates the thread-local-leak stressor while every ThreadLocal.set is delayed by 2 s and
+   * Activates the thread-local-leak stressor while every ThreadLocal.set is delayed by 30 s and
    * prints how long the activation took.
    */
   private static void threadLocalLeakSetDelay() {
@@ -3234,7 +3241,7 @@ public final class DefectProbeMain {
                 .selector(
                     new ChaosSelector.ThreadLocalSelector(
                         Set.of(OperationType.THREAD_LOCAL_SET), NamePattern.any()))
-                .effect(ChaosEffect.delay(Duration.ofSeconds(2)))
+                .effect(ChaosEffect.delay(Duration.ofSeconds(30)))
                 .activationPolicy(ActivationPolicy.always())
                 .build())) {
       final long start = System.nanoTime();

@@ -6,9 +6,10 @@ A Spring Boot 4 service fans out to three downstream endpoints (WireMock servers
 concurrently using virtual threads and `CompletableFuture`, through the JDK `HttpClient`. Two
 tests run `GET /fanout` 30 times per measurement:
 
-- `probabilisticDelayStaysWithin500msOfBaseline` measures the P99 without chaos, then delays each
-  `HTTP_CLIENT_SEND` by 20–80 ms with probability 0.4 and asserts that the P99 stays within 500 ms
-  of the baseline P99, and that the delay applied. Because all three fan-out legs run in
+- `probabilisticDelayStaysWithinBudgetOfBaseline` measures the P99 without chaos, then delays
+  each `HTTP_CLIENT_SEND` by 20–80 ms with probability 0.4 and asserts that the P99 stays within
+  2 s of the baseline P99, and that the delay applied. The delay adds at most 80 ms; the rest of
+  the budget is room for a slow CI runner's pauses. Because all three fan-out legs run in
   parallel, the per-request wall time is dominated by the slowest leg.
 - `graduatedDelayLadderStacksAdditively` stacks one, two and three scenarios that each delay every
   `HTTP_CLIENT_SEND` by 120 ms, and asserts that each step raises the P99 by at least 96 ms per

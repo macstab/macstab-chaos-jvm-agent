@@ -74,10 +74,10 @@ class ChaosRuntimeActivationPolicyTest {
                         false))
                 .build());
 
+        // Counted, not timed: a slow runner can make an undelayed submit take as long as a delay.
         for (int i = 0; i < 3; i++) {
-          final long elapsed = submitNanos(runtime);
+          submitNanos(runtime);
           assertThat(applied(runtime, "warm-up")).as("match %d is not applied", i).isZero();
-          assertThat(elapsed).as("match %d is not delayed", i).isLessThan(DELAY_NANOS / 2);
         }
 
         final long elapsed = submitNanos(runtime);

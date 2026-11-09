@@ -2811,9 +2811,11 @@ class AgentEndToEndTest {
               "carrierPinning")) {
         assertThat(result.value("activated." + stressor)).as(stressor).isEqualTo("ACTIVE");
       }
-      // The participants sleep 10 ms before the second lock, not the 2 s the user delay adds.
-      assertThat(result.longValue("deadlockMillis")).isLessThan(1_500L);
-      // A collection every 20 ms, not one per 2 s.
+      // The participants sleep 10 ms before the second lock, not the 30 s the user delay adds.
+      assertThat(result.value("deadlocked"))
+          .as("deadlocked within 10 s, after %d ms", result.longValue("deadlockMillis"))
+          .isEqualTo("true");
+      // A collection every 20 ms, not one per 30 s.
       assertThat(result.longValue("collectionsPerSecond")).isGreaterThanOrEqualTo(5L);
     }
 
@@ -2914,8 +2916,11 @@ class AgentEndToEndTest {
     void threadLocalLeakIgnoresForkJoinGate() throws Exception {
       final ChildJvmProbe.ProbeResult result =
           probe.runWithoutPlan(DefectProbeMain.class, "thread-local-leak-fork-join-gate");
-      assertThat(result.value("threadLocalLeak")).isEqualTo("activated");
-      assertThat(result.longValue("threadLocalLeakMillis")).isLessThan(2_000L);
+      assertThat(result.value("threadLocalLeak"))
+          .as(
+              "activated while the gate is closed, after %d ms",
+              result.longValue("threadLocalLeakMillis"))
+          .isEqualTo("activated");
     }
 
     @Test
@@ -2923,7 +2928,8 @@ class AgentEndToEndTest {
     void threadLocalLeakIgnoresThreadLocalSetDelay() throws Exception {
       final ChildJvmProbe.ProbeResult result =
           probe.runWithoutPlan(DefectProbeMain.class, "thread-local-leak-set-delay");
-      assertThat(result.longValue("threadLocalLeakMillis")).isLessThan(1_000L);
+      // Bounded well apart from the 30 s one delayed set would add.
+      assertThat(result.longValue("threadLocalLeakMillis")).isLessThan(10_000L);
     }
 
     @Test
