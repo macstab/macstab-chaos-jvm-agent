@@ -122,6 +122,24 @@ class ScheduledCallableWrapperTest {
     }
 
     @Test
+    @DisplayName("an InterruptedException from the tick propagates and restores the interrupt flag")
+    void interruptedTickKeepsTheInterrupt() throws Exception {
+      final InterruptedException injected = new InterruptedException("chaos-interrupt");
+      installTickBridge(
+          (e, t, p) -> {
+            throw injected;
+          });
+      final ScheduledCallableWrapper<String> wrapper =
+          new ScheduledCallableWrapper<>(executor, () -> "irrelevant");
+      try {
+        assertThatThrownBy(wrapper::call).isSameAs(injected);
+        assertThat(Thread.currentThread().isInterrupted()).isTrue();
+      } finally {
+        Thread.interrupted();
+      }
+    }
+
+    @Test
     @DisplayName("checked exception from delegate.call() propagates unchanged")
     void checkedExceptionFromDelegatePropagates() throws Exception {
       installTickBridge((e, t, p) -> true);

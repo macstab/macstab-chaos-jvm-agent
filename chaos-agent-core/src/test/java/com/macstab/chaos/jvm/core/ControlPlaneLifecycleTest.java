@@ -667,7 +667,7 @@ class ControlPlaneLifecycleTest {
     private final List<ChaosEvent> planeEvents = new CopyOnWriteArrayList<>();
 
     /** A control plane whose stressor factory throws {@code failure} once, then works. */
-    private ChaosControlPlaneImpl planeFailingOnce(final Error failure) {
+    private ChaosControlPlaneImpl planeFailingOnce(final Throwable failure) {
       final AtomicInteger calls = new AtomicInteger();
       final ChaosControlPlaneImpl plane =
           new ChaosControlPlaneImpl(
@@ -678,7 +678,10 @@ class ControlPlaneLifecycleTest {
                 ManagedStressor createIfNeeded(
                     final ChaosEffect effect, final boolean allowDestructiveEffects) {
                   if (calls.getAndIncrement() == 0) {
-                    throw failure;
+                    if (failure instanceof Error error) {
+                      throw error;
+                    }
+                    throw (RuntimeException) failure;
                   }
                   return super.createIfNeeded(effect, allowDestructiveEffects);
                 }
@@ -762,6 +765,55 @@ class ControlPlaneLifecycleTest {
             .isFalse();
         handle.start();
         assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+        handle.close();
+      } finally {
+        plane.close();
+      }
+    }
+
+    @Test
+    @DisplayName("an Error in a manual start is recorded as INTERNAL_ERROR, naming the Error")
+    void manualStartError() {
+      final ChaosControlPlaneImpl plane = planeFailingOnce(new NoClassDefFoundError("missing"));
+      try {
+        final ChaosActivationHandle handle = plane.activate(keepAlive(ActivationPolicy.manual()));
+
+        assertThatThrownBy(handle::start).isInstanceOf(NoClassDefFoundError.class);
+
+        assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.REGISTERED);
+        assertThat(plane.diagnostics().snapshot().failures())
+            .singleElement()
+            .satisfies(
+                failure -> {
+                  assertThat(failure.category())
+                      .isEqualTo(ChaosDiagnostics.FailureCategory.INTERNAL_ERROR);
+                  assertThat(failure.message()).contains("NoClassDefFoundError: missing");
+                });
+        handle.close();
+      } finally {
+        plane.close();
+      }
+    }
+
+    @Test
+    @DisplayName("any other failure of a manual start is recorded as INVALID_CONFIGURATION")
+    void manualStartRuntimeFailure() {
+      final ChaosControlPlaneImpl plane =
+          planeFailingOnce(new IllegalArgumentException("bad stressor"));
+      try {
+        final ChaosActivationHandle handle = plane.activate(keepAlive(ActivationPolicy.manual()));
+
+        assertThatThrownBy(handle::start).hasMessage("bad stressor");
+
+        assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.REGISTERED);
+        assertThat(plane.diagnostics().snapshot().failures())
+            .singleElement()
+            .satisfies(
+                failure -> {
+                  assertThat(failure.category())
+                      .isEqualTo(ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION);
+                  assertThat(failure.message()).isEqualTo("bad stressor");
+                });
         handle.close();
       } finally {
         plane.close();

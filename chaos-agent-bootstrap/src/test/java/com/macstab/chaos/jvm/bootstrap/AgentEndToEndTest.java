@@ -1057,6 +1057,20 @@ class AgentEndToEndTest {
   class Initialization {
 
     @Test
+    @DisplayName(
+        "startup-plan-error-status: a plan that does not parse is reported in the status file")
+    void startupPlanErrorIsReported() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(DefectProbeMain.class, "startup-plan-error-status");
+
+      assertThat(result.value("failed")).isEqualTo("true");
+      assertThat(result.value("status.state")).isEqualTo("error");
+      assertThat(result.value("status.scenarios")).isEqualTo("0");
+      assertThat(result.longValue("status.line")).isPositive();
+      assertThat(result.longValue("status.column")).isPositive();
+    }
+
+    @Test
     @DisplayName("a failed initialization is rolled back completely before a retry")
     void failedInitializationIsRolledBack() throws Exception {
       final ChildJvmProbe.ProbeResult result =

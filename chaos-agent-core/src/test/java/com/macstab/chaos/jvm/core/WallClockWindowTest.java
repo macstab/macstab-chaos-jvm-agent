@@ -110,6 +110,33 @@ class WallClockWindowTest {
     }
 
     @Test
+    @DisplayName(
+        "date-time reads outside the window return the caller's own value, inside it skewed")
+    void dateTimeReadsOutsideTheWindowAreUntouched() {
+      runtime.activate(
+          ChaosScenario.builder("date-skew")
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(
+                  ChaosSelector.jvmRuntime(
+                      Set.of(OperationType.LOCAL_DATE_TIME_NOW, OperationType.ZONED_DATE_TIME_NOW)))
+              .effect(
+                  new ChaosEffect.ClockSkewEffect(
+                      Duration.ofSeconds(5), ChaosEffect.ClockSkewMode.FIXED))
+              .activationPolicy(ActivationPolicy.window(T0.plusSeconds(10), null))
+              .build());
+      final java.time.LocalDateTime local = java.time.LocalDateTime.of(2026, 10, 30, 12, 0);
+      final java.time.ZonedDateTime zoned = local.atZone(ZoneOffset.UTC);
+
+      assertThat(runtime.adjustLocalDateTimeNowInZone(local, ZoneOffset.UTC)).isSameAs(local);
+      assertThat(runtime.adjustZonedDateTimeNow(zoned)).isSameAs(zoned);
+
+      clock.set(T0.plusSeconds(10));
+      assertThat(runtime.adjustLocalDateTimeNowInZone(local, ZoneOffset.UTC))
+          .isEqualTo(local.plusSeconds(5));
+      assertThat(runtime.adjustZonedDateTimeNow(zoned)).isEqualTo(zoned.plusSeconds(5));
+    }
+
+    @Test
     @DisplayName("honours activeFor")
     void honoursActiveFor() {
       runtime.activate(
@@ -225,6 +252,27 @@ class WallClockWindowTest {
             .as("the expired id can be activated again")
             .doesNotThrowAnyException();
       }
+    }
+
+    @Test
+    @DisplayName("a check that runs before the runtime's clock reached the end runs again later")
+    void earlyCheckRunsAgain() {
+      final List<ChaosEvent> inactive = new CopyOnWriteArrayList<>();
+      runtime.addEventListener(
+          event -> {
+            if (event.type() == ChaosEvent.Type.INACTIVE) {
+              inactive.add(event);
+            }
+          });
+      runtime.activate(submitScenario(ActivationPolicy.window(null, T0.plusMillis(50))));
+
+      // The first check runs about 50 ms from now and finds the runtime's clock still at T0.
+      await().pollDelay(Duration.ofMillis(200)).atMost(Duration.ofSeconds(1)).until(() -> true);
+      assertThat(inactive).as("not ended by an early check").isEmpty();
+      clock.set(T0.plusMillis(50));
+
+      await().atMost(Duration.ofSeconds(5)).until(() -> !inactive.isEmpty());
+      assertThat(inactive.get(0).attributes()).containsEntry("reason", "expired");
     }
 
     @Test

@@ -4,6 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
+import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.OperationType;
+import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
@@ -11,6 +18,8 @@ import java.lang.invoke.MethodType;
 import java.net.URI;
 import java.net.URL;
 import java.nio.ByteBuffer;
+import java.time.Duration;
+import java.util.Set;
 import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -809,5 +818,76 @@ class BootstrapDispatcherTest {
                 "act",
                 MethodType.methodType(void.class, ClassLoader.class, String.class));
     BootstrapDispatcher.install(behavior, handles);
+  }
+
+  /**
+   * The JDK's own use of a general primitive (L3a): inside {@link
+   * BootstrapDispatcher#SCOPE_JDK_INTERNAL} the timer submission, the direct-buffer allocation and
+   * the ZIP deflate are not evaluated, while an executor submission still is.
+   */
+  @Nested
+  @DisplayName("inside SCOPE_JDK_INTERNAL")
+  class InsideJdkInternalScope {
+
+    @Test
+    @DisplayName(
+        "SCHEDULE_SUBMIT, DIRECT_BUFFER_ALLOCATE and ZIP_DEFLATE are skipped, EXECUTOR_SUBMIT is not")
+    void onlyTheListedOperationsAreSkipped() throws Throwable {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      try (AutoCloseable connected = JdkInstrumentationInstaller.connectDispatcher(runtime)) {
+        final ChaosActivationHandle schedule =
+            delay(
+                runtime,
+                "schedule",
+                ChaosSelector.scheduling(Set.of(OperationType.SCHEDULE_SUBMIT)));
+        final ChaosActivationHandle submit =
+            delay(runtime, "submit", ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)));
+        final ChaosActivationHandle direct =
+            delay(
+                runtime,
+                "direct",
+                ChaosSelector.jvmRuntime(Set.of(OperationType.DIRECT_BUFFER_ALLOCATE)));
+        final ChaosActivationHandle deflate =
+            delay(runtime, "deflate", ChaosSelector.jvmRuntime(Set.of(OperationType.ZIP_DEFLATE)));
+
+        BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDK_INTERNAL);
+        try {
+          callAll();
+        } finally {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDK_INTERNAL);
+        }
+        assertThat(schedule.matchedCount()).as("SCHEDULE_SUBMIT inside").isZero();
+        assertThat(submit.matchedCount()).as("EXECUTOR_SUBMIT inside").isEqualTo(2L);
+        assertThat(direct.matchedCount()).as("DIRECT_BUFFER_ALLOCATE inside").isZero();
+        assertThat(deflate.matchedCount()).as("ZIP_DEFLATE inside").isZero();
+
+        callAll();
+        assertThat(schedule.matchedCount()).as("SCHEDULE_SUBMIT outside").isEqualTo(2L);
+        assertThat(direct.matchedCount()).as("DIRECT_BUFFER_ALLOCATE outside").isEqualTo(1L);
+        assertThat(deflate.matchedCount()).as("ZIP_DEFLATE outside").isEqualTo(1L);
+      } finally {
+        runtime.close();
+      }
+    }
+
+    private void callAll() throws Throwable {
+      BootstrapDispatcher.decorateExecutorRunnable("SCHEDULE_SUBMIT", executor, () -> {});
+      BootstrapDispatcher.decorateExecutorCallable("SCHEDULE_SUBMIT", executor, () -> "x");
+      BootstrapDispatcher.decorateExecutorRunnable("EXECUTOR_SUBMIT", executor, () -> {});
+      BootstrapDispatcher.decorateExecutorCallable("EXECUTOR_SUBMIT", executor, () -> "x");
+      BootstrapDispatcher.beforeDirectBufferAllocate(16);
+      BootstrapDispatcher.beforeZipDeflate();
+    }
+
+    private ChaosActivationHandle delay(
+        final ChaosRuntime runtime, final String id, final ChaosSelector selector) {
+      return runtime.activate(
+          ChaosScenario.builder(id)
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(selector)
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .activationPolicy(ActivationPolicy.always())
+              .build());
+    }
   }
 }

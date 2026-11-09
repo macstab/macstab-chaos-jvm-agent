@@ -47,6 +47,20 @@ class JdbcTargetExtractorTest {
   /** Declares no accessor. */
   static final class UnnamedPool {}
 
+  /** Declares no accessor, and names itself through toString(). */
+  static final class SelfNamedPool {
+    private final String name;
+
+    SelfNamedPool(final String name) {
+      this.name = name;
+    }
+
+    @Override
+    public String toString() {
+      return name;
+    }
+  }
+
   @Test
   @DisplayName("reads getPoolName(), also when a superclass declares it")
   void readsThePoolName() {
@@ -68,6 +82,15 @@ class JdbcTargetExtractorTest {
         .isEqualTo(NamedPool.class.getName());
     assertThat(JdbcTargetExtractor.fromHikariPool(new NamedPool(new Broken())))
         .isEqualTo(NamedPool.class.getName());
+  }
+
+  @Test
+  @DisplayName("without an accessor, a pool's own toString() names it unless it is blank")
+  void readsTheOwnToString() {
+    assertThat(JdbcTargetExtractor.fromHikariPool(new SelfNamedPool("ledger-pool")))
+        .isEqualTo("ledger-pool");
+    assertThat(JdbcTargetExtractor.fromHikariPool(new SelfNamedPool(" ")))
+        .isEqualTo(SelfNamedPool.class.getName());
   }
 
   @Test

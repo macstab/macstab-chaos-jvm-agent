@@ -37,6 +37,46 @@ class JdkOwnUseTest {
     }
   }
 
+  /** Methods with a hook's name and another descriptor: user methods, never skipped. */
+  @SuppressWarnings({"unused", "serial"})
+  private static final class LookAlikes implements Serializable {
+    int writeObject(final ObjectOutputStream out) {
+      return 0;
+    }
+
+    void writeObject(final ObjectOutputStream out, final int extra) {}
+
+    int readObject(final ObjectInputStream in) {
+      return 0;
+    }
+
+    void readObject(final ObjectInputStream in, final int extra) {}
+
+    void readObject(final String notAStream) {}
+
+    int readObjectNoData() {
+      return 0;
+    }
+
+    String writeReplace() {
+      return "";
+    }
+
+    Object writeReplace(final int notAHook) {
+      return this;
+    }
+  }
+
+  @Test
+  @DisplayName("a method with a hook's name and another descriptor is not a serialization hook")
+  void lookAlikesAreNotHooks() throws Exception {
+    for (final java.lang.reflect.Method method : LookAlikes.class.getDeclaredMethods()) {
+      if (!method.isSynthetic()) {
+        assertThat(JdkOwnUse.isSerializationHook(method)).as(method.toString()).isFalse();
+      }
+    }
+  }
+
   /** A static method with a hook's name and descriptor. */
   @SuppressWarnings("unused")
   private static final class StaticLookAlike {

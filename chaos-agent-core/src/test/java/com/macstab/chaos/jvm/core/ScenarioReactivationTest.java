@@ -14,6 +14,7 @@ import com.macstab.chaos.jvm.api.ChaosMetricsSink;
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Clock;
 import java.time.Duration;
@@ -22,6 +23,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -259,6 +261,92 @@ class ScenarioReactivationTest {
       } finally {
         controller.stop();
       }
+    }
+  }
+
+  @Nested
+  @DisplayName("a stop while start() builds the stressor")
+  class StopDuringStart {
+
+    @Test
+    @DisplayName("wins: the built stressor is closed, and nothing starts or is published")
+    void stopWins() {
+      final AtomicReference<ScenarioController> target = new AtomicReference<>();
+      final AtomicInteger closed = new AtomicInteger();
+      final StressorFactory stopping =
+          new StressorFactory(Optional::empty) {
+            @Override
+            @Nullable ManagedStressor createIfNeeded(
+                final ChaosEffect effect, final boolean allowDestructiveEffects) {
+              target.get().stop();
+              return closed::incrementAndGet;
+            }
+          };
+      final List<ChaosEvent.Type> events = new CopyOnWriteArrayList<>();
+      final ObservabilityBus bus = new ObservabilityBus(ChaosMetricsSink.NOOP);
+      bus.addListener(event -> events.add(event.type()));
+      final ScenarioController controller =
+          new ScenarioController(
+              ChaosScenario.builder("raced")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.stress(ChaosSelector.StressTarget.KEEPALIVE))
+                  .effect(new ChaosEffect.KeepAliveEffect("raced", true, Duration.ofMillis(10)))
+                  .build(),
+              "jvm",
+              null,
+              Clock.systemUTC(),
+              bus,
+              stopping);
+      target.set(controller);
+
+      controller.start();
+
+      assertThat(controller.state()).isEqualTo(ChaosDiagnostics.ScenarioState.STOPPED);
+      assertThat(closed).hasValue(1);
+      assertThat(events).containsExactly(ChaosEvent.Type.STOPPED);
+    }
+  }
+
+  @Nested
+  @DisplayName("a plan in a session")
+  class SessionPlans {
+
+    @Test
+    @DisplayName("is refused by a closed session")
+    void closedSessionRefusesPlan() {
+      final ChaosSession session = runtime.openSession("closed");
+      session.close();
+
+      assertThatThrownBy(() -> session.activate(plan(sessionScenario("a"))))
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessageContaining("closed session");
+    }
+
+    @Test
+    @DisplayName("that fails leaves none of its scenarios behind, and the session's own running")
+    void failedPlanRollsBack() {
+      try (ChaosSession session = runtime.openSession("rollback")) {
+        final ChaosActivationHandle own = session.activate(sessionScenario("b"));
+
+        assertThatThrownBy(() -> session.activate(plan(sessionScenario("a"), sessionScenario("b"))))
+            .isInstanceOf(ChaosActivationException.class);
+
+        assertThat(runtime.diagnostics().scenario("a")).isEmpty();
+        assertThat(own.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+      }
+    }
+
+    private ChaosScenario sessionScenario(final String id) {
+      return ChaosScenario.builder(id)
+          .scope(ChaosScenario.ScenarioScope.SESSION)
+          .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+          .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+          .activationPolicy(ActivationPolicy.always())
+          .build();
+    }
+
+    private ChaosPlan plan(final ChaosScenario... scenarios) {
+      return new ChaosPlan(new ChaosPlan.Metadata("session-plan", ""), null, List.of(scenarios));
     }
   }
 

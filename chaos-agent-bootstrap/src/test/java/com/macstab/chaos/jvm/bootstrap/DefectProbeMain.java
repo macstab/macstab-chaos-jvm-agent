@@ -166,6 +166,7 @@ public final class DefectProbeMain {
       case "schedule-periodic-only" -> schedulePeriodicOnly();
       case "executor-scheduled-only" -> executorScheduledOnly();
       case "skewed-window-manual-read" -> skewedWindowManualRead();
+      case "startup-plan-error-status" -> startupPlanErrorStatus();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
     printCounts();
@@ -3716,6 +3717,30 @@ public final class DefectProbeMain {
         "skewMillis="
             + (((com.macstab.chaos.jvm.core.ChaosRuntime) plane).adjustClockMillis(real) - real));
     System.out.println("hourState=" + hour.state());
+  }
+
+  /**
+   * Installs the agent with reports on and a startup plan that does not parse: the status file
+   * reports the error, with its position, before the start fails.
+   */
+  private static void startupPlanErrorStatus() throws Exception {
+    final Path reports = Files.createTempDirectory("chaos-reports");
+    try {
+      ChaosAgentBootstrap.initialize(
+          "configJson={\"scenarios\": [;reports=on;reportsDir=" + reports,
+          net.bytebuddy.agent.ByteBuddyAgent.install(),
+          Map.of());
+      System.out.println("failed=false");
+    } catch (final com.macstab.chaos.jvm.startup.ConfigLoadException failure) {
+      System.out.println("failed=true");
+    }
+    final String status = Files.readString(reports.resolve(ChaosReports.STATUS_FILE));
+    for (final String line : status.lines().toList()) {
+      System.out.println("status." + line);
+    }
+    // No agent is installed, so there are no counts to print.
+    System.out.flush();
+    System.exit(0);
   }
 
   static void printCounts() {

@@ -208,6 +208,15 @@ class HttpUrlExtractorTest {
     }
 
     @Test
+    @DisplayName("a host without a URI contributes nothing; with no target either there is no URL")
+    void hostWithoutUri() {
+      final Hc5Host bare = new Hc5Host(null);
+      assertThat(HttpUrlExtractor.fromApacheHc5(bare, new Hc5Request(null, "/v1/orders")))
+          .isEqualTo("/v1/orders");
+      assertThat(HttpUrlExtractor.fromApacheHc5(bare, new Hc5Request(null, null))).isNull();
+    }
+
+    @Test
     @DisplayName("else, without a host (executeOpen(null, ...)), the full getUri()")
     void withoutHost() {
       assertThat(
