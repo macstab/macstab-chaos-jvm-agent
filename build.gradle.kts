@@ -506,15 +506,17 @@ tasks.register("releaseToCentral") {
 
         val apiUrl = "https://ossrh-staging-api.central.sonatype.com/manual/upload/defaultRepository/com.macstab"
 
-        // The credentials go to curl through its config on stdin, not the command line, where every
-        // local user could read them; --fail-with-body turns an HTTP error into a failed exit.
+        // The Central Portal takes the user token as `Authorization: Bearer base64(user:password)`.
+        // The header goes to curl through its config on stdin, not the command line, where every
+        // local user could read it; --fail-with-body turns an HTTP error into a failed exit.
         val process = ProcessBuilder("curl", "--fail-with-body", "--config", "-", "-X", "POST", apiUrl)
             .redirectOutput(ProcessBuilder.Redirect.INHERIT)
             .redirectError(ProcessBuilder.Redirect.INHERIT)
             .start()
         process.outputStream.bufferedWriter().use { config ->
-            val escaped = "$username:$password".replace("\\", "\\\\").replace("\"", "\\\"")
-            config.write("user = \"$escaped\"\n")
+            val token = java.util.Base64.getEncoder()
+                .encodeToString("$username:$password".toByteArray(Charsets.UTF_8))
+            config.write("header = \"Authorization: Bearer $token\"\n")
         }
 
         val exitCode = process.waitFor()
