@@ -29,23 +29,20 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
 /**
- * End-to-end integration test for the JDBC chaos pipeline.
+ * The JDBC dispatch path from the bootstrap bridge to the runtime, against real JDBC objects.
  *
  * <p>The test wires a real {@link ChaosRuntime} through a real {@link ChaosBridge} into the {@link
- * BootstrapDispatcher} — the same path the ByteBuddy-woven advice uses at production runtime. It
- * then drives the {@link JdbcAdvice} entry methods against real JDBC objects (H2 in-memory database
- * and a real HikariCP {@link HikariDataSource}) exactly as ByteBuddy would when the agent is
- * attached with {@code -javaagent:}.
+ * BootstrapDispatcher}, with a {@link JdkInstrumentationInstaller#buildMethodHandles()} table, and
+ * calls the {@code BootstrapDispatcher.beforeJdbc*} statics the JDBC advice calls, before the real
+ * call on an H2 in-memory database and a real HikariCP {@link HikariDataSource}.
  *
- * <p>The advice is called directly rather than woven, so the test needs no agent attached: it
- * exercises the runtime and bridge code the woven advice reaches, with a {@link
- * JdkInstrumentationInstaller#buildMethodHandles()} table installed into {@link
- * BootstrapDispatcher}. The woven JDBC hooks themselves (weaving the JDBC hook group on demand, as
- * under {@code -javaagent:} or self-attach) are covered by the bootstrap module's child-JVM tests.
+ * <p>Neither the advice nor its weaving runs here: no agent is attached and the {@link JdbcAdvice}
+ * entry methods are not called. The woven JDBC hooks (the JDBC hook group woven on demand, as under
+ * {@code -javaagent:} or self-attach) are covered by the bootstrap module's child-JVM tests.
  */
-@DisplayName("JDBC integration — real H2 + HikariCP via ChaosBridge + BootstrapDispatcher")
+@DisplayName("JDBC bridge — BootstrapDispatcher → ChaosBridge → runtime, real H2 + HikariCP")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class JdbcIntegrationTest {
+class JdbcBridgeTest {
 
   private static final String H2_URL = "jdbc:h2:mem:chaos-jdbc-it;DB_CLOSE_DELAY=-1";
 
@@ -106,18 +103,18 @@ class JdbcIntegrationTest {
   }
 
   @Nested
-  @DisplayName("Statement interception")
+  @DisplayName("Statement execute")
   class StatementInterception {
 
     @Test
-    @DisplayName("REJECT on JDBC_STATEMENT_EXECUTE throws SQLException via StatementExecuteAdvice")
+    @DisplayName("REJECT on JDBC_STATEMENT_EXECUTE throws SQLException from the bridge call")
     void statementExecuteIsRejected() throws Exception {
       try (Connection connection = DriverManager.getConnection(H2_URL);
           Statement statement = connection.createStatement()) {
         final ChaosActivationHandle handle =
             activateReject("it-stmt-reject", OperationType.JDBC_STATEMENT_EXECUTE);
         try {
-          assertThatThrownBy(() -> runStatementExecuteAdvice(statement, "SELECT 1"))
+          assertThatThrownBy(() -> bridgeThenExecute(statement, "SELECT 1"))
               .isInstanceOf(SQLException.class)
               .hasMessage("db down");
         } finally {
@@ -126,25 +123,24 @@ class JdbcIntegrationTest {
       }
     }
 
-    private void runStatementExecuteAdvice(final Statement statement, final String sql)
-        throws Throwable {
+    private void bridgeThenExecute(final Statement statement, final String sql) throws Throwable {
       BootstrapDispatcher.beforeJdbcStatementExecute(sql);
       statement.execute(sql);
     }
   }
 
   @Nested
-  @DisplayName("PrepareStatement interception")
+  @DisplayName("Prepare statement")
   class PrepareStatementInterception {
 
     @Test
-    @DisplayName("REJECT on JDBC_PREPARED_STATEMENT throws SQLException via PrepareStatementAdvice")
+    @DisplayName("REJECT on JDBC_PREPARED_STATEMENT throws SQLException from the bridge call")
     void prepareStatementIsRejected() throws Exception {
       try (Connection connection = DriverManager.getConnection(H2_URL)) {
         final ChaosActivationHandle handle =
             activateReject("it-prepare-reject", OperationType.JDBC_PREPARED_STATEMENT);
         try {
-          assertThatThrownBy(() -> runPrepareAdvice(connection, "SELECT ?"))
+          assertThatThrownBy(() -> bridgeThenPrepare(connection, "SELECT ?"))
               .isInstanceOf(SQLException.class)
               .hasMessage("db down");
         } finally {
@@ -153,7 +149,7 @@ class JdbcIntegrationTest {
       }
     }
 
-    private void runPrepareAdvice(final Connection connection, final String sql) throws Throwable {
+    private void bridgeThenPrepare(final Connection connection, final String sql) throws Throwable {
       BootstrapDispatcher.beforeJdbcPreparedStatement(sql);
       try (PreparedStatement ignored = connection.prepareStatement(sql)) {
         // passthrough
@@ -162,7 +158,7 @@ class JdbcIntegrationTest {
   }
 
   @Nested
-  @DisplayName("Commit interception")
+  @DisplayName("Commit")
   class CommitInterception {
 
     @Test
@@ -173,7 +169,7 @@ class JdbcIntegrationTest {
         final ChaosActivationHandle handle =
             activateReject("it-commit-reject", OperationType.JDBC_TRANSACTION_COMMIT);
         try {
-          assertThatThrownBy(() -> runCommitAdvice(connection))
+          assertThatThrownBy(() -> bridgeThenCommit(connection))
               .isInstanceOf(SQLException.class)
               .hasMessage("db down");
         } finally {
@@ -182,14 +178,14 @@ class JdbcIntegrationTest {
       }
     }
 
-    private void runCommitAdvice(final Connection connection) throws Throwable {
+    private void bridgeThenCommit(final Connection connection) throws Throwable {
       BootstrapDispatcher.beforeJdbcTransactionCommit();
       connection.commit();
     }
   }
 
   @Nested
-  @DisplayName("Rollback interception")
+  @DisplayName("Rollback")
   class RollbackInterception {
 
     @Test
@@ -200,7 +196,7 @@ class JdbcIntegrationTest {
         final ChaosActivationHandle handle =
             activateReject("it-rollback-reject", OperationType.JDBC_TRANSACTION_ROLLBACK);
         try {
-          assertThatThrownBy(() -> runRollbackAdvice(connection))
+          assertThatThrownBy(() -> bridgeThenRollback(connection))
               .isInstanceOf(SQLException.class)
               .hasMessage("db down");
         } finally {
@@ -209,7 +205,7 @@ class JdbcIntegrationTest {
       }
     }
 
-    private void runRollbackAdvice(final Connection connection) throws Throwable {
+    private void bridgeThenRollback(final Connection connection) throws Throwable {
       BootstrapDispatcher.beforeJdbcTransactionRollback();
       connection.rollback();
     }
@@ -252,12 +248,11 @@ class JdbcIntegrationTest {
   }
 
   @Nested
-  @DisplayName("HikariCP pool interception")
+  @DisplayName("HikariCP connection acquire")
   class HikariPoolInterception {
 
     @Test
-    @DisplayName(
-        "REJECT on JDBC_CONNECTION_ACQUIRE throws SQLException via HikariGetConnectionAdvice")
+    @DisplayName("REJECT on JDBC_CONNECTION_ACQUIRE throws SQLException from the bridge call")
     void hikariGetConnectionIsRejected() throws Exception {
       final HikariConfig config = new HikariConfig();
       config.setJdbcUrl(H2_URL);
@@ -267,7 +262,7 @@ class JdbcIntegrationTest {
         final ChaosActivationHandle handle =
             activateReject("it-hikari-reject", OperationType.JDBC_CONNECTION_ACQUIRE);
         try {
-          assertThatThrownBy(() -> runHikariAcquireAdvice(dataSource))
+          assertThatThrownBy(() -> bridgeThenAcquire(dataSource))
               .isInstanceOf(SQLException.class)
               .hasMessage("db down");
         } finally {
@@ -293,7 +288,7 @@ class JdbcIntegrationTest {
       }
     }
 
-    private void runHikariAcquireAdvice(final HikariDataSource dataSource) throws Throwable {
+    private void bridgeThenAcquire(final HikariDataSource dataSource) throws Throwable {
       final String poolName = dataSource.getPoolName();
       BootstrapDispatcher.beforeJdbcConnectionAcquire(poolName);
       try (Connection ignored = dataSource.getConnection()) {

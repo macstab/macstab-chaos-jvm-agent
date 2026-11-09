@@ -901,7 +901,7 @@ The contract: `evaluateJdbc` returns nothing. It throws the `SQLException` of a 
 
 ## 13.8 Integration Test Design — Why `ChaosPlatform.installLocally()` Is Not Used
 
-`JdbcIntegrationTest` wires the pipeline manually:
+`JdbcBridgeTest` wires the pipeline manually:
 
 ```java
 @BeforeAll
@@ -916,7 +916,7 @@ void installBridge() throws Exception {
 
 `ChaosPlatform` lives in `chaos-agent-bootstrap`, which depends on `chaos-agent-instrumentation-jdk`; this module depends only on `chaos-agent-api` and `chaos-agent-core`, so `ChaosPlatform.installLocally()` is not on its test class path, and adding the dependency would make a cycle. (Self-attach weaves the JDBC group on demand exactly as a `-javaagent:` start does; that path is covered by the bootstrap module's tests.)
 
-The manual `BootstrapDispatcher.install(bridge, handles)` approach bypasses ByteBuddy entirely. The test drives the `JdbcAdvice` entry methods and the `BootstrapDispatcher` static dispatch methods directly, simulating what the woven advice calls at production runtime. The real `ChaosRuntime` → `ChaosDispatcher` → `ScenarioRegistry` → `SelectorMatcher` pipeline executes in full. The real H2 in-memory database and HikariCP connection pool are used. The only missing piece is the ByteBuddy weaving — which is a concern for `JdkInstrumentationInstaller` to test, not for `JdbcIntegrationTest`. The test covers the dispatch path, the `SQLException` of a reject, the refusal of a suppress at activation, and the passthrough path; it leaves the bytecode transformation mechanics to the installer's own test scope.
+The manual `BootstrapDispatcher.install(bridge, handles)` approach bypasses ByteBuddy entirely. The test calls the `BootstrapDispatcher.beforeJdbc*` statics the woven advice calls, then the real JDBC method; the `JdbcAdvice` entry methods themselves are not called. The real `ChaosRuntime` → `ChaosDispatcher` → `ScenarioRegistry` → `SelectorMatcher` pipeline executes in full. The real H2 in-memory database and HikariCP connection pool are used. The only missing piece is the ByteBuddy weaving — which is a concern for `JdkInstrumentationInstaller` to test, not for `JdbcBridgeTest`. The test covers the dispatch path, the `SQLException` of a reject, the refusal of a suppress at activation, and the passthrough path; it leaves the bytecode transformation mechanics to the installer's own test scope.
 
 ## 13.9 Sequence Diagram — HikariCP Connection Acquire
 
