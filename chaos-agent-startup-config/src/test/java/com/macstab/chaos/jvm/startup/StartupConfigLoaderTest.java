@@ -690,6 +690,7 @@ class StartupConfigLoaderTest {
       Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-rw-rw-"));
 
       assertThatThrownBy(() -> StartupConfigLoader.load("configFile=" + file, Map.of()))
+          .isInstanceOf(ConfigLoadException.class)
           .hasMessageContaining("config file is world-writable")
           .hasMessageContaining("configJson");
 
@@ -697,6 +698,7 @@ class StartupConfigLoaderTest {
       Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("rwxrwxrwx"));
 
       assertThatThrownBy(() -> StartupConfigLoader.load("configFile=" + file, Map.of()))
+          .isInstanceOf(ConfigLoadException.class)
           .hasMessageContaining("parent directory is world-writable")
           .hasMessageContaining("configJson");
     }

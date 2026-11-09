@@ -378,12 +378,14 @@ class FailureFactoryTest {
                     EffectReachesTheCallTest.INVOKERS
                         .get(OperationType.THREAD_START)
                         .invoke(runtime))
+            .isInstanceOf(OutOfMemoryError.class)
             .hasMessage(
                 "unable to create native thread: possibly out of memory or process/resource"
                     + " limits reached");
       }
       try (ChaosRuntime runtime = rejecting(OperationType.SHUTDOWN_HOOK_REGISTER)) {
         assertThatThrownBy(() -> runtime.decorateShutdownHook(new Thread(() -> {})))
+            .isInstanceOf(IllegalStateException.class)
             .hasMessage("Shutdown in progress");
       }
     }

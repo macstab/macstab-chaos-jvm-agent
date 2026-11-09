@@ -109,6 +109,7 @@ class ThreadAndSessionDispatchTest {
 
       assertThatThrownBy(
               () -> runtime.beforeThreadStart(Thread.ofVirtual().unstarted(() -> {}), false))
+          .isInstanceOf(RejectedExecutionException.class)
           .hasMessage("no virtual threads");
       assertThatCode(() -> runtime.beforeThreadStart(new Thread(() -> {}), false))
           .doesNotThrowAnyException();

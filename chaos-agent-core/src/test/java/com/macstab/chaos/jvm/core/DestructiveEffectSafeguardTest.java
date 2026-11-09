@@ -97,6 +97,7 @@ class DestructiveEffectSafeguardTest {
     void deadlockErrorMessageSaysUntilStopped() {
       final ChaosScenario scenario = deadlockScenario(ActivationPolicy.always());
       assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, FEATURE_SET))
+          .isInstanceOf(ChaosValidationException.class)
           .hasMessageContaining("until the scenario is stopped");
     }
 
@@ -105,6 +106,7 @@ class DestructiveEffectSafeguardTest {
     void deadlockErrorMessageMentionsOptIn() {
       final ChaosScenario scenario = deadlockScenario(ActivationPolicy.always());
       assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, FEATURE_SET))
+          .isInstanceOf(ChaosValidationException.class)
           .hasMessageContaining("withDestructiveEffects");
     }
 
@@ -136,6 +138,7 @@ class DestructiveEffectSafeguardTest {
     void threadLeakErrorMessageSaysUntilStopped() {
       final ChaosScenario scenario = threadLeakScenario(ActivationPolicy.always());
       assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, FEATURE_SET))
+          .isInstanceOf(ChaosValidationException.class)
           .hasMessageContaining("until the scenario is stopped");
     }
 
@@ -144,6 +147,7 @@ class DestructiveEffectSafeguardTest {
     void threadLeakErrorMessageMentionsOptIn() {
       final ChaosScenario scenario = threadLeakScenario(ActivationPolicy.always());
       assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, FEATURE_SET))
+          .isInstanceOf(ChaosValidationException.class)
           .hasMessageContaining("withDestructiveEffects");
     }
 

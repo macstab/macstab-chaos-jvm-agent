@@ -78,6 +78,7 @@ class ClientCallValidationTest {
         scenario(ChaosSelector.rpc(NamePattern.any()), ChaosEffect.reject("rpc down")));
 
     assertThatThrownBy(() -> runtime.beforeClientCall("RPC_CALL", this, "a.B/C", null, null))
+        .isInstanceOf(java.io.IOException.class)
         .hasMessage("rpc down");
   }
 

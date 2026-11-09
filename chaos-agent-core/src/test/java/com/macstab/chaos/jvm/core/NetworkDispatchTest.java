@@ -300,6 +300,7 @@ class NetworkDispatchTest {
               () ->
                   runtime.beforeSocketConnect(
                       new Socket(), InetSocketAddress.createUnresolved("db.internal", 5432), 0))
+          .isInstanceOf(java.net.ConnectException.class)
           .hasMessageContaining("db down");
     }
 
@@ -313,6 +314,7 @@ class NetworkDispatchTest {
           ChaosEffect.reject("unix down"));
 
       assertThatThrownBy(() -> runtime.beforeSocketConnect(null, socketPath, 0))
+          .isInstanceOf(java.net.ConnectException.class)
           .hasMessageContaining("unix down");
     }
 

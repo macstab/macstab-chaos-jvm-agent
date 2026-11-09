@@ -35,6 +35,7 @@ class MethodExitRejectTest {
 
       assertThatThrownBy(
               () -> runtime.afterMethodExit("com.example.Service", "save", String.class, "ok"))
+          .isInstanceOf(IllegalStateException.class)
           .hasMessageContaining("lost response");
     } finally {
       runtime.close();

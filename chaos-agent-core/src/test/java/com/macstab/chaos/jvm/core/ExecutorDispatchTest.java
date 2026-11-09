@@ -274,9 +274,11 @@ class ExecutorDispatchTest {
           "unknown", queue(OperationType.QUEUE_PUT, NamePattern.exact("unknown")), reject("?"));
 
       assertThatThrownBy(() -> runtime.beforeQueueOperation("QUEUE_PUT", new OrdersQueue()))
+          .isInstanceOf(InterruptedException.class)
           .hasMessageContaining("orders full");
       runtime.beforeQueueOperation("QUEUE_PUT", new ArrayBlockingQueue<>(1));
       assertThatThrownBy(() -> runtime.beforeQueueOperation("QUEUE_PUT", null))
+          .isInstanceOf(InterruptedException.class)
           .hasMessageContaining("?");
     }
 
@@ -527,10 +529,12 @@ class ExecutorDispatchTest {
               () ->
                   runtime.beforeExecutorShutdown(
                       "EXECUTOR_AWAIT_TERMINATION", new PaymentsExecutor(), 10L))
+          .isInstanceOf(InterruptedException.class)
           .hasMessageContaining("stay up");
       runtime.beforeExecutorShutdown("EXECUTOR_AWAIT_TERMINATION", this, 10L);
       assertThatThrownBy(
               () -> runtime.beforeExecutorShutdown("EXECUTOR_AWAIT_TERMINATION", null, 10L))
+          .isInstanceOf(InterruptedException.class)
           .hasMessageContaining("unknown executor");
     }
   }

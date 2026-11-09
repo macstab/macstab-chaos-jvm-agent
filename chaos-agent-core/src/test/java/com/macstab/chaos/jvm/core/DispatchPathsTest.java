@@ -93,7 +93,9 @@ class DispatchPathsTest {
       assertThatThrownBy(() -> runtime.beforeJmxInvoke(server, null, "reset"))
           .isInstanceOf(javax.management.MBeanException.class);
       final java.lang.reflect.Field field = String.class.getDeclaredField("value");
-      assertThatThrownBy(() -> runtime.beforeReflectionInvoke(field, "text")).hasMessage("refused");
+      assertThatThrownBy(() -> runtime.beforeReflectionInvoke(field, "text"))
+          .isInstanceOf(java.lang.reflect.InvocationTargetException.class)
+          .hasMessage("refused");
     }
 
     @Test
@@ -102,6 +104,7 @@ class DispatchPathsTest {
       rejectJvmRuntime(OperationType.REFLECTION_INVOKE);
       final java.lang.reflect.Constructor<?> constructor = Object.class.getConstructor();
       assertThatThrownBy(() -> runtime.beforeReflectionInvoke(constructor, null))
+          .isInstanceOf(java.lang.reflect.InvocationTargetException.class)
           .hasMessage("refused");
     }
 
@@ -109,7 +112,9 @@ class DispatchPathsTest {
     @DisplayName("a reflective call without a method object is still rejected")
     void missingMethod() {
       rejectJvmRuntime(OperationType.REFLECTION_INVOKE);
-      assertThatThrownBy(() -> runtime.beforeReflectionInvoke(null, null)).hasMessage("refused");
+      assertThatThrownBy(() -> runtime.beforeReflectionInvoke(null, null))
+          .isInstanceOf(java.lang.reflect.InvocationTargetException.class)
+          .hasMessage("refused");
     }
 
     @Test
@@ -277,6 +282,7 @@ class DispatchPathsTest {
     void clientCallWithoutClient() {
       activate("rpc", ChaosSelector.rpc(NamePattern.any()), ChaosEffect.reject("unavailable"));
       assertThatThrownBy(() -> runtime.beforeClientCall("RPC_CALL", null, "svc/Get", null, null))
+          .isInstanceOf(java.io.IOException.class)
           .hasMessage("unavailable");
     }
 

@@ -196,9 +196,9 @@ class StartupPathIntegrationTest {
       assertThat(result.value("pollerAfterRetry")).isEqualTo("true");
       assertThat(result.value("watchedScenario")).isEqualTo("ACTIVE");
       assertThat(result.value("retryStatus")).startsWith("state=ok|scenarios=1|");
-      assertThat(result.output().split("macstab-chaos diagnostics", -1))
+      assertThat(LogLines.containing(result.output(), "macstab-chaos diagnostics"))
           .as("the watched plan's dump is printed once")
-          .hasSize(2);
+          .hasSize(1);
     }
 
     @Test
@@ -244,11 +244,11 @@ class StartupPathIntegrationTest {
       final Result result = run(Map.of(), List.of(), "settings");
 
       assertThat(result.value("installed")).isEqualTo("true");
-      assertThat(result.output().lines().filter(line -> line.contains("duplicate agent arg")))
+      assertThat(LogLines.containing(result.output(), "duplicate agent arg"))
           .as("the arguments are parsed once, however many settings read them")
           .containsExactly(
               "[chaos-agent] duplicate agent arg key 'a': previous value overwritten (last-wins)");
-      assertThat(result.output().lines().filter(line -> line.contains("already installed")))
+      assertThat(LogLines.containing(result.output(), "already installed"))
           .as("only b differs from the installed arguments; malformed ones are not quoted")
           .containsExactly(
               "[chaos-agent] the agent is already installed; these agent args are ignored: b",
@@ -274,9 +274,9 @@ class StartupPathIntegrationTest {
                   + " is already registered in this JVM");
       assertThat(result.value("takenBeanKept")).isEqualTo("true");
       assertThat(result.value("installed")).isEqualTo("true");
-      assertThat(result.output().split("macstab-chaos diagnostics", -1))
+      assertThat(LogLines.containing(result.output(), "macstab-chaos diagnostics"))
           .as("the agent args and the plan both ask for the dump; it is printed once")
-          .hasSize(2);
+          .hasSize(1);
       assertThat(result.value("closedDuringShutdown")).isEqualTo("true");
     }
 
@@ -297,9 +297,9 @@ class StartupPathIntegrationTest {
           .contains("[chaos-agent] MBean registration skipped: registration refused");
       assertThat(result.value("installed")).isEqualTo("true");
       assertThat(result.value("chaosBeanRegistered")).isEqualTo("false");
-      assertThat(result.output().split("macstab-chaos diagnostics", -1))
+      assertThat(LogLines.containing(result.output(), "macstab-chaos diagnostics"))
           .as("the agent args ask for the dump the plan does not")
-          .hasSize(2);
+          .hasSize(1);
     }
 
     @Test

@@ -421,6 +421,7 @@ class PlanSchemaTest {
                           + "}, "
                           + effect
                           + "}]}"))
+          .isInstanceOf(ConfigLoadException.class)
           .as("%s without operations", selector.getName())
           .hasMessageContaining("operations");
       final OperationType foreign =
@@ -438,6 +439,7 @@ class PlanSchemaTest {
                           + "\"]}, "
                           + effect
                           + "}]}"))
+          .isInstanceOf(ConfigLoadException.class)
           .as("%s with %s", selector.getName(), foreign)
           .hasMessageContaining("does not support operation");
     }

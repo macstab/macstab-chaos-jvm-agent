@@ -204,7 +204,7 @@ class StartupConfigPollerEdgeCaseTest {
             });
 
     verify(runtime, times(2)).activate(any(ChaosScenario.class));
-    assertThat(stderr.lines().filter(line -> line.contains("config reload failed")))
+    assertThat(LogLines.containing(stderr, "config reload failed"))
         .singleElement()
         .asString()
         .endsWith("weaving failed");

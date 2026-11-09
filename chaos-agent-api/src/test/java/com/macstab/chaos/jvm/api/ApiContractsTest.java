@@ -140,6 +140,7 @@ class ApiContractsTest {
                   .acquisitionDelay())
           .isZero();
       assertThatThrownBy(() -> create(ChaosEffect.DeadlockEffect.class, deadlock, null, null))
+          .isInstanceOf(java.lang.reflect.InvocationTargetException.class)
           .hasRootCauseMessage(
               "participantCount must be >= 2 — a deadlock requires at least two participants");
     }

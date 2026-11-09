@@ -177,6 +177,7 @@ class CompositionAndLifecycleLawsTest {
     assertThat(waiting.state()).isEqualTo(ChaosDiagnostics.ScenarioState.REGISTERED);
     waiting.start();
     assertThatThrownBy(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}))
+        .isInstanceOf(RejectedExecutionException.class)
         .hasMessageContaining("a");
   }
 
@@ -194,6 +195,7 @@ class CompositionAndLifecycleLawsTest {
     runtime.activate(scenario("spent", ChaosEffect.reject("again"), 0, ActivationPolicy.always()));
 
     assertThatThrownBy(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}))
+        .isInstanceOf(RejectedExecutionException.class)
         .hasMessageContaining("again");
   }
 

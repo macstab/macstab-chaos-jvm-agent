@@ -806,7 +806,9 @@ class ControlPlaneLifecycleTest {
       try {
         final ChaosActivationHandle handle = plane.activate(keepAlive(ActivationPolicy.manual()));
 
-        assertThatThrownBy(handle::start).hasMessage("bad stressor");
+        assertThatThrownBy(handle::start)
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("bad stressor");
 
         assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.REGISTERED);
         assertThat(plane.diagnostics().snapshot().failures())
