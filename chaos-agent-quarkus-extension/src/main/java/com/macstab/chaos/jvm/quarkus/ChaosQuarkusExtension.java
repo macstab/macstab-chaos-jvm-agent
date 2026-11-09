@@ -18,6 +18,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.AfterTestExecutionCallback;
@@ -86,8 +87,47 @@ public final class ChaosQuarkusExtension
    */
   private static final String METHOD_HANDLES_KEY = "methodHandles";
 
+  /**
+   * The control planes the application's {@code ChaosControlPlane} beans hand out in a test ({@link
+   * ChaosArcProducer}); one application serves several test classes, so what is activated through
+   * an injected bean is released when the last running chaos test class ends.
+   */
+  static final Set<TrackingChaosControlPlane> CONTEXT_PLANES = ConcurrentHashMap.newKeySet();
+
+  private static final Object RUNNING_LOCK = new Object();
+
+  /** Outermost chaos test classes running now; guarded by the lock. */
+  private static int runningClasses;
+
   /** Default constructor invoked by JUnit when the extension is registered. */
   public ChaosQuarkusExtension() {}
+
+  /**
+   * Returns a tracking control plane for the application's bean, released when the application
+   * stops or when the last running chaos test class ends. Called by {@link ChaosArcProducer} in a
+   * test, through the system class loader that loaded this extension; not for application code.
+   *
+   * @param delegate the JVM-wide control plane
+   * @return the tracking control plane
+   */
+  public static ChaosControlPlane contextPlane(final ChaosControlPlane delegate) {
+    final TrackingChaosControlPlane plane = new TrackingChaosControlPlane(delegate);
+    CONTEXT_PLANES.add(plane);
+    return plane;
+  }
+
+  /**
+   * Releases a plane {@link #contextPlane} returned when its application stops: what it activated
+   * stops, and it is no longer released with the others. Called by {@link ChaosArcProducer}; not
+   * for application code.
+   *
+   * @param plane the plane being released
+   */
+  public static void releaseContextPlane(final ChaosControlPlane plane) {
+    if (plane instanceof TrackingChaosControlPlane tracker && CONTEXT_PLANES.remove(tracker)) {
+      tracker.stopTracked();
+    }
+  }
 
   @Override
   public void beforeAll(final ExtensionContext context) {
@@ -104,6 +144,9 @@ public final class ChaosQuarkusExtension
       session = tracker.openSession(context.getDisplayName());
       store.put(ChaosControlPlane.class, tracker);
       store.put(ChaosSession.class, session);
+      synchronized (RUNNING_LOCK) {
+        runningClasses++;
+      }
     }
     // Class-scoped list of handles for the scenarios the class's annotations activate. JVM-scoped
     // ones outlive any session, so afterAll stops them to keep them from leaking into subsequent
@@ -175,6 +218,19 @@ public final class ChaosQuarkusExtension
       stopHandlesSafely(classHandles);
       if (controlPlane instanceof TrackingChaosControlPlane tracker) {
         tracker.stopTracked();
+      }
+      // Present only in the class that opened it: a nested class leaves the count to its outer.
+      if (session != null) {
+        releaseContextPlanesIfLast();
+      }
+    }
+  }
+
+  /** Releases what the application's beans activated once no chaos test class is running. */
+  private static void releaseContextPlanesIfLast() {
+    synchronized (RUNNING_LOCK) {
+      if (--runningClasses == 0) {
+        CONTEXT_PLANES.forEach(TrackingChaosControlPlane::stopTracked);
       }
     }
   }
