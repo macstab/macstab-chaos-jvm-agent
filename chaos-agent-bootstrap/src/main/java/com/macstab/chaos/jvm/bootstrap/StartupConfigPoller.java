@@ -415,7 +415,8 @@ public final class StartupConfigPoller implements AutoCloseable {
     } catch (final RuntimeException | Error failure) {
       // Remember content that can never apply (malformed, invalid, hooks that cannot be woven, an
       // Error while applying it) so it is not tried again; a conflict with a scenario activated
-      // elsewhere may clear and is retried.
+      // elsewhere may clear and is retried. Any Error counts, a transient OutOfMemoryError too: the
+      // content is tried again once the file changes (documented in startup-config.md).
       if (failure instanceof Error || isDeterministic(failure)) {
         failedDigest = digest;
         failedStamp = stamp;
