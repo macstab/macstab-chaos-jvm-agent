@@ -14,6 +14,8 @@ dependencies {
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
+    // ParallelExecutionTest runs its fixture classes in a parallel engine of their own.
+    testImplementation(libs.junit.platform.testkit)
     testImplementation(libs.assertj)
 }
 

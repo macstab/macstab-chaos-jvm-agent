@@ -27,6 +27,8 @@ dependencies {
     testImplementation(platform(libs.quarkus.bom))
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
+    // ParallelExecutionTest runs its fixture classes in a parallel engine of their own.
+    testImplementation(libs.junit.platform.testkit)
     testImplementation(libs.assertj)
     // The recorder runs against Quarkus's runtime types and MicroProfile Config.
     testImplementation("io.quarkus:quarkus-core")

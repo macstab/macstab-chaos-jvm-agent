@@ -27,6 +27,8 @@ dependencies {
     testImplementation(platform(libs.micronaut.bom))
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
+    // ParallelExecutionTest runs its fixture classes in a parallel engine of their own.
+    testImplementation(libs.junit.platform.testkit)
     testImplementation(libs.assertj)
     testImplementation("io.micronaut.test:micronaut-test-junit5")
     testImplementation("io.micronaut:micronaut-management")
