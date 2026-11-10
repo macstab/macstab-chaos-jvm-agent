@@ -134,6 +134,20 @@ final class DispatchEngine {
     return registry.candidates(operation).length == 0;
   }
 
+  /**
+   * Returns whether a scenario indexed for the call's operation is started and its session and
+   * selector match the call, without counting anything: a dispatch can skip work it needs only for
+   * a call some scenario selects.
+   */
+  boolean selects(final InvocationContext context) {
+    for (final ScenarioController controller : registry.candidates(context.operationType())) {
+      if (controller.selects(context)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   RuntimeDecision evaluate(final InvocationContext context) {
     return evaluate(context, true);
   }

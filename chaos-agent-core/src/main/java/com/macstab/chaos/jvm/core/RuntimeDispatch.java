@@ -18,8 +18,20 @@ public final class RuntimeDispatch {
 
   private final DispatchEngine engine;
 
+  /** {@link JdkOwnUse#isJdkReflectionCaller}, the stack walk; a test seam counts the walks. */
+  private final java.util.function.BooleanSupplier jdkReflectionCaller;
+
   RuntimeDispatch(final DispatchEngine engine) {
+    this(engine, JdkOwnUse::isJdkReflectionCaller);
+  }
+
+  /**
+   * Creates the dispatch with {@code jdkReflectionCaller} in place of the stack walk (test seam).
+   */
+  RuntimeDispatch(
+      final DispatchEngine engine, final java.util.function.BooleanSupplier jdkReflectionCaller) {
     this.engine = engine;
+    this.jdkReflectionCaller = jdkReflectionCaller;
   }
 
   /**
@@ -140,11 +152,9 @@ public final class RuntimeDispatch {
    */
   public void beforeReflectionInvoke(final @Nullable Object method, final @Nullable Object target)
       throws Throwable {
-    if (engine.idle(OperationType.REFLECTION_INVOKE)
-        || JdkOwnUse.isSerializationHook(method)
-        || JdkOwnUse.isJdkReflectionCaller()) {
+    if (engine.idle(OperationType.REFLECTION_INVOKE) || JdkOwnUse.isSerializationHook(method)) {
       // idle, or the JDK's own reflection (L3a): the object streams calling a class's
-      // serialization hook, or any other Method.invoke whose caller is a JDK class
+      // serialization hook
       return;
     }
     final String methodName;
@@ -159,17 +169,22 @@ public final class RuntimeDispatch {
       methodName = null;
       declaringClass = method == null ? "java.lang.reflect.Method" : method.getClass().getName();
     }
-    engine.applyPreDecision(
-        engine.evaluate(
-            new InvocationContext(
-                OperationType.REFLECTION_INVOKE,
-                declaringClass,
-                target == null ? null : target.getClass().getName(),
-                methodName,
-                false,
-                null,
-                null,
-                engine.scopeContext.currentSessionId())));
+    final InvocationContext context =
+        new InvocationContext(
+            OperationType.REFLECTION_INVOKE,
+            declaringClass,
+            target == null ? null : target.getClass().getName(),
+            methodName,
+            false,
+            null,
+            null,
+            engine.scopeContext.currentSessionId());
+    // The stack walk only for a call a scenario selects (its session and selector match): a
+    // Method.invoke whose caller is a JDK class is the JDK's own reflection (L3a).
+    if (!engine.selects(context) || jdkReflectionCaller.getAsBoolean()) {
+      return;
+    }
+    engine.applyPreDecision(engine.evaluate(context));
   }
 
   /**

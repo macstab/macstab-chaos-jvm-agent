@@ -2,12 +2,23 @@ package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
+import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.ChaosSession;
+import com.macstab.chaos.jvm.api.OperationType;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
+import java.time.Duration;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import javax.management.ObjectName;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("JdkOwnUse (the L3a list)")
@@ -169,5 +180,72 @@ class JdkOwnUseTest {
     assertThat(JdkOwnUseTest.class.getMethod("reflectionCallerIsJdk").invoke(null))
         .as("called from this test class")
         .isEqualTo(false);
+  }
+
+  @Nested
+  @DisplayName("the stack walk of a Method.invoke")
+  class ReflectionCallerWalk {
+
+    @Test
+    @DisplayName("a REFLECTION_INVOKE scenario of another session makes no stack walk")
+    void noWalkForACallNoScenarioSelects() throws Throwable {
+      // Arrange
+      final AtomicInteger walks = new AtomicInteger();
+      try (ChaosRuntime runtime = new ChaosRuntime();
+          ChaosSession other = runtime.openSession("other");
+          ChaosSession mine = runtime.openSession("mine")) {
+        other.activate(reflectionDelay(ChaosScenario.ScenarioScope.SESSION));
+        final RuntimeDispatch dispatch = dispatch(runtime, walks, false);
+
+        // Act: the call is made in another session
+        try (ChaosSession.ScopeBinding ignored = mine.bind()) {
+          dispatch.beforeReflectionInvoke(null, null);
+        }
+      }
+
+      // Assert
+      assertThat(walks).as("stack walks").hasValue(0);
+    }
+
+    @Test
+    @DisplayName(
+        "a REFLECTION_INVOKE scenario that selects the call walks once; a JDK caller skips it")
+    void walkForACallAScenarioSelects() throws Throwable {
+      // Arrange
+      final AtomicInteger walks = new AtomicInteger();
+      final long matched;
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final ChaosActivationHandle handle =
+            runtime.activate(reflectionDelay(ChaosScenario.ScenarioScope.JVM));
+        final RuntimeDispatch dispatch = dispatch(runtime, walks, true);
+
+        // Act
+        dispatch.beforeReflectionInvoke(null, null);
+        matched = handle.matchedCount();
+      }
+
+      // Assert
+      assertThat(walks).as("stack walks").hasValue(1);
+      assertThat(matched).as("the JDK's own call is not counted").isZero();
+    }
+
+    private RuntimeDispatch dispatch(
+        final ChaosRuntime runtime, final AtomicInteger walks, final boolean jdkCaller) {
+      return new RuntimeDispatch(
+          new DispatchEngine(runtime.controlPlane()),
+          () -> {
+            walks.incrementAndGet();
+            return jdkCaller;
+          });
+    }
+
+    private ChaosScenario reflectionDelay(final ChaosScenario.ScenarioScope scope) {
+      return ChaosScenario.builder("reflection-" + scope)
+          .scope(scope)
+          .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.REFLECTION_INVOKE)))
+          .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+          .activationPolicy(ActivationPolicy.always())
+          .build();
+    }
   }
 }

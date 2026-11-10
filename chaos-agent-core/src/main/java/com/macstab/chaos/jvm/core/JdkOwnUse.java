@@ -186,7 +186,7 @@ final class JdkOwnUse {
    * Whether the innermost {@code Method.invoke} on the current thread's stack was called by a JDK
    * class, one of a named module of the bootstrap or platform class loader: {@code EnumSet} reading
    * an enum's constants, the TLS provider's set-up behind {@code SSLContext}. Walks the stack, so
-   * it runs only after the idle check.
+   * it runs only for a call a scenario selects.
    *
    * @return {@code true} when that caller is a JDK class; {@code false} when it is not, or when no
    *     {@code Method.invoke} is on the stack

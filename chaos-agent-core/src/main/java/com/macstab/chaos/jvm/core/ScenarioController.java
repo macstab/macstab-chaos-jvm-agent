@@ -631,13 +631,7 @@ final class ScenarioController {
    *     check fails
    */
   @Nullable ScenarioContribution evaluate(final InvocationContext context) {
-    if (!started.get()) {
-      return null;
-    }
-    if (sessionId != null && !sessionId.equals(context.sessionId())) {
-      return null;
-    }
-    if (!SelectorMatcher.matches(scenario.selector(), context)) {
+    if (!selects(context)) {
       return null;
     }
     final Window window = window();
@@ -686,6 +680,19 @@ final class ScenarioController {
         context,
         matchCount,
         ratePermitWindow);
+  }
+
+  /**
+   * Whether the scenario is started and its session and selector match {@code context}: the checks
+   * of {@link #evaluate} before any is counted, so a call it does not select changes nothing.
+   *
+   * @param context the intercepted call
+   * @return {@code true} when {@link #evaluate} goes on to the activation window
+   */
+  boolean selects(final InvocationContext context) {
+    return started.get()
+        && (sessionId == null || sessionId.equals(context.sessionId()))
+        && SelectorMatcher.matches(scenario.selector(), context);
   }
 
   /**
