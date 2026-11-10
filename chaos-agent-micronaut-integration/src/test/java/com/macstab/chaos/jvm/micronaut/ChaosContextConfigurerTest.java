@@ -4,7 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 import io.micronaut.context.ApplicationContextBuilder;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -68,11 +74,11 @@ class ChaosContextConfigurerTest {
   void failingInstallDoesNotAbort() {
     System.setProperty(ChaosContextConfigurer.ENABLED_PROPERTY, "true");
 
-    new ChaosContextConfigurer(
-            () -> {
-              throw new IllegalStateException("attach unavailable");
-            })
-        .configure((ApplicationContextBuilder) null);
+    final List<LogRecord> records =
+        configureLogged(new IllegalStateException("attach unavailable"));
+
+    assertThat(installs).hasValue(1);
+    assertFailureLogged(records, IllegalStateException.class);
   }
 
   @Test
@@ -80,13 +86,63 @@ class ChaosContextConfigurerTest {
   void linkageErrorDoesNotAbort() {
     System.setProperty(ChaosContextConfigurer.ENABLED_PROPERTY, "true");
 
-    assertThatCode(
-            () ->
-                new ChaosContextConfigurer(
-                        () -> {
-                          throw new UnsatisfiedLinkError("no attach library");
-                        })
-                    .configure((ApplicationContextBuilder) null))
-        .doesNotThrowAnyException();
+    final List<LogRecord> records = configureLogged(new UnsatisfiedLinkError("no attach library"));
+
+    assertThat(installs).hasValue(1);
+    assertFailureLogged(records, UnsatisfiedLinkError.class);
+  }
+
+  /** One WARNING naming the self-attach failure, carrying the install's throwable. */
+  private static void assertFailureLogged(
+      final List<LogRecord> records, final Class<? extends Throwable> failure) {
+    assertThat(records)
+        .singleElement()
+        .satisfies(
+            record -> {
+              assertThat(record.getLevel()).isEqualTo(Level.WARNING);
+              assertThat(record.getMessage())
+                  .isEqualTo(
+                      "[chaos-agent] failed to self-attach during Micronaut context bootstrap");
+              assertThat(record.getThrown()).isInstanceOf(failure);
+            });
+  }
+
+  /**
+   * Runs the configurer with an install that counts its call and throws {@code failure}; asserts
+   * that nothing reaches the caller and returns what the configurer's logger published.
+   */
+  private List<LogRecord> configureLogged(final Throwable failure) {
+    final Logger logger = Logger.getLogger(ChaosContextConfigurer.class.getName());
+    final List<LogRecord> records = new CopyOnWriteArrayList<>();
+    final Handler handler =
+        new Handler() {
+          @Override
+          public void publish(final LogRecord record) {
+            records.add(record);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    final Runnable install =
+        () -> {
+          installs.incrementAndGet();
+          if (failure instanceof RuntimeException runtime) {
+            throw runtime;
+          }
+          throw (Error) failure;
+        };
+    logger.addHandler(handler);
+    try {
+      assertThatCode(
+              () -> new ChaosContextConfigurer(install).configure((ApplicationContextBuilder) null))
+          .doesNotThrowAnyException();
+    } finally {
+      logger.removeHandler(handler);
+    }
+    return records;
   }
 }
