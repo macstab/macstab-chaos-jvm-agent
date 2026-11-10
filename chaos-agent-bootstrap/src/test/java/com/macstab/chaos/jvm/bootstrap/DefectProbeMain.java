@@ -1909,7 +1909,8 @@ public final class DefectProbeMain {
 
   /**
    * Binds a server socket and a server socket channel to 127.0.0.1 and to ::1, then accepts on a
-   * ::1 server; prints "ok" or the failure for each.
+   * server bound to the wildcard address (which the bind scenario's 127.0.0.1 does not match, and
+   * which every host has); prints "ok" or the failure for each.
    */
   private static void socketBind() throws Exception {
     for (final String host : new String[] {"127.0.0.1", "::1"}) {
@@ -1939,8 +1940,7 @@ public final class DefectProbeMain {
                 + failed.getMessage());
       }
     }
-    try (java.net.ServerSocket server =
-        new java.net.ServerSocket(0, 1, InetAddress.getByName("::1"))) {
+    try (java.net.ServerSocket server = new java.net.ServerSocket(0, 1)) {
       // No client connects: the EMFILE scenario must fail the accept. Bounded, so a fault that
       // did not apply reports a timeout instead of hanging the probe.
       server.setSoTimeout(5_000);

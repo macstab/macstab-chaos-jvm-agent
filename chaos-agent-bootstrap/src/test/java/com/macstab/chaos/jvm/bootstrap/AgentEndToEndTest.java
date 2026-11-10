@@ -2416,12 +2416,14 @@ class AgentEndToEndTest {
       final String inUse = "java.net.BindException: Address already in use";
       assertThat(result.value("serverSocket.127.0.0.1")).isEqualTo(inUse);
       assertThat(result.value("serverChannel.127.0.0.1")).isEqualTo(inUse);
-      // The other address and the accept use the IPv6 loopback, which not every host has.
+      assertThat(result.value("accept")).isEqualTo("java.io.IOException: Too many open files");
+      // The other address is the IPv6 loopback, which not every host has.
       org.junit.jupiter.api.Assumptions.assumeTrue(
-          ipv6LoopbackAvailable(), "this host has no IPv6 loopback");
+          ipv6LoopbackAvailable(),
+          "this host has no IPv6 loopback: binds to an address the scenario does not name are"
+              + " not checked");
       assertThat(result.value("serverSocket.::1")).isEqualTo("ok");
       assertThat(result.value("serverChannel.::1")).isEqualTo("ok");
-      assertThat(result.value("accept")).isEqualTo("java.io.IOException: Too many open files");
     }
 
     private static boolean ipv6LoopbackAvailable() {
