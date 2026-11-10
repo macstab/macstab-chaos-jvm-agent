@@ -171,4 +171,35 @@ class AgentLogTest {
 
     assertThat(written).extracting(LogRecord::getMessage).containsExactly("kept");
   }
+
+  @Test
+  @DisplayName("at exit, the dropped lines are counted on System.err before the held ones")
+  void droppedLinesCountedOnStandardError() {
+    final AgentLog log = AgentLog.named(NAME);
+    final java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
+    final java.io.PrintStream errBefore = System.err;
+    AgentLog.hold();
+    for (int i = 0; i < AgentLog.HELD_LINES + 2; i++) {
+      final int line = i;
+      log.warning(() -> "warning " + line);
+    }
+    System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
+    try {
+      AgentLog.releaseToStandardError();
+    } finally {
+      System.setErr(errBefore);
+    }
+
+    final java.util.List<String> lines =
+        captured.toString(java.nio.charset.StandardCharsets.UTF_8).lines().toList();
+    assertThat(lines).hasSize(AgentLog.HELD_LINES + 1);
+    assertThat(lines.get(0))
+        .isEqualTo(
+            "WARNING "
+                + AgentLog.AGENT
+                + ": [chaos-agent] 2 log lines of the agent's start were dropped; the "
+                + AgentLog.HELD_LINES
+                + " latest follow");
+    assertThat(lines.get(1)).endsWith(": warning 2");
+  }
 }

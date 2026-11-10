@@ -207,4 +207,22 @@ class ClockSkewStateTest {
       assertThat(runtime.adjustLocalDateTimeNowInZone(real, tokyo)).isEqualTo(real.plusMinutes(45));
     }
   }
+
+  @Test
+  @DisplayName("an activeFrom beyond the epoch-millisecond range saturates instead of throwing")
+  void activeFromBeyondTheMillisecondRange() {
+    final ChaosEffect.ClockSkewEffect freeze =
+        ChaosEffect.skewClock(Duration.ofHours(1), ChaosEffect.ClockSkewMode.FREEZE);
+    final long captured = 1_000_000L;
+
+    final ClockSkewState never = new ClockSkewState(freeze, captured, 0L, Instant.MAX);
+    final ClockSkewState always = new ClockSkewState(freeze, captured, 0L, Instant.MIN);
+
+    assertThat(never.applyMillis(ChaosEffect.ClockSkewMode.FREEZE, captured))
+        .as("frozen at the saturated anchor, never wrapped")
+        .isEqualTo(Long.MAX_VALUE);
+    assertThat(always.applyMillis(ChaosEffect.ClockSkewMode.FREEZE, captured))
+        .as("an activeFrom before the epoch range anchors at activation")
+        .isEqualTo(captured + Duration.ofHours(1).toMillis());
+  }
 }
