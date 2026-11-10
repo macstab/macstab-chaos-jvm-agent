@@ -121,12 +121,12 @@ class PlanObservabilityTest {
             new ChaosPlan.Metadata("conflict", ""),
             new ChaosPlan.Observability(false, false, false),
             List.of(scenario("fresh"), scenario("taken")));
-    try {
-      runtime.activate(conflicting);
-    } catch (final RuntimeException expected) {
-      // the second scenario's id is in use
-    }
+    assertThatThrownBy(() -> runtime.activate(conflicting))
+        .isInstanceOf(ChaosActivationConflictException.class)
+        .hasMessageContaining("jvm::taken");
+
     assertThat(runtime.jmxVisible("jvm", "fresh")).isTrue();
+    assertThat(runtime.diagnostics().scenario("fresh")).as("nothing of the plan started").isEmpty();
   }
 
   @Test
