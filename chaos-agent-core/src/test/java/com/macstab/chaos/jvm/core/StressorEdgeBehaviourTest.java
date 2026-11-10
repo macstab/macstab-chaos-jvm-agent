@@ -977,6 +977,70 @@ class StressorEdgeBehaviourTest {
       }
     }
 
+    @Test
+    @DisplayName(
+        "a running thread-leak stressor keeps no loader through the context class loader or the"
+            + " inheritable thread-locals of the thread that activated it")
+    void threadLeakKeepsNoActivatingThreadsLoader() throws Exception {
+      // Arrange
+      ClassLoader application = new ThrowawayLoader();
+      final java.lang.ref.WeakReference<ClassLoader> loader =
+          new java.lang.ref.WeakReference<>(application);
+      final Thread self = Thread.currentThread();
+      final ClassLoader original = self.getContextClassLoader();
+      self.setContextClassLoader(application);
+      REQUEST_CONTEXT.set(LoaderFrame.in(application));
+      application = null;
+      final ThreadLeakStressor stressor;
+      try {
+        // Act
+        stressor =
+            new ThreadLeakStressor(
+                new ChaosEffect.ThreadLeakEffect(1, "edge-itl-leak-", true, null), reason -> {});
+      } finally {
+        REQUEST_CONTEXT.remove();
+        self.setContextClassLoader(original);
+      }
+      try {
+        // Assert
+        assertThat(collected(loader)).as("the loader is collected while the leak runs").isTrue();
+      } finally {
+        stressor.close();
+      }
+    }
+
+    @Test
+    @DisplayName(
+        "a running carrier-pinning stressor keeps no loader through the context class loader or"
+            + " the inheritable thread-locals of the thread that activated it")
+    void carrierPinningKeepsNoActivatingThreadsLoader() throws Exception {
+      // Arrange
+      ClassLoader application = new ThrowawayLoader();
+      final java.lang.ref.WeakReference<ClassLoader> loader =
+          new java.lang.ref.WeakReference<>(application);
+      final Thread self = Thread.currentThread();
+      final ClassLoader original = self.getContextClassLoader();
+      self.setContextClassLoader(application);
+      REQUEST_CONTEXT.set(LoaderFrame.in(application));
+      application = null;
+      final VirtualThreadCarrierPinningStressor stressor;
+      try {
+        // Act: one virtual thread that holds its carrier until the stressor is closed
+        stressor =
+            new VirtualThreadCarrierPinningStressor(
+                new ChaosEffect.VirtualThreadCarrierPinningEffect(1, Duration.ofMinutes(1)), false);
+      } finally {
+        REQUEST_CONTEXT.remove();
+        self.setContextClassLoader(original);
+      }
+      try {
+        // Assert
+        assertThat(collected(loader)).as("the loader is collected while the pinning runs").isTrue();
+      } finally {
+        stressor.close();
+      }
+    }
+
     /**
      * Fails only on JDK 21 to 23, where a thread keeps the access-control context of the frames
      * that made it; JDK 24 dropped that context, so there it passes either way. {@link

@@ -87,16 +87,13 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
       final Runnable body =
           pinWithMonitor ? () -> pinWithMonitor(pinNanos) : () -> occupyWithSpin(pinNanos);
       threads.add(
-          Thread.ofVirtual()
-              .name(name)
-              .unstarted(
-                  AgentThreads.owned(
-                      () -> {
-                        body.run();
-                        LOGGER.fine(
-                            () -> "[chaos-agent] chaos carrier-pin thread terminated: " + name);
-                      },
-                      ManagedStressor.failure(onEnd, "VirtualThreadCarrierPinning"))));
+          AgentThreads.virtual(
+              name,
+              () -> {
+                body.run();
+                LOGGER.fine(() -> "[chaos-agent] chaos carrier-pin thread terminated: " + name);
+              },
+              ManagedStressor.failure(onEnd, "VirtualThreadCarrierPinning")));
     }
     this.pinningThreads = AgentThreads.startAll(threads);
   }

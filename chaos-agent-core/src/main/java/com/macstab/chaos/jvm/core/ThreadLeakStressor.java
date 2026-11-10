@@ -41,7 +41,7 @@ final class ThreadLeakStressor implements ManagedStressor {
    * @param onEnd the scenario's end callback
    */
   ThreadLeakStressor(final ChaosEffect.ThreadLeakEffect effect, final Consumer<String> onEnd) {
-    this(effect, onEnd, Thread::new);
+    this(effect, onEnd, AgentThreads.PLATFORM);
   }
 
   /**

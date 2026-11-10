@@ -31,8 +31,12 @@ public final class AgentThreads {
    * Makes the agent's platform threads without the creating thread's inheritable thread-locals (an
    * application's request context, an MDC adapter), whose values are application classes.
    */
-  private static final ThreadFactory PLATFORM =
+  static final ThreadFactory PLATFORM =
       Thread.ofPlatform().inheritInheritableThreadLocals(false).factory();
+
+  /** Makes the agent's virtual threads, as {@link #PLATFORM} its platform threads. */
+  private static final ThreadFactory VIRTUAL =
+      Thread.ofVirtual().inheritInheritableThreadLocals(false).factory();
 
   /** How long a rollback waits for each thread it stops. */
   private static final long ROLLBACK_JOIN_MILLIS = 1_000L;
@@ -138,6 +142,20 @@ public final class AgentThreads {
       final Runnable body,
       final Runnable onFailure) {
     return named(created(threads, owned(body, onFailure)), name, daemon);
+  }
+
+  /**
+   * Returns an unstarted virtual thread whose body runs {@link #owned(Runnable, Runnable) owned},
+   * reporting its failure to {@code onFailure}, and which keeps no loader of the thread that made
+   * it; start it with {@link #startAll(List)}.
+   *
+   * @param name the thread name
+   * @param body the thread's work
+   * @param onFailure runs when the body fails
+   * @return the unstarted thread
+   */
+  static Thread virtual(final String name, final Runnable body, final Runnable onFailure) {
+    return named(created(VIRTUAL, owned(body, onFailure)), name, true);
   }
 
   /**
