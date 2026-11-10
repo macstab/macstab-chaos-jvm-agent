@@ -168,6 +168,10 @@ ChaosControlPlane → HookDemand.require(SelectorOperations.of(selector))
    — then the classes that escape an installation (POST_INSTALL_RETRANSFORM_TARGETS) are
      loaded (not initialized) and retransformed in one call, each on its own if that call
      fails
+   — the agent's own work (semantics L3): weave(), the method weaving and every reset run
+     inside beginInternalCall / endInternalCall, and the base builder's TransformerDecorator
+     (AGENT_WORK) brackets each transform() call the same way, also when an application
+     thread loads a class; ByteBuddy's own reflection is then no REFLECTION_INVOKE target
 ```
 
 ## Per-Call Dispatch (hot path)

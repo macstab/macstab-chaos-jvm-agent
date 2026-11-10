@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.instrumentation;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.AgentLog;
+import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import java.lang.instrument.Instrumentation;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -57,6 +58,8 @@ final class MethodWeaver {
       return;
     }
     final Set<ChaosSelector.MethodSelector> snapshot = Set.copyOf(selectors);
+    // The agent's own work (L3), as for the hook groups.
+    BootstrapDispatcher.beginInternalCall();
     try {
       transformer =
           baseBuilder
@@ -89,6 +92,8 @@ final class MethodWeaver {
     } catch (final RuntimeException failure) {
       HookCoverage.failed("METHODS", failure);
       throw new IllegalStateException("failed to weave method hooks for " + snapshot, failure);
+    } finally {
+      BootstrapDispatcher.endInternalCall();
     }
     woven = snapshot;
     LOGGER.fine(() -> "chaos method hooks woven for " + snapshot.size() + " selector(s)");

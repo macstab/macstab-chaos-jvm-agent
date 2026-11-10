@@ -94,6 +94,7 @@ public final class JdkOwnUseProbeMain {
       case "jmx-reject" -> jmxReject();
       case "thread-local-suppress" -> threadLocalSuppress();
       case "reflection-reject-serialization" -> reflectionRejectSerialization();
+      case "weave-under-reflection-reject" -> weaveUnderReflectionReject();
       case "direct-buffer-reject-socket-read" -> directBufferRejectSocketRead();
       case "gc-suppress-bits" -> gcSuppressBits();
       case "woven-after-file-io" ->
@@ -440,6 +441,47 @@ public final class JdkOwnUseProbeMain {
           "userInvoke",
           outcome(() -> Object.class.getMethod("hashCode").invoke(new Object()) != null));
       print("matched", handle.matchedCount());
+    }
+  }
+
+  /**
+   * A REFLECTION_INVOKE reject does not reach the agent's own weaving (L3): a class loaded while it
+   * is active still gets the method hook of a scenario activated before, and a hook group woven
+   * while it is active still applies.
+   */
+  private static void weaveUnderReflectionReject() throws Exception {
+    try (ChaosActivationHandle zero =
+            activate(
+                "zero-late-count",
+                new ChaosSelector.MethodSelector(
+                    Set.of(OperationType.METHOD_EXIT),
+                    NamePattern.exact("com.example.chaostarget.LateCounter"),
+                    NamePattern.exact("count"),
+                    null),
+                ChaosEffect.corruptReturnValue(ChaosEffect.ReturnValueStrategy.ZERO));
+        ChaosActivationHandle reflect =
+            activate(
+                "reflect",
+                ChaosSelector.jvmRuntime(Set.of(OperationType.REFLECTION_INVOKE)),
+                ChaosEffect.reject("reflect"))) {
+      print("lateCount", outcome(() -> new com.example.chaostarget.LateCounter().count()));
+      print(
+          "groupWoven",
+          outcome(
+              () -> {
+                try (ChaosActivationHandle offer =
+                    activate(
+                        "offer",
+                        ChaosSelector.queue(Set.of(OperationType.QUEUE_OFFER)),
+                        ChaosEffect.reject("full"))) {
+                  return new java.util.concurrent.ArrayBlockingQueue<String>(1).offer("x");
+                }
+              }));
+      print(
+          "hookFailures",
+          ChaosPlatform.current().diagnostics().snapshot().runtimeDetails().get("hookFailures"));
+      print("reflectionMatched", reflect.matchedCount());
+      print("zeroMatched", zero.matchedCount());
     }
   }
 

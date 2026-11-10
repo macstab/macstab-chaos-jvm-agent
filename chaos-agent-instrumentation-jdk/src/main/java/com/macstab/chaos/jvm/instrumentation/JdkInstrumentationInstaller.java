@@ -214,6 +214,18 @@ public final class JdkInstrumentationInstaller {
    *     retransform one of its classes
    */
   static void weave(final Instrumentation instrumentation, final Set<OperationType> operations) {
+    // The agent's own work (L3): ByteBuddy's reflection while it installs and retransforms is no
+    // application call, so a REFLECTION_INVOKE reject cannot fail the weaving.
+    BootstrapDispatcher.beginInternalCall();
+    try {
+      weaveGroups(instrumentation, operations);
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
+  }
+
+  private static void weaveGroups(
+      final Instrumentation instrumentation, final Set<OperationType> operations) {
     synchronized (WOVEN_GROUPS) {
       boolean wovenNow = false;
       try {
@@ -548,12 +560,52 @@ public final class JdkInstrumentationInstaller {
    */
   static void reset(
       final ResettableClassFileTransformer transformer, final Instrumentation instrumentation) {
-    transformer.reset(
-        instrumentation,
-        AgentBuilder.RedefinitionStrategy.RETRANSFORMATION,
-        AgentBuilder.RedefinitionStrategy.BatchAllocator.ForTotal.INSTANCE,
-        AgentBuilder.RedefinitionStrategy.Listener.ErrorEscalating.FAIL_FAST);
+    BootstrapDispatcher.beginInternalCall();
+    try {
+      transformer.reset(
+          instrumentation,
+          AgentBuilder.RedefinitionStrategy.RETRANSFORMATION,
+          AgentBuilder.RedefinitionStrategy.BatchAllocator.ForTotal.INSTANCE,
+          AgentBuilder.RedefinitionStrategy.Listener.ErrorEscalating.FAIL_FAST);
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
   }
+
+  /**
+   * Runs every transformation of a transformer as the agent's own work (L3): a class that loads on
+   * an application thread is transformed with the reentrancy depth raised, so ByteBuddy's own
+   * reflection is no {@code REFLECTION_INVOKE} target and no other scenario applies to it either.
+   */
+  static final AgentBuilder.TransformerDecorator AGENT_WORK =
+      transformer ->
+          ResettableClassFileTransformer.WithDelegation.of(
+              transformer,
+              new ResettableClassFileTransformer.WithDelegation.Callback<Boolean>() {
+                @Override
+                public Boolean onBeforeTransform(
+                    final @Nullable JavaModule module,
+                    final @Nullable ClassLoader classLoader,
+                    final @Nullable String internalName,
+                    final @Nullable Class<?> classBeingRedefined,
+                    final java.security.@Nullable ProtectionDomain protectionDomain,
+                    final byte[] classFile) {
+                  BootstrapDispatcher.beginInternalCall();
+                  return Boolean.TRUE;
+                }
+
+                @Override
+                public void onAfterTransform(
+                    final @Nullable Boolean begun,
+                    final @Nullable JavaModule module,
+                    final @Nullable ClassLoader classLoader,
+                    final @Nullable String internalName,
+                    final @Nullable Class<?> classBeingRedefined,
+                    final java.security.@Nullable ProtectionDomain protectionDomain,
+                    final byte[] classFile) {
+                  BootstrapDispatcher.endInternalCall();
+                }
+              });
 
   /**
    * Refuses to install when the JVM-wide dispatcher already carries a delegate from a copy of the
@@ -957,9 +1009,9 @@ public final class JdkInstrumentationInstaller {
 
   /**
    * Builds the base {@link AgentBuilder} with retransformation strategy, failing on a refused
-   * retransformation, error logging, and ignore rules for ByteBuddy and chaos-agent internal
-   * packages and for class loaders with a bootstrap bridge copy of their own ({@link
-   * BridgeVisibility}).
+   * retransformation, error logging, transformations run as the agent's own work ({@link
+   * #AGENT_WORK}), and ignore rules for ByteBuddy and chaos-agent internal packages and for class
+   * loaders with a bootstrap bridge copy of their own ({@link BridgeVisibility}).
    */
   private static AgentBuilder buildBaseAgentBuilder() {
     return newAgentBuilder()
@@ -969,6 +1021,7 @@ public final class JdkInstrumentationInstaller {
         // transformer and throws) instead of leaving a group recorded as woven with inert hooks.
         .with(AgentBuilder.RedefinitionStrategy.Listener.ErrorEscalating.FAIL_FAST)
         .with(errorListener())
+        .with(AGENT_WORK)
         .ignore(
             ElementMatchers.nameStartsWith(BYTE_BUDDY_PACKAGE_PREFIX)
                 .or(ElementMatchers.nameStartsWith("com.macstab.chaos.jvm.")))

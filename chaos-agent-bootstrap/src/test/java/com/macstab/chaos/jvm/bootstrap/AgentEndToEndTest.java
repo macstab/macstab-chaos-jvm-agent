@@ -2958,6 +2958,28 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName(
+        "a REFLECTION_INVOKE reject does not fail the agent's weaving: a class loaded later and a"
+            + " group woven later get their hooks")
+    void weavingIgnoresReflectionReject() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(JdkOwnUseProbeMain.class, "weave-under-reflection-reject");
+      assertSoftly(
+          softly -> {
+            softly
+                .assertThat(result.value("lateCount"))
+                .as("LateCounter.count woven")
+                .isEqualTo("0");
+            softly
+                .assertThat(result.value("groupWoven"))
+                .as("QUEUE_OFFER woven")
+                .isEqualTo("false");
+            softly.assertThat(result.value("hookFailures")).isEmpty();
+            softly.assertThat(result.longValue("reflectionMatched")).isZero();
+          });
+    }
+
+    @Test
     @DisplayName("a THREAD_LOCAL_GET suppress in a session leaves the session visible")
     void sessionSurvivesThreadLocalGetSuppress() throws Exception {
       final ChildJvmProbe.ProbeResult result =

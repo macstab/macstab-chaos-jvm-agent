@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.instrumentation;
 
+import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import java.util.Collections;
 import java.util.Set;
 import java.util.TreeSet;
@@ -113,10 +114,14 @@ final class HookCoverage {
    * of {@link ClientCallExtractor} the advice links, the bootstrap one once the bridge is injected.
    */
   private static @Nullable String grpcFailingStreamMiss() {
+    // The agent's own reflection (L3): no REFLECTION_INVOKE target.
+    BootstrapDispatcher.beginInternalCall();
     try {
       return (String) linkedExtractor().getMethod("failingStreamMiss").invoke(null);
     } catch (final ReflectiveOperationException unreadable) {
       return null;
+    } finally {
+      BootstrapDispatcher.endInternalCall();
     }
   }
 
@@ -133,10 +138,13 @@ final class HookCoverage {
     REGISTERED.clear();
     MATCHED.clear();
     FAILED.clear();
+    BootstrapDispatcher.beginInternalCall();
     try {
       linkedExtractor().getMethod("forgetFailingStreamMiss").invoke(null);
     } catch (final ReflectiveOperationException unreachable) {
       // an older bootstrap copy without the method: nothing recorded there to forget
+    } finally {
+      BootstrapDispatcher.endInternalCall();
     }
   }
 
