@@ -262,10 +262,12 @@ public final class JdkInstrumentationInstaller {
 
   /**
    * Returns the hooks that matched a method of their type, as {@code advice on matcher}: what the
-   * hook-coverage test checks against every advice class on the running JDK.
+   * hook-coverage test checks against every advice class on the running JDK. Public only for that
+   * test's child-JVM probe, which runs in another package.
    *
    * @return the active hooks, sorted
    */
+  @Internal
   public static Set<String> matchedHooks() {
     return HookCoverage.matched();
   }

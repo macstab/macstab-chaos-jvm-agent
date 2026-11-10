@@ -324,6 +324,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Deprecations
 
+* **startup-config:** `AgentArgs.getLong` is deprecated for removal: no agent argument is a plain long any more (`AgentSettings` reads the numbers with their own validation), and nothing in the agent calls it. Read the value with `get(key)` and parse it.
 * **api:** `ChaosMetricsSink` is deprecated for removal, and with it the `chaos.effect.applied` metric: a second metrics API beside the events, for the count `chaos-agent-micrometer` and `chaos-agent-opentelemetry` publish as `chaos.applications`. Its javadoc no longer names `chaos.gate.block.duration`, which nothing produced. The `APPLIED` event attribute `delayMillis` is deprecated in favour of `delayNanos`; it is still set from 1 ms.
 
 ### Performance Improvements

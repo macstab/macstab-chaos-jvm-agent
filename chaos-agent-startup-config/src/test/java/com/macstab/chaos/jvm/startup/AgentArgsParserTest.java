@@ -249,6 +249,7 @@ class AgentArgsParserTest {
 
   @Nested
   @DisplayName("AgentArgs long accessor")
+  @SuppressWarnings("removal") // deprecated for removal, tested until it is removed
   class LongAccessor {
 
     @Test

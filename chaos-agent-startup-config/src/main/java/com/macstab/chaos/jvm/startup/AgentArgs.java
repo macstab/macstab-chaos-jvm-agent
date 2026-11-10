@@ -48,7 +48,11 @@ public record AgentArgs(Map<String, String> values) {
    * @param key the argument key to look up
    * @param defaultValue value returned when the key is absent or its value is not a valid long
    * @return the parsed long, or {@code defaultValue}
+   * @deprecated no agent argument is a plain long any more ({@code configWatchInterval} and the
+   *     other numbers are read by {@code AgentSettings} with their own validation); read the value
+   *     with {@code get(key)} and parse it. To be removed in the next major release.
    */
+  @Deprecated(since = "2.0.0", forRemoval = true)
   public long getLong(final String key, final long defaultValue) {
     final String raw = values.get(key);
     if (raw == null || raw.isBlank()) {
