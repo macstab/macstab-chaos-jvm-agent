@@ -74,12 +74,11 @@ class VirtualThreadCarrierPinningStressorTest {
       final VirtualThreadCarrierPinningStressor stressor =
           new VirtualThreadCarrierPinningStressor(
               new ChaosEffect.VirtualThreadCarrierPinningEffect(1, Duration.ofSeconds(10)));
-      assertThatCode(
-              () -> {
-                stressor.close();
-                stressor.close();
-              })
-          .doesNotThrowAnyException();
+      await().atMost(3, TimeUnit.SECONDS).until(() -> stressor.aliveCount() == 1);
+      stressor.close();
+
+      assertThatCode(stressor::close).doesNotThrowAnyException();
+      assertThat(stressor.aliveCount()).as("the first close stopped the thread").isZero();
     }
   }
 

@@ -194,6 +194,13 @@ class NativeParityDispatchTest {
           ChaosEffect.errno(ChaosEffect.Errno.EADDRINUSE));
       runtime.beforeSocketBind(InetAddress.getByName("127.0.0.1"), 8081);
       runtime.beforeSocketBind(null, 8080);
+
+      assertThat(runtime.diagnostics().scenario("in-use").orElseThrow().matchedCount())
+          .as("neither bind is matched")
+          .isZero();
+      assertThatThrownBy(() -> runtime.beforeSocketBind(InetAddress.getByName("127.0.0.1"), 8080))
+          .as("the selected port is")
+          .isInstanceOf(java.net.BindException.class);
     }
   }
 

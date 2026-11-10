@@ -69,6 +69,12 @@ class ExceptionInjectionRuntimeTest {
 
       assertThatCode(() -> runtime.beforeMethodEnter("com.example.OtherClass", "findById"))
           .doesNotThrowAnyException();
+      assertThatThrownBy(() -> runtime.beforeMethodEnter("com.example.Dao", "findById"))
+          .as("the selected class is")
+          .isInstanceOf(IOException.class)
+          .hasMessage("msg");
+      assertThat(runtime.diagnostics().scenario("inject-miss").orElseThrow().matchedCount())
+          .isEqualTo(1L);
     }
   }
 

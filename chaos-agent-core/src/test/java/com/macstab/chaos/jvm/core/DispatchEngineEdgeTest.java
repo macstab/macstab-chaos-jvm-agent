@@ -1,7 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
@@ -130,26 +130,55 @@ class DispatchEngineEdgeTest {
   @DisplayName("applyPreDecision")
   class PreDecision {
 
+    /**
+     * A decision with a 30 ms delay and {@code action}: the delay shows the decision was applied.
+     */
+    private RuntimeDecision delayedTerminal(final TerminalAction action) {
+      return new RuntimeDecision(
+          java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(30), null, action);
+    }
+
+    /** Applies {@code decision} and returns how long it took, in milliseconds. */
+    private long applied(final RuntimeDecision decision) throws Throwable {
+      final long start = System.nanoTime();
+      engine.applyPreDecision(decision);
+      return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+    }
+
     @Test
     @DisplayName("a RETURN carrying a value other than the suppression marker lets the call go on")
-    void returnWithValueProceeds() {
-      assertThatCode(
-              () -> engine.applyPreDecision(terminal(new TerminalAction.Return(Boolean.TRUE))))
-          .doesNotThrowAnyException();
+    void returnWithValueProceeds() throws Throwable {
+      assertThat(applied(delayedTerminal(new TerminalAction.Return(Boolean.TRUE))))
+          .as("the delay is applied, then the call goes on")
+          .isGreaterThanOrEqualTo(30L);
     }
 
     @Test
     @DisplayName("a RETURN without a value lets the call go on")
-    void returnWithoutValueProceeds() {
-      assertThatCode(() -> engine.applyPreDecision(terminal(new TerminalAction.Return(null))))
-          .doesNotThrowAnyException();
+    void returnWithoutValueProceeds() throws Throwable {
+      assertThat(applied(delayedTerminal(new TerminalAction.Return(null))))
+          .isGreaterThanOrEqualTo(30L);
     }
 
     @Test
     @DisplayName("a terminal with no pre-call meaning lets the call go on")
-    void otherTerminalProceeds() {
-      assertThatCode(() -> engine.applyPreDecision(terminal(new TerminalAction.Suppress())))
-          .doesNotThrowAnyException();
+    void otherTerminalProceeds() throws Throwable {
+      assertThat(applied(delayedTerminal(new TerminalAction.Suppress())))
+          .isGreaterThanOrEqualTo(30L);
+    }
+
+    @Test
+    @DisplayName("a THROW terminal throws its failure, after the delay")
+    void throwTerminalThrows() {
+      final IllegalStateException failure = new IllegalStateException("thrown");
+      final long start = System.nanoTime();
+
+      assertThatThrownBy(
+              () ->
+                  engine.applyPreDecision(delayedTerminal(new TerminalAction.Throw(() -> failure))))
+          .isSameAs(failure);
+      assertThat(System.nanoTime() - start)
+          .isGreaterThanOrEqualTo(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(30));
     }
   }
 

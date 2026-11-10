@@ -266,6 +266,11 @@ class JdbcRuntimeTest {
                     runtime.beforeJdbcTransactionRollback();
                   })
               .doesNotThrowAnyException();
+          assertThat(handle.matchedCount()).as("no other JDBC operation is matched").isZero();
+          assertThatThrownBy(() -> runtime.beforeJdbcConnectionAcquire("jdbc:h2:mem:x"))
+              .as("its own operation is")
+              .isInstanceOf(java.sql.SQLException.class);
+          assertThat(handle.appliedCount()).isEqualTo(1L);
         } finally {
           handle.stop();
         }

@@ -93,7 +93,11 @@ class ScenarioControllerStateTest {
             null,
             null,
             null);
-    assertThat(controller.evaluate(context)).isNotNull();
+    final ScenarioContribution contribution = controller.evaluate(context);
+    assertThat(contribution).isNotNull();
+    assertThat(contribution.controller()).isSameAs(controller);
+    assertThat(contribution.delayNanos()).as("the scenario's 1 ms delay").isEqualTo(1_000_000L);
+    assertThat(controller.matchedCount()).isEqualTo(1L);
   }
 
   @Test

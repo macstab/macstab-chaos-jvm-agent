@@ -129,6 +129,9 @@ class SleepDnsTlsFileDispatchTest {
                 ChaosEffect.suppress());
         try {
           assertThatCode(() -> runtime.beforeDnsResolve("db.internal")).doesNotThrowAnyException();
+          assertThat(handle.matchedCount()).as("the DNS call is not matched").isZero();
+          assertThat(runtime.beforeThreadSleep(1000L)).as("its own operation is").isTrue();
+          assertThat(handle.matchedCount()).isEqualTo(1L);
         } finally {
           handle.stop();
         }

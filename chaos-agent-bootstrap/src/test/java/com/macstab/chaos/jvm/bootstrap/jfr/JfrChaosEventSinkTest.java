@@ -198,12 +198,25 @@ class JfrChaosEventSinkTest {
   }
 
   @Test
-  @DisplayName("without an enabled recording nothing is committed and nothing fails")
-  void disabled() {
-    try (JfrChaosEventSink sink = new JfrChaosEventSink(runtime.diagnostics())) {
-      sink.onEvent(event(ChaosEvent.Type.STARTED, "s1", Map.of()));
-      sink.onEvent(event(ChaosEvent.Type.APPLIED, "s1", Map.of()));
+  @DisplayName("an event type the recording does not enable is not committed")
+  void disabled() throws IOException {
+    final List<RecordedEvent> events;
+    try (JfrChaosEventSink sink = new JfrChaosEventSink(runtime.diagnostics());
+        Recording recording = new Recording()) {
+      recording.enable(APPLIED);
+      recording.disable(LIFECYCLE);
+      recording.start();
+      sink.onEvent(event(ChaosEvent.Type.STARTED, "disabled-s1", Map.of()));
+      sink.onEvent(
+          event(ChaosEvent.Type.APPLIED, "disabled-s1", Map.of("operation", "SOCKET_READ")));
+      recording.stop();
+      events = read(recording);
     }
+
+    assertThat(events)
+        .filteredOn(e -> "disabled-s1".equals(e.getString("scenarioId")))
+        .extracting(e -> e.getEventType().getName())
+        .containsExactly(APPLIED);
   }
 
   /** Streams periodic snapshots until one that {@code wanted} accepts arrives. */

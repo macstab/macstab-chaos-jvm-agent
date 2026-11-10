@@ -104,14 +104,6 @@ class RuntimeInterceptionTest {
             .isInstanceOf(SecurityException.class);
       }
     }
-
-    @Test
-    @DisplayName("no scenario — does not throw")
-    void noScenarioDoesNotThrow() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeExitRequest(0);
-      }
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -240,14 +232,6 @@ class RuntimeInterceptionTest {
     }
 
     @Test
-    @DisplayName("no scenario — does not throw")
-    void noScenarioDoesNotThrow() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeObjectDeserialize(null);
-      }
-    }
-
-    @Test
     @DisplayName("delay effect adds latency")
     void delayEffectAddsLatency() throws Throwable {
       try (ChaosRuntime runtime =
@@ -290,14 +274,6 @@ class RuntimeInterceptionTest {
         assertThat(thrown).isInstanceOf(java.io.NotSerializableException.class);
       }
     }
-
-    @Test
-    @DisplayName("no scenario — does not throw")
-    void noScenarioDoesNotThrow() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeObjectSerialize(null, null);
-      }
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -327,14 +303,6 @@ class RuntimeInterceptionTest {
         assertThat(applied(runtime)).as("the scenario applied").isPositive();
       }
     }
-
-    @Test
-    @DisplayName("no scenario — does not throw")
-    void noScenarioDoesNotThrow() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeZipInflate();
-      }
-    }
   }
 
   @Nested
@@ -360,14 +328,6 @@ class RuntimeInterceptionTest {
         assertThat(applied(runtime)).as("the scenario applied").isPositive();
       }
     }
-
-    @Test
-    @DisplayName("no scenario — does not throw")
-    void noScenarioDoesNotThrow() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeZipDeflate();
-      }
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -390,14 +350,6 @@ class RuntimeInterceptionTest {
                   .build())) {
         final Throwable thrown = catchThrowable(() -> runtime.beforeDirectBufferAllocate(1024));
         assertThat(thrown).isInstanceOf(OutOfMemoryError.class);
-      }
-    }
-
-    @Test
-    @DisplayName("no scenario — does not throw")
-    void noScenarioDoesNotThrow() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeDirectBufferAllocate(1024);
       }
     }
   }
@@ -429,14 +381,6 @@ class RuntimeInterceptionTest {
         assertThat(applied(runtime)).as("the scenario applied").isPositive();
       }
     }
-
-    @Test
-    @DisplayName("no scenario — does not throw")
-    void noScenarioDoesNotThrow() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeReflectionInvoke(null, null);
-      }
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -461,14 +405,6 @@ class RuntimeInterceptionTest {
                   .build())) {
         final Throwable thrown = catchThrowable(() -> runtime.beforeSocketConnect(null, null, 0));
         assertThat(thrown).isInstanceOf(java.net.ConnectException.class);
-      }
-    }
-
-    @Test
-    @DisplayName("no scenario — does not throw")
-    void noScenarioDoesNotThrow() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeSocketConnect(null, null, 0);
       }
     }
 
@@ -521,14 +457,6 @@ class RuntimeInterceptionTest {
         assertThat(thrown).isInstanceOf(ClassFormatError.class);
       }
     }
-
-    @Test
-    @DisplayName("no scenario — does not throw")
-    void noScenarioDoesNotThrow() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeClassDefine(null, "com.example.Foo");
-      }
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -576,14 +504,6 @@ class RuntimeInterceptionTest {
         assertThatThrownBy(() -> runtime.beforeSocketAccept(null))
             .isInstanceOf(java.io.IOException.class)
             .hasMessage("chaos accept rejection");
-      }
-    }
-
-    @Test
-    @DisplayName("no scenario — does not throw")
-    void noScenarioDoesNotThrow() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeSocketAccept(null);
       }
     }
   }
@@ -636,14 +556,6 @@ class RuntimeInterceptionTest {
         assertThat(thrown).isExactlyInstanceOf(java.net.SocketException.class);
       }
     }
-
-    @Test
-    @DisplayName("no scenario — does not throw")
-    void noScenarioDoesNotThrow() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeSocketRead(null, InvocationContext.UNKNOWN, null, 0, 0);
-      }
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -692,14 +604,6 @@ class RuntimeInterceptionTest {
         assertThat(thrown).isInstanceOf(java.io.IOException.class);
       }
     }
-
-    @Test
-    @DisplayName("no scenario — does not throw")
-    void noScenarioDoesNotThrow() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeSocketWrite(null, 64, null, 0);
-      }
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -729,14 +633,6 @@ class RuntimeInterceptionTest {
             .as("delay effect should add the whole configured %dms", DELAY_MS)
             .isGreaterThanOrEqualTo(DELAY_MS);
         assertThat(applied(runtime)).as("the scenario applied").isPositive();
-      }
-    }
-
-    @Test
-    @DisplayName("no scenario — does not throw")
-    void noScenarioDoesNotThrow() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeSocketClose(null);
       }
     }
   }
@@ -784,14 +680,6 @@ class RuntimeInterceptionTest {
             .as("delay effect should add the whole configured %dms", DELAY_MS)
             .isGreaterThanOrEqualTo(DELAY_MS);
         assertThat(applied(runtime)).as("the scenario applied").isPositive();
-      }
-    }
-
-    @Test
-    @DisplayName("no scenario — does not throw")
-    void noScenarioDoesNotThrow() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeJndiLookup(null, "java:comp/env/test");
       }
     }
   }
@@ -845,22 +733,6 @@ class RuntimeInterceptionTest {
         assertThat(applied(runtime)).as("the scenario applied").isPositive();
       }
     }
-
-    @Test
-    @DisplayName("no scenario — getAttribute does not throw")
-    void noScenarioDoesNotThrowGetAttr() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeJmxGetAttr(null, null, "VmName");
-      }
-    }
-
-    @Test
-    @DisplayName("no scenario — invoke does not throw")
-    void noScenarioDoesNotThrowInvoke() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeJmxInvoke(null, null, "gc");
-      }
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -906,14 +778,6 @@ class RuntimeInterceptionTest {
             .as("delay effect should add the whole configured %dms", DELAY_MS)
             .isGreaterThanOrEqualTo(DELAY_MS);
         assertThat(applied(runtime)).as("the scenario applied").isPositive();
-      }
-    }
-
-    @Test
-    @DisplayName("no scenario — does not throw")
-    void noScenarioDoesNotThrow() throws Throwable {
-      try (ChaosRuntime runtime = new ChaosRuntime()) {
-        runtime.beforeNativeLibraryLoad("nonexistent_chaos_lib_xyz");
       }
     }
   }

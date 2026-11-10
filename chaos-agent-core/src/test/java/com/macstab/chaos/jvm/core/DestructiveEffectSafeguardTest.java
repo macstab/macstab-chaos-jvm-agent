@@ -254,12 +254,15 @@ class DestructiveEffectSafeguardTest {
     @DisplayName("failed activation leaves no scenario registered in the runtime")
     void failedActivationLeavesNoScenarioRegistered() {
       try (ChaosRuntime runtime = new ChaosRuntime()) {
-        try {
-          runtime.activate(deadlockScenario(ActivationPolicy.always()));
-        } catch (ChaosValidationException ignored) {
-          // expected
-        }
+        assertThatThrownBy(() -> runtime.activate(deadlockScenario(ActivationPolicy.always())))
+            .isExactlyInstanceOf(ChaosValidationException.class);
+
         assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();
+        assertThat(
+                Thread.getAllStackTraces().keySet().stream()
+                    .anyMatch(thread -> thread.getName().startsWith("chaos-deadlock-")))
+            .as("no participant was started")
+            .isFalse();
       }
     }
 

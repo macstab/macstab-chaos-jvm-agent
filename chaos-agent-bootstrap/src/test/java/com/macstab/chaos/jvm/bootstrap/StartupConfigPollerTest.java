@@ -461,6 +461,10 @@ class StartupConfigPollerTest {
 
       poller.close();
       poller.close();
+
+      // A closed poller applies no plan any more: a tick still in flight changes nothing.
+      poller.applyDiff(List.of(scenario("late")));
+      verify(runtime, never()).activate(any(ChaosScenario.class));
     }
   }
 
