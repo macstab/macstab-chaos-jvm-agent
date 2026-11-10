@@ -61,6 +61,7 @@
 | 40 | The JFR field `description` is `message` | a JFR query, a JMC view or a `RecordedEvent.getString("description")` reads `com.macstab.chaos.jvm.ScenarioLifecycle` | read `message` (§40) |
 | 41 | A test's sessions and listeners end with it | a test opens a session or adds a listener through the injected `ChaosControlPlane` and a later test relies on it | open or add it again in that test, or through `ChaosPlatform.current()` (§41) |
 | 42 | `spuriousWakeup` selects `NIO_SELECTOR_SELECT` alone | a `spuriousWakeup` scenario's `NioSelector` also lists a channel operation (`NIO_CHANNEL_READ`, `NIO_CHANNEL_WRITE`, `NIO_CHANNEL_CONNECT`, `NIO_CHANNEL_ACCEPT`) | remove the other operations, or put them in a scenario of their own (§42) |
+| 43 | The Quarkus and Micronaut modules no longer bring `chaos-agent-testkit` | a test uses `@QuarkusChaosTest`, `@MicronautChaosTest`, `@WithChaos` or `ChaosAssertions` and gets the testkit only through `chaos-agent-quarkus-extension` or `chaos-agent-micronaut-integration` | add `chaos-agent-testkit` to the test dependencies (§43) |
 
 ---
 
@@ -479,6 +480,12 @@ Before (1.x): a listener added in one test kept receiving the events of every la
 A `spuriousWakeup` effect is refused with `ChaosValidationException` unless its `NioSelector` lists `NIO_SELECTOR_SELECT` as its only operation. 1.x required `NIO_SELECTOR_SELECT` among the operations but accepted others beside it, and on a channel read, write, connect or accept the effect skipped the call instead of waking a selector.
 
 Before (1.x): `new NioSelector(Set.of(NIO_SELECTOR_SELECT, NIO_CHANNEL_READ), …)` with `spuriousWakeup()` was accepted. Now select `NIO_SELECTOR_SELECT` alone; give a channel operation a scenario of its own with an effect it supports (a delay, `reject`, `errno`).
+
+## 43. The Quarkus and Micronaut modules no longer bring `chaos-agent-testkit`
+
+`chaos-agent-quarkus-extension` and `chaos-agent-micronaut-integration` compile against `chaos-agent-testkit` but no longer export it: their POMs do not list it. An application ships these modules for its `ChaosControlPlane` bean and its management endpoint, and the testkit (with `TrackingChaosControlPlane`, `@WithChaos` and `ChaosAssertions`) is test support, so it no longer reaches the production class path. The test support in the two modules (`@QuarkusChaosTest` and `ChaosQuarkusExtension`; `@MicronautChaosTest`, `ChaosMicronautExtension` and the tracked control-plane bean of a chaos test's context) is built on it and needs it in the test dependencies.
+
+Before (1.x): the testkit came with the module, also into the packaged application. Now declare it where your tests run; with Gradle, for example, `testImplementation("com.macstab.chaos.jvm:chaos-agent-testkit")` next to the module (its version from `chaos-agent-bom`). An application that uses neither the test annotations nor the testkit's classes changes nothing.
 
 ---
 

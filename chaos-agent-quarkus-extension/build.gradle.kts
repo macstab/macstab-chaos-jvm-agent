@@ -1,6 +1,10 @@
 dependencies {
     api(project(":chaos-agent-api"))
-    api(project(":chaos-agent-testkit"))
+    // The test support (@QuarkusChaosTest, ChaosQuarkusExtension) is built on the testkit, which the
+    // application declares where its tests run: the producer and the recorder an application ships
+    // need none of it, so it stays off the production class path.
+    compileOnly(project(":chaos-agent-testkit"))
+    testImplementation(project(":chaos-agent-testkit"))
     implementation(project(":chaos-agent-bootstrap"))
     // Inside the agent jar (chaos-agent-bootstrap) at runtime: the trust rule for the switches.
     compileOnly(project(":chaos-agent-startup-config"))
