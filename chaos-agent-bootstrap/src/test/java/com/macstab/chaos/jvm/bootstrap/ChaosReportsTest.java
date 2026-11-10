@@ -521,8 +521,12 @@ class ChaosReportsTest {
       assertThat(writer.isAlive()).as("the writer is still stuck").isTrue();
     }
     closer.join();
+    // Released, the stuck writer finishes its write and ends (the reports are closed); it must not
+    // still be writing into the temporary directory while JUnit deletes it.
+    writer.join(java.util.concurrent.TimeUnit.SECONDS.toMillis(10));
 
     assertThat(closedInTime).as("close returned while the writer was stuck").isTrue();
+    assertThat(writer.isAlive()).as("the released writer ends").isFalse();
   }
 
   @Test
