@@ -103,7 +103,8 @@ final class CompatibilityValidator {
    *   <li><b>Direct memory limit</b> — direct-buffer pressure must fit under {@code
    *       -XX:MaxDirectMemorySize} ({@link ChaosUnsupportedFeatureException}).
    *   <li><b>Runtime flags</b> — a safepoint storm without retransforms under {@code
-   *       -XX:+DisableExplicitGC} and a finalizer backlog under {@code --finalization=disabled}
+   *       -XX:+DisableExplicitGC}, a finalizer backlog under {@code --finalization=disabled} and
+   *       carrier pinning without {@code allowDestructiveEffects} on a single-carrier scheduler
    *       produce no load ({@link ChaosUnsupportedFeatureException}).
    *   <li><b>Stressor limits</b> — heap pressure must fit in the free heap ({@link
    *       ChaosUnsupportedFeatureException}); interned strings must be distinct and within their
@@ -142,6 +143,7 @@ final class CompatibilityValidator {
       validateStressActivationPolicy(scenario.activationPolicy());
       validateDirectMemoryLimit(scenario.effect(), featureSet);
       validateRuntimeFlags(scenario.effect(), featureSet);
+      validateCarrierPinning(scenario);
       validateStressorLimits(scenario.effect());
     }
     if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect) {
@@ -199,6 +201,23 @@ final class CompatibilityValidator {
       throw new ChaosUnsupportedFeatureException(
           "a finalizer backlog cannot build up under --finalization=disabled, where the JVM runs"
               + " no finalizer");
+    }
+  }
+
+  /**
+   * Refuses carrier pinning without {@code allowDestructiveEffects} on a virtual-thread scheduler
+   * with a single carrier ({@code -Djdk.virtualThreadScheduler.parallelism=1}, a one-CPU
+   * container): the stressor must leave one carrier free (L18), so it would hold none (L17, {@link
+   * ChaosUnsupportedFeatureException}).
+   */
+  private static void validateCarrierPinning(final ChaosScenario scenario) {
+    if (scenario.effect() instanceof ChaosEffect.VirtualThreadCarrierPinningEffect
+        && !scenario.activationPolicy().allowDestructiveEffects()
+        && VirtualThreadCarrierPinningStressor.schedulerParallelism() < 2) {
+      throw new ChaosUnsupportedFeatureException(
+          "virtual-thread carrier pinning holds no carrier on a scheduler with a single carrier"
+              + " (jdk.virtualThreadScheduler.parallelism or the processor count is 1): it leaves"
+              + " one carrier free unless allowDestructiveEffects is set");
     }
   }
 

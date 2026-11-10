@@ -1569,6 +1569,71 @@ class CompatibilityValidatorTest {
           .doesNotThrowAnyException();
     }
 
+    private ChaosScenario carrierPinning(final boolean allowDestructiveEffects) {
+      return ChaosScenario.builder("pinning")
+          .selector(ChaosSelector.stress(ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING))
+          .effect(new ChaosEffect.VirtualThreadCarrierPinningEffect(1, Duration.ofMillis(10)))
+          .activationPolicy(
+              ActivationPolicy.builder().allowDestructiveEffects(allowDestructiveEffects).build())
+          .build();
+    }
+
+    private void withParallelism(final String parallelism, final Runnable check) {
+      final String key = "jdk.virtualThreadScheduler.parallelism";
+      final String previous = System.getProperty(key);
+      System.setProperty(key, parallelism);
+      try {
+        check.run();
+      } finally {
+        if (previous == null) {
+          System.clearProperty(key);
+        } else {
+          System.setProperty(key, previous);
+        }
+      }
+    }
+
+    @Test
+    @DisplayName("carrier pinning on a single-carrier scheduler is refused (L17)")
+    void carrierPinningOnSingleCarrierIsRefused() {
+      withParallelism(
+          "1",
+          () ->
+              assertThatThrownBy(
+                      () ->
+                          CompatibilityValidator.validate(
+                              carrierPinning(false), features(true, true)))
+                  .isInstanceOf(ChaosUnsupportedFeatureException.class)
+                  .hasMessageContaining("single carrier")
+                  .hasMessageContaining("allowDestructiveEffects"));
+    }
+
+    @Test
+    @DisplayName("carrier pinning on a single carrier with allowDestructiveEffects is accepted")
+    void carrierPinningOnSingleCarrierWithDestructiveIsAccepted() {
+      withParallelism(
+          "1",
+          () ->
+              assertThatCode(
+                      () ->
+                          CompatibilityValidator.validate(
+                              carrierPinning(true), features(true, true)))
+                  .doesNotThrowAnyException());
+    }
+
+    @Test
+    @DisplayName("carrier pinning with a carrier to spare is accepted")
+    void carrierPinningWithTwoCarriersIsAccepted() {
+      withParallelism(
+          "2",
+          () ->
+              assertThatCode(
+                      () ->
+                          CompatibilityValidator.validate(
+                              carrierPinning(false), features(true, true)))
+                  .doesNotThrowAnyException());
+    }
+
     @Test
     @DisplayName("ReferenceQueueFlood under DisableExplicitGC is accepted (degraded, OPEN-1)")
     void referenceQueueFloodUnderDisableExplicitGcIsAccepted() {

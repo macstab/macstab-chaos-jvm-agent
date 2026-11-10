@@ -106,6 +106,8 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
   /**
    * Returns {@code effect} with its thread count reduced so at least one carrier of the
    * virtual-thread scheduler stays free, or {@code null} when the scheduler has a single carrier.
+   * {@link CompatibilityValidator} refuses that case at activation (L17); the {@code null} remains
+   * for a parallelism setting changed after the validation.
    *
    * <p>Holding every carrier stops every virtual thread in the JVM until the scenario ends: an
    * application serving requests on virtual threads stops responding, which is a deadlock rather
