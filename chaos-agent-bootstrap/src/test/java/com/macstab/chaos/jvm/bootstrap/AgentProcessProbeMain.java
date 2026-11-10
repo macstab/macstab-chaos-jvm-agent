@@ -50,6 +50,9 @@ import javax.naming.InitialContext;
 public final class AgentProcessProbeMain {
   private AgentProcessProbeMain() {}
 
+  /** The number of application shutdown hooks {@link #appHooks()} registers. */
+  static final int APP_HOOKS = 40;
+
   // Expose defineClass for the CLASS_DEFINE probe.
   private static final class DefineTestLoader extends ClassLoader {
     DefineTestLoader() {
@@ -75,6 +78,7 @@ public final class AgentProcessProbeMain {
       case "executor" -> executor();
       case "resource" -> resource();
       case "thread" -> thread();
+      case "app-hooks" -> appHooks();
       case "classload" -> classload();
       case "gc" -> gc();
       case "exit" -> exit();
@@ -210,6 +214,19 @@ public final class AgentProcessProbeMain {
     } catch (final InterruptedException e) {
       Thread.currentThread().interrupt();
     }
+  }
+
+  /**
+   * Registers {@link #APP_HOOKS} application shutdown hooks, each printing {@code app-hook=ran} at
+   * exit. The JDK starts the hooks in an order of its own, the agent's among them: many hooks make
+   * it all but certain that some start after the agent's.
+   */
+  private static void appHooks() {
+    for (int i = 0; i < APP_HOOKS; i++) {
+      Runtime.getRuntime()
+          .addShutdownHook(new Thread(() -> System.out.println("app-hook=ran"), "app-hook-" + i));
+    }
+    System.out.println("app-hooks=" + APP_HOOKS);
   }
 
   private static void classload() {

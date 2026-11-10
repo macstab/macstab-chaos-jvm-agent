@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.bootstrap;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.jfr.JfrIntegration;
+import com.macstab.chaos.jvm.core.AgentHookThread;
 import com.macstab.chaos.jvm.core.AgentLog;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller;
@@ -240,12 +241,12 @@ public final class ChaosAgentBootstrap {
    * Registers a shutdown hook that writes the lines still held when the JVM exits before the
    * deferred start released them (a JVM that ran for less than {@link LoggingStart#LIMIT} without
    * initialising JUL): straight to {@code System.err}, since JUL's own shutdown hook may already
-   * have closed its handlers. After a release it writes nothing. The registration and the hook's
-   * work are the agent's own (L3).
+   * have closed its handlers. After a release it writes nothing. The registration, the hook's start
+   * by the JDK ({@link AgentHookThread}) and the hook's work are the agent's own (L3).
    */
   private static void releaseHeldLinesAtExit() {
     final Thread hook =
-        new Thread(
+        new AgentHookThread(
             () -> {
               BootstrapDispatcher.beginInternalCall();
               try {

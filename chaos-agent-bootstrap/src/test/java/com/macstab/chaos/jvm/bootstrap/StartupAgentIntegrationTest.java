@@ -159,6 +159,24 @@ class StartupAgentIntegrationTest {
       assertThat(output).contains("thread=started");
     }
 
+    @Test
+    @DisplayName(
+        "a reject on the agent's macstab- thread names still lets every application shutdown hook"
+            + " run: the JDK starts the agent's own hooks too")
+    void agentHooksLeaveTheApplicationHooksAlone() throws Exception {
+      final ChildJvmProbe.BoundedRun run =
+          runAgent(
+              threadStartReject(NamePattern.prefix("macstab-")),
+              "app-hooks",
+              ";reports=on;reportsDir=" + tempDir.resolve("reports"),
+              List.of());
+
+      assertThat(run.exitValue()).as("probe JVM exit value: " + run.output()).isZero();
+      assertThat(run.output().lines().filter("app-hook=ran"::equals).count())
+          .as("application hooks that ran: %s", run.output())
+          .isEqualTo(AgentProcessProbeMain.APP_HOOKS);
+    }
+
     private ChaosPlan threadStartReject(final NamePattern threadName) {
       return new ChaosPlan(
           new ChaosPlan.Metadata("startup-thread-any", ""),

@@ -80,6 +80,27 @@ class ThreadAndSessionDispatchTest {
     }
 
     @Test
+    @DisplayName("the agent's shutdown hook, which the JDK starts, is never evaluated")
+    void agentHookThreadIsNotEvaluated() {
+      activate(
+          new ChaosSelector.ThreadSelector(
+              Set.of(OperationType.THREAD_START),
+              ChaosSelector.ThreadKind.ANY,
+              NamePattern.any(),
+              null),
+          ChaosEffect.reject("no threads"));
+
+      assertThatCode(
+              () ->
+                  runtime.beforeThreadStart(
+                      new AgentHookThread(() -> {}, "macstab-chaos-log-release"), false))
+          .doesNotThrowAnyException();
+      assertThatThrownBy(
+              () -> runtime.beforeThreadStart(new Thread(() -> {}, "macstab-chaos-other"), false))
+          .isExactlyInstanceOf(OutOfMemoryError.class);
+    }
+
+    @Test
     @DisplayName("a daemon filter matches daemon threads only")
     void daemonFilter() {
       activate(

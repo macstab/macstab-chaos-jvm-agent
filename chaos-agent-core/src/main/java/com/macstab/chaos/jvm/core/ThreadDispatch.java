@@ -36,7 +36,8 @@ public final class ThreadDispatch {
             ? OperationType.VIRTUAL_THREAD_START
             : OperationType.THREAD_START;
     final String sessionId = engine.scopeContext.currentSessionId();
-    if (!engine.idle(operation)) {
+    // Idle first; the agent's shutdown hooks, which the JDK starts, are never evaluated (L3).
+    if (!engine.idle(operation) && !(thread instanceof AgentOwned)) {
       engine.applyPreDecision(
           engine.evaluate(
               new InvocationContext(

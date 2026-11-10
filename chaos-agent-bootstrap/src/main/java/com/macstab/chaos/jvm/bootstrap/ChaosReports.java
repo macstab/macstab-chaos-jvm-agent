@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.bootstrap;
 
 import com.macstab.chaos.jvm.api.ChaosEvent;
+import com.macstab.chaos.jvm.core.AgentHookThread;
 import com.macstab.chaos.jvm.core.AgentLog;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
@@ -113,7 +114,8 @@ final class ChaosReports implements AutoCloseable {
     this.runtime = runtime;
     this.hitsWriter = new Thread(this::writeHitsWhileOpen, "macstab-chaos-hits-writer");
     this.hitsWriter.setDaemon(true);
-    this.shutdownHook = new Thread(this::writeFinalHits, "macstab-chaos-hits-final");
+    // The JDK starts the hook: AgentHookThread keeps a THREAD_START scenario off its start (L3).
+    this.shutdownHook = new AgentHookThread(this::writeFinalHits, "macstab-chaos-hits-final");
   }
 
   /**
