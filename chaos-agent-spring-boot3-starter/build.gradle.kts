@@ -27,6 +27,9 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-actuator-autoconfigure")
     testImplementation("org.springframework:spring-context")
     testImplementation("org.springframework:spring-web")
+    // ActuatorSecurityWarningTest: the endpoint with Spring Security present (spring-boot-common's
+    // tests cover it without).
+    testRuntimeOnly("org.springframework.security:spring-security-config")
 }
 
 tasks.jar {

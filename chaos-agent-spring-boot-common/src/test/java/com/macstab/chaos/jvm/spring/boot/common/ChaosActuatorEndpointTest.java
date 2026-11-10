@@ -37,6 +37,43 @@ class ChaosActuatorEndpointTest {
   }
 
   @Test
+  @DisplayName("without Spring Security the endpoint is created with one WARNING to protect it")
+  void warnsWithoutSecurity() {
+    final java.util.logging.Logger logger =
+        java.util.logging.Logger.getLogger(ChaosAutoConfiguration.class.getName());
+    final List<java.util.logging.LogRecord> records =
+        new java.util.concurrent.CopyOnWriteArrayList<>();
+    final java.util.logging.Handler handler =
+        new java.util.logging.Handler() {
+          @Override
+          public void publish(final java.util.logging.LogRecord record) {
+            records.add(record);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    logger.addHandler(handler);
+    try {
+      runner
+          .withPropertyValues("macstab.chaos.enabled=true", "macstab.chaos.actuator.enabled=true")
+          .run(context -> assertThat(context).hasSingleBean(ChaosActuatorEndpoint.class));
+    } finally {
+      logger.removeHandler(handler);
+    }
+
+    assertThat(records)
+        .filteredOn(
+            record -> record.getMessage().contains("Spring Security is not on the classpath"))
+        .singleElement()
+        .satisfies(
+            record -> assertThat(record.getLevel()).isEqualTo(java.util.logging.Level.WARNING));
+  }
+
+  @Test
   @DisplayName("endpoint bean is absent when actuator.enabled=true comes from an untrusted source")
   void endpointAbsentWhenSwitchUntrusted() {
     runner
