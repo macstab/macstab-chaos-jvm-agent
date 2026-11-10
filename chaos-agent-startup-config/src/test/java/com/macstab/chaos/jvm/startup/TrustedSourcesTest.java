@@ -177,6 +177,36 @@ class TrustedSourcesTest {
     }
 
     @Test
+    @DisplayName("is off from an untrusted source when a local source sets allowRemoteEnable=false")
+    void allowRemoteEnableFalseFromTrustedSource() {
+      final String source = "consul-false-" + System.nanoTime();
+
+      assertThat(
+              TrustedSources.switchedOn(
+                  SWITCH,
+                  lookup(
+                      Map.of(
+                          SWITCH,
+                          sourced("true", source),
+                          TrustedSources.ALLOW_REMOTE_ENABLE_PROPERTY,
+                          sourced("false", "local"))),
+                  "local"::equals))
+          .isFalse();
+      assertThat(
+              TrustedSources.switchedOn(
+                  SWITCH,
+                  lookup(
+                      Map.of(
+                          SWITCH,
+                          sourced("true", source),
+                          TrustedSources.ALLOW_REMOTE_ENABLE_PROPERTY,
+                          sourced("true", "local"))),
+                  "local"::equals))
+          .as("and on once it is true")
+          .isTrue();
+    }
+
+    @Test
     @DisplayName("is off from an untrusted source, with one line naming the source")
     void untrusted() {
       final String source = "consul-" + System.nanoTime();

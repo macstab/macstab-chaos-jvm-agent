@@ -52,6 +52,28 @@ class ChaosReportsTest {
   }
 
   @Test
+  @DisplayName("a report name taken by a directory or a link is left alone, without a failure")
+  void notARegularFileIsLeftAlone() throws Exception {
+    final ChaosReports reports = create("reports=on;reportsDir=" + tempDir, Map.of());
+    final Path directory = Files.createDirectory(tempDir.resolve("taken-by-a-directory"));
+    final Path target = Files.writeString(tempDir.resolve("link-target"), "untouched");
+    final Path link = Files.createSymbolicLink(tempDir.resolve("taken-by-a-link"), target);
+    final String user = System.getProperty("user.name");
+
+    reports.writeAtomically("taken-by-a-directory", "report", Set.of("posix"), path -> user, user);
+    reports.writeAtomically("taken-by-a-link", "report", Set.of("posix"), path -> user, user);
+
+    assertThat(directory).isDirectory();
+    assertThat(Files.isSymbolicLink(link)).isTrue();
+    assertThat(target).hasContent("untouched");
+    try (Stream<Path> left = Files.list(tempDir)) {
+      assertThat(left.map(path -> path.getFileName().toString()))
+          .as("no staging file is left behind")
+          .noneMatch(name -> name.startsWith(".chaos-staging-"));
+    }
+  }
+
+  @Test
   @DisplayName("without reports=on, and with off or false, no reports are written")
   void switchedOff() {
     final Optional<ChaosReports> before = ChaosReports.current();

@@ -107,6 +107,17 @@ class StartupSettingsTest {
   }
 
   @Test
+  @DisplayName("a bridgeDir that does not exist is refused: it cannot be resolved")
+  void missingBridgeDirRefused(@TempDir final Path tempDir) {
+    final Path missing = tempDir.resolve("missing");
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> ChaosAgentBootstrap.bridgeDir(AgentSettings.of("bridgeDir=" + missing, Map.of())))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("bridgeDir " + missing + " is refused: it cannot be resolved");
+  }
+
+  @Test
   @DisplayName("a world-writable bridgeDir without the sticky bit is refused with the reason")
   void bridgeDirRefused(@TempDir final Path tempDir) throws Exception {
     assumeTrue(tempDir.getFileSystem().supportedFileAttributeViews().contains("posix"));
