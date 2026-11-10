@@ -2883,6 +2883,9 @@ class AgentEndToEndTest {
       final ChildJvmProbe.ProbeResult result =
           probe.runWithoutPlan(DefectProbeMain.class, "finalizer-backlog-sleep");
       assertThat(result.value("finalizable")).isEqualTo("ACTIVE");
+      assertThat(result.longValue("finalizableLeft"))
+          .as("at least one finalize() ran, so its sleep was checked")
+          .isLessThan(20L);
       assertThat(result.longValue("finalizerSleepsMatched")).isZero();
     }
 

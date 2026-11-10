@@ -3137,10 +3137,12 @@ public final class DefectProbeMain {
 
   /**
    * Runs a finalizer backlog while a THREAD_SLEEP delay matches the Finalizer thread, and prints
-   * how often that delay matched a sleep ({@code finalizerSleepsMatched}) and how many objects the
-   * stressor made ({@code finalizable}).
+   * how often that delay matched a sleep ({@code finalizerSleepsMatched}), how many objects the
+   * stressor made ({@code finalizable}) and how many of them are still waiting for their {@code
+   * finalize()} after the collections ({@code finalizableLeft}, from a class histogram: an object
+   * with a finalizer is collected only after its {@code finalize()} ran).
    */
-  private static void finalizerBacklogSleep() {
+  private static void finalizerBacklogSleep() throws Exception {
     final ChaosControlPlane plane = ChaosPlatform.current();
     try (ChaosActivationHandle sleeps =
             plane.activate(
@@ -3168,8 +3170,35 @@ public final class DefectProbeMain {
         System.gc();
         LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(50));
       }
+      System.out.println(
+          "finalizableLeft=" + instances("FinalizerBacklogStressor$FinalizableObject"));
       System.out.println("finalizerSleepsMatched=" + sleeps.matchedCount());
     }
+  }
+
+  /**
+   * The live instances of the class whose name ends with {@code suffix}, from a class histogram.
+   */
+  private static long instances(final String suffix) throws Exception {
+    final String histogram =
+        (String)
+            ManagementFactory.getPlatformMBeanServer()
+                .invoke(
+                    new javax.management.ObjectName("com.sun.management:type=DiagnosticCommand"),
+                    "gcClassHistogram",
+                    new Object[] {new String[0]},
+                    new String[] {String[].class.getName()});
+    // A row is "  <rank>:  <instances>  <bytes>  <class name>".
+    final java.util.regex.Matcher row =
+        java.util.regex.Pattern.compile(
+                "^\\s*\\d+:\\s+(\\d+)\\s+\\d+\\s+(\\S+)", java.util.regex.Pattern.MULTILINE)
+            .matcher(histogram);
+    while (row.find()) {
+      if (row.group(2).endsWith(suffix)) {
+        return Long.parseLong(row.group(1));
+      }
+    }
+    return 0L;
   }
 
   private static String state(final String scenarioId) {
