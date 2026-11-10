@@ -243,11 +243,11 @@ public final class AgentLog {
   private record Held(ArrayDeque<LogRecord> lines, long lost) {}
 
   /**
-   * Whether lines are held now.
+   * Whether lines are held now; package-private as a test seam.
    *
    * @return {@code true} between {@link #hold()} and {@link #release()}
    */
-  public static boolean holding() {
+  static boolean holding() {
     return holding;
   }
 }
