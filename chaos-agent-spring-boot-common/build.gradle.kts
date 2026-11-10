@@ -1,10 +1,11 @@
 dependencies {
     api(project(":chaos-agent-api"))
-    // Inside the agent jar (chaos-agent-bootstrap) at runtime; declaring it here would put a
-    // second, unshaded copy on the application classpath.
-    compileOnly(project(":chaos-agent-core"))
+    // The core is inside the agent jar (chaos-agent-bootstrap) at runtime, and no production class
+    // here names it (ADR 0003); only the tests drive it directly.
     testImplementation(project(":chaos-agent-core"))
     implementation(project(":chaos-agent-bootstrap"))
+    // Inside the agent jar at runtime; declaring it here would put a second, unshaded copy on the
+    // application classpath.
     compileOnly(project(":chaos-agent-startup-config"))
     testImplementation(project(":chaos-agent-startup-config"))
 
