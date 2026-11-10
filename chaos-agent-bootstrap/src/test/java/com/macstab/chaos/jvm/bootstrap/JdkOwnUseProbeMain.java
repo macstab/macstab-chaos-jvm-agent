@@ -94,6 +94,7 @@ public final class JdkOwnUseProbeMain {
       case "jmx-reject" -> jmxReject();
       case "thread-local-suppress" -> threadLocalSuppress();
       case "reflection-reject-serialization" -> reflectionRejectSerialization();
+      case "reflection-reject-jdk-callers" -> reflectionRejectJdkCallers();
       case "weave-under-reflection-reject" -> weaveUnderReflectionReject();
       case "direct-buffer-reject-socket-read" -> directBufferRejectSocketRead();
       case "gc-suppress-bits" -> gcSuppressBits();
@@ -436,6 +437,40 @@ public final class JdkOwnUseProbeMain {
                   out.writeObject(new ArrayList<>(List.of("a", "b")));
                 }
                 return bytes.size() > 0;
+              }));
+      print(
+          "userInvoke",
+          outcome(() -> Object.class.getMethod("hashCode").invoke(new Object()) != null));
+      print("matched", handle.matchedCount());
+    }
+  }
+
+  /** An application enum: {@code EnumSet} reads its constants through {@code Method.invoke}. */
+  private enum Colour {
+    RED,
+    GREEN
+  }
+
+  /**
+   * A REFLECTION_INVOKE reject: the JDK's own {@code Method.invoke} calls (an {@code EnumSet}'s
+   * universe, the TLS provider's set-up behind {@code SSLContext}) are not targets; the
+   * application's own {@code Method.invoke} fails.
+   */
+  private static void reflectionRejectJdkCallers() throws Exception {
+    try (ChaosActivationHandle handle =
+        activate(
+            "reflect",
+            ChaosSelector.jvmRuntime(Set.of(OperationType.REFLECTION_INVOKE)),
+            ChaosEffect.reject("reflect"))) {
+      print("enumSet", outcome(() -> java.util.EnumSet.allOf(Colour.class).size()));
+      print(
+          "sslContext",
+          outcome(
+              () -> {
+                final javax.net.ssl.SSLContext context =
+                    javax.net.ssl.SSLContext.getInstance("TLS");
+                context.init(null, null, null);
+                return context.createSSLEngine().getEnabledProtocols().length > 0;
               }));
       print(
           "userInvoke",

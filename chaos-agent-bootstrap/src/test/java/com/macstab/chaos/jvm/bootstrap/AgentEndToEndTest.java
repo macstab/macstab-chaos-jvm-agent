@@ -724,6 +724,28 @@ class AgentEndToEndTest {
 
     @Test
     @DisplayName(
+        "an OkHttp client built while a REFLECTION_INVOKE reject is active works, and its RealCall"
+            + " is still woven: neither the JDK's TLS set-up nor the agent's weaving is a target")
+    void okHttpClientUnderReflectionReject() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "okhttp",
+                      ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND)),
+                      ChaosEffect.reject("service down"))),
+              HttpLibraryProbeMain.class,
+              "okhttp-client-under-reflection-reject",
+              httpClasspath);
+      assertThat(result.output()).as("the client was built").doesNotContain("failure=");
+      assertThat(result.value("rejected")).isEqualTo("java.io.IOException");
+      assertThat(result.value("events")).isEqualTo("callStart,callFailed");
+      assertThat(result.longValue("matched.okhttp")).isEqualTo(1L);
+      assertThat(result.value("hookFailures")).isEmpty();
+    }
+
+    @Test
+    @DisplayName(
         "OkHttp enqueue: a reject reaches Callback.onFailure on OkHttp's dispatcher thread, enqueue"
             + " does not throw, and EventListener.callFailed runs")
     void okHttpEnqueueReject() throws Exception {
@@ -3121,6 +3143,22 @@ class AgentEndToEndTest {
       assertThat(result.value("serialize")).isEqualTo("true");
       assertThat(result.value("userInvoke"))
           .isEqualTo("java.lang.reflect.InvocationTargetException");
+    }
+
+    @Test
+    @DisplayName(
+        "reflection-reject-jdk-callers: EnumSet and SSLContext work, a user Method.invoke fails")
+    void reflectionRejectSparesJdkCallers() throws Exception {
+      final ChildJvmProbe.ProbeResult result = run("reflection-reject-jdk-callers");
+      assertSoftly(
+          softly -> {
+            softly.assertThat(result.value("enumSet")).isEqualTo("2");
+            softly.assertThat(result.value("sslContext")).isEqualTo("true");
+            softly
+                .assertThat(result.value("userInvoke"))
+                .isEqualTo("java.lang.reflect.InvocationTargetException");
+            softly.assertThat(result.longValue("matched")).isEqualTo(1L);
+          });
     }
 
     @Test

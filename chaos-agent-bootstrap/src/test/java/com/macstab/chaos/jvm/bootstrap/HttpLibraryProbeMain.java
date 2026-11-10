@@ -18,6 +18,8 @@ public final class HttpLibraryProbeMain {
       case "okhttp-execute" -> DefectProbeMain.withHttpServer(url -> okHttpExecute(url, null));
       case "okhttp-execute-reflection-reject" ->
           DefectProbeMain.withHttpServer(HttpLibraryProbeMain::okHttpExecuteBesideReflectionReject);
+      case "okhttp-client-under-reflection-reject" ->
+          DefectProbeMain.withHttpServer(HttpLibraryProbeMain::okHttpClientUnderReflectionReject);
       case "okhttp-enqueue-reject" ->
           DefectProbeMain.withHttpServer(HttpLibraryProbeMain::okHttpEnqueueReject);
       case "okhttp-interceptor-nested-request" ->
@@ -70,6 +72,39 @@ public final class HttpLibraryProbeMain {
         System.out.println("reflection.matched=" + reflection[0].matchedCount());
         reflection[0].close();
       }
+    }
+  }
+
+  /**
+   * {@link #okHttpExecute} with a REFLECTION_INVOKE reject active from the start: the client's TLS
+   * set-up (the JDK's own reflection) and the weaving of {@code RealCall} when it first loads (the
+   * agent's own work) are not targets, so the call is rejected by the plan's OkHttp scenario.
+   */
+  private static void okHttpClientUnderReflectionReject(final String url) throws Exception {
+    try (com.macstab.chaos.jvm.api.ChaosActivationHandle reflection =
+        ChaosPlatform.current()
+            .activate(
+                com.macstab.chaos.jvm.api.ChaosScenario.builder("reflection")
+                    .scope(com.macstab.chaos.jvm.api.ChaosScenario.ScenarioScope.JVM)
+                    .selector(
+                        com.macstab.chaos.jvm.api.ChaosSelector.jvmRuntime(
+                            java.util.Set.of(
+                                com.macstab.chaos.jvm.api.OperationType.REFLECTION_INVOKE)))
+                    .effect(com.macstab.chaos.jvm.api.ChaosEffect.reject("reflection"))
+                    .activationPolicy(com.macstab.chaos.jvm.api.ActivationPolicy.always())
+                    .build())) {
+      try {
+        okHttpExecute(url, null);
+      } catch (final RuntimeException | Error failure) {
+        System.out.println("failure=" + failure);
+      }
+      System.out.println(
+          "hookFailures="
+              + ChaosPlatform.current()
+                  .diagnostics()
+                  .snapshot()
+                  .runtimeDetails()
+                  .get("hookFailures"));
     }
   }
 

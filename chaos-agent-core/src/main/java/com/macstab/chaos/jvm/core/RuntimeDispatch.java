@@ -140,8 +140,12 @@ public final class RuntimeDispatch {
    */
   public void beforeReflectionInvoke(final @Nullable Object method, final @Nullable Object target)
       throws Throwable {
-    if (engine.idle(OperationType.REFLECTION_INVOKE) || JdkOwnUse.isSerializationHook(method)) {
-      return; // idle, or the object streams calling a class's serialization hook (L3a)
+    if (engine.idle(OperationType.REFLECTION_INVOKE)
+        || JdkOwnUse.isSerializationHook(method)
+        || JdkOwnUse.isJdkReflectionCaller()) {
+      // idle, or the JDK's own reflection (L3a): the object streams calling a class's
+      // serialization hook, or any other Method.invoke whose caller is a JDK class
+      return;
     }
     final String methodName;
     final String declaringClass;

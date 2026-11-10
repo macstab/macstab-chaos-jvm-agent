@@ -148,4 +148,26 @@ class JdkOwnUseTest {
     assertThat(JdkOwnUse.isForkJoinTimerTask(null)).isFalse();
     assertThat(JdkOwnUse.isForkJoinTimerTask(new CompletableFuture<>())).isFalse();
   }
+
+  @Test
+  @DisplayName("a JDK class is one of the bootstrap or platform class loader")
+  void jdkClasses() {
+    assertThat(JdkOwnUse.isJdkClass(String.class)).as("bootstrap").isTrue();
+    assertThat(JdkOwnUse.isJdkClass(java.sql.Connection.class)).as("platform").isTrue();
+    assertThat(JdkOwnUse.isJdkClass(JdkOwnUseTest.class)).as("application").isFalse();
+  }
+
+  /** Reports whether the {@code Method.invoke} that called it came from a JDK class. */
+  public static boolean reflectionCallerIsJdk() {
+    return JdkOwnUse.isJdkReflectionCaller();
+  }
+
+  @Test
+  @DisplayName("the application's own Method.invoke, or none on the stack, is no JDK caller")
+  void applicationReflectionCaller() throws Exception {
+    assertThat(JdkOwnUse.isJdkReflectionCaller()).as("no Method.invoke on the stack").isFalse();
+    assertThat(JdkOwnUseTest.class.getMethod("reflectionCallerIsJdk").invoke(null))
+        .as("called from this test class")
+        .isEqualTo(false);
+  }
 }

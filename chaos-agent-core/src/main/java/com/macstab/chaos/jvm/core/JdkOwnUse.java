@@ -51,6 +51,15 @@ final class JdkOwnUse {
   private static final String HTTP_CLIENT_SELECTOR =
       "jdk.internal.net.http.HttpClientImpl$SelectorManager";
 
+  /**
+   * Walks to the caller of a {@code Method.invoke}: reflection frames are shown, so the walk finds
+   * {@code Method.invoke} itself, and classes are retained, so their loader can be checked.
+   */
+  private static final StackWalker REFLECTION_CALLERS =
+      StackWalker.getInstance(
+          Set.of(
+              StackWalker.Option.RETAIN_CLASS_REFERENCE, StackWalker.Option.SHOW_REFLECT_FRAMES));
+
   /** The agent's own MBean domain (L3). */
   private static final String AGENT_MBEAN_DOMAIN = "com.macstab.chaos.jvm";
 
@@ -171,6 +180,41 @@ final class JdkOwnUse {
       case "writeReplace", "readResolve" -> returned == Object.class && parameters.length == 0;
       default -> false;
     };
+  }
+
+  /**
+   * Whether the innermost {@code Method.invoke} on the current thread's stack was called by a JDK
+   * class, one of the bootstrap or platform class loader: {@code EnumSet} reading an enum's
+   * constants, the TLS provider's set-up behind {@code SSLContext}. Walks the stack, so it runs
+   * only after the idle check.
+   *
+   * @return {@code true} when that caller is a JDK class; {@code false} when it is not, or when no
+   *     {@code Method.invoke} is on the stack
+   */
+  static boolean isJdkReflectionCaller() {
+    return REFLECTION_CALLERS.walk(
+        frames ->
+            frames
+                .dropWhile(
+                    frame ->
+                        frame.getDeclaringClass() != Method.class
+                            || !"invoke".equals(frame.getMethodName()))
+                .skip(1)
+                .findFirst()
+                .map(caller -> isJdkClass(caller.getDeclaringClass()))
+                .orElse(false));
+  }
+
+  /**
+   * Whether {@code type} is a JDK class: one of the bootstrap or platform class loader.
+   *
+   * @param type the class
+   * @return {@code true} for a class of the bootstrap or platform class loader
+   */
+  @SuppressWarnings("ReferenceEquality") // a class loader's identity
+  static boolean isJdkClass(final Class<?> type) {
+    final ClassLoader loader = type.getClassLoader();
+    return loader == null || loader == ClassLoader.getPlatformClassLoader();
   }
 
   /**
