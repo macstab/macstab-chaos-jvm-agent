@@ -180,7 +180,8 @@ public interface BridgeDelegate {
 
   /**
    * Evaluates a shutdown hook before it is registered with the JVM: a scenario can delay or reject
-   * the registration. The hook itself is registered.
+   * the registration. The hook itself is registered: despite its name (kept with slot {@code
+   * DECORATE_SHUTDOWN_HOOK}, ADR 0001), nothing wraps it.
    *
    * @param hook the shutdown-hook thread submitted by the application, or {@code null}
    * @throws Throwable if the delegate throws

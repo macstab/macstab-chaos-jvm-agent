@@ -383,7 +383,12 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #afterResourceLookup(ClassLoader, String, java.net.URL)}. */
   public static final int AFTER_RESOURCE_LOOKUP = 10;
 
-  /** Handle index for {@link #decorateShutdownHook(Thread)}. */
+  /**
+   * Handle index for {@link #decorateShutdownHook(Thread)}. The name is historic: the slot no
+   * longer wraps the hook (the hook is registered as itself) but evaluates its registration, like a
+   * {@code before*} slot; it keeps its name and its number 11, as the slot table of ADR 0001 lists
+   * it.
+   */
   public static final int DECORATE_SHUTDOWN_HOOK = 11;
 
   /**
