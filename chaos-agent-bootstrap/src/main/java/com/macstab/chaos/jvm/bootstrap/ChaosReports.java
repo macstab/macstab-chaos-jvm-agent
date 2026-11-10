@@ -426,9 +426,10 @@ final class ChaosReports implements AutoCloseable {
 
   /**
    * Stops the writer thread and waits for it, then writes the hits file a last time: once this
-   * returns, no write of these reports is still running or still to come. A writer stuck in a write
-   * for longer than {@value #CLOSE_JOIN_MILLIS} ms (a hanging file system) is logged once at
-   * WARNING and left behind; the last write is then skipped, as it would wait for the same write.
+   * returns, no write of these reports is still running or still to come, unless the writer is
+   * stuck. A writer stuck in a write for longer than {@value #CLOSE_JOIN_MILLIS} ms (a hanging file
+   * system) is logged once at WARNING and left behind; the last write is then skipped, as it would
+   * wait for the same write, and the stuck write may still complete after this returns.
    */
   @Override
   public void close() {

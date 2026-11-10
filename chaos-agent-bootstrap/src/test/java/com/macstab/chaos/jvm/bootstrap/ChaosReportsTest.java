@@ -171,6 +171,9 @@ class ChaosReportsTest {
   @DisplayName("a status file that cannot be removed is kept and traced at FINE")
   @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
   void unremovableStatusIsTraced() throws Exception {
+    // root removes files from a read-only directory
+    org.junit.jupiter.api.Assumptions.assumeFalse(
+        "root".equals(System.getProperty("user.name")), "running as root");
     final Path directory = Files.createDirectories(tempDir.resolve("read-only"));
     final ChaosReports reports = create("reports=on;reportsDir=" + directory, Map.of());
     reports.statusOk(1, "inline");
