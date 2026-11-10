@@ -347,6 +347,37 @@ class SleepDnsTlsFileDispatchTest {
   @DisplayName("beforeFileIo")
   class BeforeFileIo {
 
+    /** An application subclass of a java.io stream. */
+    static final class CountingInput extends java.io.InputStream {
+      @Override
+      public int read() {
+        return -1;
+      }
+    }
+
+    @Test
+    @DisplayName("an open of a java.io stream subclass fails with FileNotFoundException")
+    void openOfASubclassFailsAsItsJdkSuperclass() throws Throwable {
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        activate(
+            runtime,
+            "open",
+            ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_OPEN)),
+            ChaosEffect.reject("gone"));
+        final java.io.File missing = java.io.File.createTempFile("open", ".txt");
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                () ->
+                    runtime.beforeFileIo(
+                        "FILE_IO_OPEN", new CountingInput(), missing.getPath(), -1))
+            .isExactlyInstanceOf(java.io.FileNotFoundException.class);
+        assertThat(FileDispatch.hookedClassName(new CountingInput()))
+            .isEqualTo("java.io.InputStream");
+        assertThat(FileDispatch.hookedClassName("not a stream")).isEqualTo("java.lang.String");
+        missing.delete();
+      }
+    }
+
     @Test
     @DisplayName("FILE_IO_READ delay blocks for at least 100 ms")
     void readDelayBlocksForConfiguredDuration() throws Throwable {

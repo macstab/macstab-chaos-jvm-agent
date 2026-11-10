@@ -48,7 +48,7 @@ public final class FileDispatch {
         (engine.evaluate(
             new InvocationContext(
                 fileIoOpType,
-                stream == null ? "java.io.FileInputStream" : stream.getClass().getName(),
+                stream == null ? "java.io.FileInputStream" : hookedClassName(stream),
                 null,
                 transferTag(operation),
                 false,
@@ -62,6 +62,22 @@ public final class FileDispatch {
                 null,
                 InvocationContext.UNKNOWN))),
         byteCount);
+  }
+
+  /**
+   * The JDK class whose method was hooked: the stream's class, or for an application subclass of
+   * {@code FileInputStream}, {@code FileOutputStream} or {@code RandomAccessFile} its nearest JDK
+   * superclass (a class of its own is kept as it is). The failure type follows the hooked API (a
+   * {@code java.io} constructor declares {@code FileNotFoundException}), not the runtime class.
+   */
+  static String hookedClassName(final Object stream) {
+    Class<?> type = stream.getClass();
+    while (type.getClassLoader() != null
+        && type.getSuperclass() != null
+        && type.getSuperclass() != Object.class) {
+      type = type.getSuperclass();
+    }
+    return type.getName();
   }
 
   /** The method a transfer tag stands for, as the context's target name; {@code null} otherwise. */

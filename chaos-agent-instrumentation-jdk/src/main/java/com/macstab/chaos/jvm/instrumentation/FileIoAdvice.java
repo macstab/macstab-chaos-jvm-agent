@@ -338,16 +338,37 @@ final class FileIoAdvice {
 
   /**
    * Intercepts {@code FileChannelImpl.transferFrom(ReadableByteChannel, long, long)}: a write,
-   * whose count a torn write lowers.
+   * whose count a torn write lowers. The count is an upper bound ({@code Long.MAX_VALUE} is the
+   * usual "copy everything"): the bytes reported are what a file source still holds; for another
+   * source the count, or unknown ({@code -1}, which a torn write cannot shorten) when it exceeds
+   * any {@code int}.
    */
   static final class FileChannelTransferFromAdvice {
     @Advice.OnMethodEnter
     static void enter(
         @Advice.This final Object channel,
+        @Advice.Argument(0) final java.nio.channels.ReadableByteChannel source,
         @Advice.Argument(value = 2, readOnly = false) long count,
         @Advice.FieldValue("path") final String path)
         throws Throwable {
-      final int requested = (int) Math.min(count, Integer.MAX_VALUE);
+      // A count beyond any int ("copy everything") bounds nothing: unknown unless the source says.
+      int requested = count > Integer.MAX_VALUE ? -1 : (int) count;
+      if (source instanceof java.nio.channels.FileChannel file
+          && !BootstrapDispatcher.idle(OperationTags.FILE_IO_WRITE)) {
+        // The agent's own reads of the source's size and position.
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          requested =
+              (int)
+                  Math.min(
+                      Math.min(count, Math.max(0L, file.size() - file.position())),
+                      Integer.MAX_VALUE);
+        } catch (final java.io.IOException closed) {
+          // the transfer itself reports it
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+      }
       final int allowed =
           BootstrapDispatcher.beforeFileIo(
               OperationTags.FILE_IO_TRANSFER_FROM, channel, path, requested);
