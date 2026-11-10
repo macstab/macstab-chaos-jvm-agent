@@ -715,22 +715,15 @@ final class ScenarioController {
     if (maxApplications == null) {
       return true;
     }
-    final boolean ended;
     synchronized (applicationBudgetLock) {
-      if (appliedCount.get() < maxApplications) {
-        if (appliedCount.get() + reservedApplications >= maxApplications) {
-          return false;
-        }
-        reservedApplications++;
-        return true;
+      if (appliedCount.get() + reservedApplications >= maxApplications) {
+        // A spent budget is ended by the thread that spent it (commitApplication), after its
+        // APPLIED: ending it here would publish INACTIVE before that APPLIED (L19).
+        return false;
       }
-      ended = markInactive(MAX_APPLICATIONS_REACHED);
+      reservedApplications++;
+      return true;
     }
-    // Published after leaving the budget lock: listeners are untrusted code.
-    if (ended) {
-      publishInactive(MAX_APPLICATIONS_REACHED);
-    }
-    return false;
   }
 
   /**

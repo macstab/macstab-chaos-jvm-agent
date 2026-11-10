@@ -65,6 +65,58 @@ class ScenarioLifecycleEdgesTest {
   }
 
   @Nested
+  @DisplayName("A spent maxApplications")
+  class SpentBudget {
+
+    @Test
+    @DisplayName("is reported INACTIVE by the thread that spent it, after its APPLIED")
+    void committingThreadEndsTheScenario() throws Exception {
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final CountDownLatch inApplied = new CountDownLatch(1);
+        final CountDownLatch leaveApplied = new CountDownLatch(1);
+        final List<String> seen = new CopyOnWriteArrayList<>();
+        runtime.addEventListener(
+            event -> {
+              if (!"cap".equals(event.scenarioId())
+                  || (event.type() != ChaosEvent.Type.APPLIED
+                      && event.type() != ChaosEvent.Type.INACTIVE)) {
+                return;
+              }
+              seen.add(event.type() + "@" + Thread.currentThread().getName());
+              if (event.type() == ChaosEvent.Type.APPLIED) {
+                inApplied.countDown();
+                try {
+                  leaveApplied.await(5, TimeUnit.SECONDS);
+                } catch (final InterruptedException interrupted) {
+                  Thread.currentThread().interrupt();
+                }
+              }
+            });
+        runtime.activate(
+            ChaosScenario.builder("cap")
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ZERO))
+                .activationPolicy(ActivationPolicy.count(1))
+                .build());
+        final Object executor = new Object();
+        final Runnable submit =
+            () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", executor, () -> {});
+
+        final Thread committer = new Thread(submit, "committer");
+        committer.start();
+        assertThat(inApplied.await(5, TimeUnit.SECONDS)).isTrue();
+        final Thread late = new Thread(submit, "late");
+        late.start();
+        late.join(5_000L);
+        leaveApplied.countDown();
+        committer.join(5_000L);
+
+        assertThat(seen).containsExactly("APPLIED@committer", "INACTIVE@committer");
+      }
+    }
+  }
+
+  @Nested
   @DisplayName("A stressor whose close fails")
   class FailingClose {
 
