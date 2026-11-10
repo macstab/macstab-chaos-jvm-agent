@@ -73,6 +73,7 @@ final class SafepointStormStressor implements ManagedStressor {
                   Thread.sleep(intervalMillis);
                 } catch (final InterruptedException interruptedException) {
                   Thread.currentThread().interrupt();
+                  ManagedStressor.interrupted(onEnd, "SafepointStorm", !running.get());
                   break;
                 }
               }

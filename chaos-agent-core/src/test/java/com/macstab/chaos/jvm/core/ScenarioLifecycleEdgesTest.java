@@ -117,6 +117,66 @@ class ScenarioLifecycleEdgesTest {
   }
 
   @Nested
+  @DisplayName("A stressor that cannot start")
+  class FailedStart {
+
+    private final AtomicBoolean failing = new AtomicBoolean();
+
+    private final StressorFactory factory =
+        new StressorFactory(Optional::empty) {
+          @Override
+          ManagedStressor createIfNeeded(
+              final ChaosEffect effect,
+              final boolean allowDestructiveEffects,
+              final Consumer<String> onEnd) {
+            if (failing.get()) {
+              throw new OutOfMemoryError("Java heap space");
+            }
+            return super.createIfNeeded(effect, allowDestructiveEffects, onEnd);
+          }
+        };
+
+    @Test
+    @DisplayName("publishes FAILED and nothing else for its id")
+    void onlyFailed() {
+      final ChaosControlPlaneImpl plane = plane(factory);
+      final List<ChaosEvent.Type> events = recordEvents(plane, "starving");
+      failing.set(true);
+      try {
+        assertThatThrownBy(() -> plane.activate(keepAlive("starving")))
+            .isInstanceOf(ChaosUnsupportedFeatureException.class);
+
+        assertThat(events).containsExactly(ChaosEvent.Type.FAILED);
+        assertThat(plane.diagnostics().snapshot().scenarios()).isEmpty();
+      } finally {
+        plane.close();
+      }
+    }
+
+    @Test
+    @DisplayName("leaves the finished scenario of its id as it was")
+    void keepsTheFinishedScenario() {
+      final ChaosControlPlaneImpl plane = plane(factory);
+      try {
+        plane.activate(keepAlive("again")).stop();
+        final List<ChaosEvent.Type> events = recordEvents(plane, "again");
+        failing.set(true);
+
+        assertThatThrownBy(() -> plane.activate(keepAlive("again")))
+            .isInstanceOf(ChaosUnsupportedFeatureException.class);
+
+        assertThat(events).containsExactly(ChaosEvent.Type.FAILED);
+        assertThat(plane.diagnostics().scenario("again"))
+            .get()
+            .extracting(ChaosDiagnostics.ScenarioReport::state)
+            .isEqualTo(ChaosDiagnostics.ScenarioState.STOPPED);
+      } finally {
+        plane.close();
+      }
+    }
+  }
+
+  @Nested
   @DisplayName("A stressor whose close fails")
   class FailingClose {
 

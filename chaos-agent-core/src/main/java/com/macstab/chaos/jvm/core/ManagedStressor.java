@@ -19,9 +19,9 @@ import java.util.function.Consumer;
  *
  * <p>A stressor that stops producing load on its own reports it through the end callback it is
  * built with ({@link StressorFactory#createIfNeeded}): a thread that failed ({@code "stressor
- * failed: <type>"}), a {@code duration} or a {@code lifespan} that elapsed. The scenario then ends
- * {@code INACTIVE} with that reason (L17). The callback only hands the end over, so a stressor
- * thread may call it.
+ * failed: <type>"}), an interrupt it did not send ({@code "stressor interrupted: <type>"}), a
+ * {@code duration} or a {@code lifespan} that elapsed. The scenario then ends {@code INACTIVE} with
+ * that reason (L17). The callback only hands the end over, so a stressor thread may call it.
  *
  * <h2>Thread safety</h2>
  *
@@ -42,6 +42,23 @@ interface ManagedStressor extends AutoCloseable {
    */
   static Runnable failure(final Consumer<String> onEnd, final String type) {
     return () -> onEnd.accept("stressor failed: " + type);
+  }
+
+  /**
+   * Reports a stressor thread ended by an interrupt its stressor did not send (a {@code
+   * Thread.interrupt()} or {@code ThreadGroup.interrupt()} of someone else, a container's thread
+   * clean-up): its load has ended, and so does the scenario, with the reason {@code "stressor
+   * interrupted: <type>"} (L17). An interrupt that {@link #close()} sends is no end: the stressor
+   * sets its stop flag first.
+   *
+   * @param onEnd the scenario's end callback
+   * @param type the stressor's name, such as {@code MonitorContention}
+   * @param stopping whether the stressor's own stop flag is set
+   */
+  static void interrupted(final Consumer<String> onEnd, final String type, final boolean stopping) {
+    if (!stopping) {
+      onEnd.accept("stressor interrupted: " + type);
+    }
   }
 
   /**

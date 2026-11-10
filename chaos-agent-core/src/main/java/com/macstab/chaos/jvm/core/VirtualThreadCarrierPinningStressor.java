@@ -90,8 +90,10 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
           AgentThreads.virtual(
               name,
               () -> {
+                // The body returns on the stop flag or on an interrupt.
                 body.run();
                 LOGGER.fine(() -> "[chaos-agent] chaos carrier-pin thread terminated: " + name);
+                ManagedStressor.interrupted(onEnd, "VirtualThreadCarrierPinning", stopped.get());
               },
               ManagedStressor.failure(onEnd, "VirtualThreadCarrierPinning")));
     }

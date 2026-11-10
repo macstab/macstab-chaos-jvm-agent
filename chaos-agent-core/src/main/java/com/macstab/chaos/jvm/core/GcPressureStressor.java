@@ -164,6 +164,7 @@ final class GcPressureStressor implements ManagedStressor {
           pause.pause(Math.min(BATCH_INTERVAL_NANOS, durationNanos - elapsed));
         } catch (final InterruptedException e) {
           Thread.currentThread().interrupt();
+          ManagedStressor.interrupted(onEnd, "GcPressure", !running.get());
           break;
         }
       }

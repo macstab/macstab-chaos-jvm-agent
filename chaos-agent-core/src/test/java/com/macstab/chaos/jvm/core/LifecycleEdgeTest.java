@@ -287,7 +287,6 @@ class LifecycleEdgeTest {
     @Test
     @DisplayName("a stressor that fails to start leaves nothing registered")
     void failingStartIsRolledBack() {
-      // Parallelism 2 whatever the machine: the overflow needs more than one worker.
       final List<ChaosEvent> planeEvents = new CopyOnWriteArrayList<>();
       try (ChaosControlPlaneImpl plane =
           new ChaosControlPlaneImpl(
@@ -299,9 +298,10 @@ class LifecycleEdgeTest {
                     final ChaosEffect effect,
                     final boolean allowDestructiveEffects,
                     final java.util.function.Consumer<String> onEnd) {
-                  return effect instanceof ChaosEffect.ThreadLocalLeakEffect leak
-                      ? new ThreadLocalLeakStressor(leak, 2)
-                      : super.createIfNeeded(effect, allowDestructiveEffects, onEnd);
+                  if (effect instanceof ChaosEffect.ThreadLocalLeakEffect) {
+                    throw new IllegalArgumentException("bad stressor");
+                  }
+                  return super.createIfNeeded(effect, allowDestructiveEffects, onEnd);
                 }
               })) {
         plane.addEventListener(planeEvents::add);
@@ -309,12 +309,12 @@ class LifecycleEdgeTest {
             ChaosScenario.builder("overflow")
                 .scope(ChaosScenario.ScenarioScope.JVM)
                 .selector(ChaosSelector.stress(ChaosSelector.StressTarget.THREAD_LOCAL_LEAK))
-                .effect(new ChaosEffect.ThreadLocalLeakEffect(Integer.MAX_VALUE, 1))
+                .effect(new ChaosEffect.ThreadLocalLeakEffect(1, 1))
                 .build();
 
         assertThatThrownBy(() -> plane.activate(overflowing))
             .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageStartingWith("thread-local-leak total entries");
+            .hasMessage("bad stressor");
 
         assertThat(plane.registry().isLive("jvm::overflow")).isFalse();
         assertThat(plane.diagnostics().snapshot().failures())
@@ -326,12 +326,10 @@ class LifecycleEdgeTest {
                     "overflow", ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION));
         assertThat(
                 planeEvents.stream()
-                    .filter(
-                        event ->
-                            event.type() == ChaosEvent.Type.STOPPED
-                                && event.scenarioId().equals("overflow"))
-                    .count())
-            .isEqualTo(1);
+                    .filter(event -> event.scenarioId().equals("overflow"))
+                    .map(ChaosEvent::type))
+            .as("the only event of a failed start is FAILED (L21)")
+            .containsExactly(ChaosEvent.Type.FAILED);
       }
     }
   }

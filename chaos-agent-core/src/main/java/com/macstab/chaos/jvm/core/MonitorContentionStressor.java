@@ -64,6 +64,7 @@ final class MonitorContentionStressor implements ManagedStressor {
                   ready.await();
                 } catch (final InterruptedException e) {
                   Thread.currentThread().interrupt();
+                  ManagedStressor.interrupted(onEnd, "MonitorContention", stopped.get());
                   return;
                 }
                 while (!stopped.get()) {
@@ -73,8 +74,9 @@ final class MonitorContentionStressor implements ManagedStressor {
                   try {
                     lock.lockInterruptibly();
                   } catch (final InterruptedException e) {
-                    stopped.set(true);
+                    // This thread alone ends: the scenario ends through onEnd and stops the rest.
                     Thread.currentThread().interrupt();
+                    ManagedStressor.interrupted(onEnd, "MonitorContention", stopped.get());
                     return;
                   }
                   try {
@@ -86,8 +88,8 @@ final class MonitorContentionStressor implements ManagedStressor {
                       try {
                         Thread.sleep(0, 10_000 /* 10 µs */);
                       } catch (final InterruptedException ie) {
-                        stopped.set(true);
                         Thread.currentThread().interrupt();
+                        ManagedStressor.interrupted(onEnd, "MonitorContention", stopped.get());
                         return;
                       }
                     }

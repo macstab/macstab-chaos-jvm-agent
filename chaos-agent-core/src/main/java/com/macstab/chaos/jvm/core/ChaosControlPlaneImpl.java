@@ -641,6 +641,19 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
               controller,
               registry,
               failure -> recordStartFailure(scopeKey, scenario.id(), failure));
+      final boolean automatic =
+          scenario.activationPolicy().startMode() == ActivationPolicy.StartMode.AUTOMATIC;
+      if (automatic) {
+        // An id taken by a running scenario is refused before its stressor is built.
+        final String key = scopeKey + "::" + scenario.id();
+        if (registry.isLive(key)) {
+          throw new ChaosActivationConflictException("scenario key already active: " + key);
+        }
+        // The stressor is built before anything is registered or published: one that cannot
+        // start fails the activation with FAILED alone, and a finished scenario of the same id
+        // stays as it was (L21).
+        controller.prepare();
+      }
       // Register before starting. A duplicate id is rejected here, before any side effect;
       // starting first would spawn the new controller's stressor and publish STARTED, then roll
       // it back with a STOPPED event carrying the id of the scenario that is still running. A
@@ -663,7 +676,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
           scenario.id(),
           "scenario registered",
           Map.of("scope", scopeKey));
-      if (scenario.activationPolicy().startMode() == ActivationPolicy.StartMode.AUTOMATIC) {
+      if (automatic) {
         // The controller, not the handle: a failure here is recorded once, by the catches below.
         controller.start();
       }
@@ -814,6 +827,10 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     // Destroying it would only publish a STOPPED event carrying an id that may belong to a
     // scenario that is still running.
     if (controller == null || !wasRegistered) {
+      if (controller != null) {
+        // What prepare() built goes, silently: nothing of this controller was published.
+        controller.discard();
+      }
       // A method selector woven before the failed registration is dropped again.
       registry.reconcileMethodSelectors();
       return;

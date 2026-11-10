@@ -61,6 +61,7 @@ final class KeepAliveStressor implements ManagedStressor {
                   Thread.sleep(effect.heartbeat().toMillis());
                 } catch (final InterruptedException interruptedException) {
                   Thread.currentThread().interrupt();
+                  ManagedStressor.interrupted(onEnd, "KeepAlive", !running.get());
                   return;
                 }
               }

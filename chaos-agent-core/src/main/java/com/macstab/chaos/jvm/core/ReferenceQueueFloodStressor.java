@@ -92,6 +92,7 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
                   Thread.sleep(intervalMillis);
                 } catch (final InterruptedException interruptedException) {
                   Thread.currentThread().interrupt();
+                  ManagedStressor.interrupted(onEnd, "ReferenceQueueFlood", !running.get());
                   break;
                 }
               }

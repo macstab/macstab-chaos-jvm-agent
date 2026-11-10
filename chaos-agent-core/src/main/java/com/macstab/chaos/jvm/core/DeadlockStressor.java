@@ -4,6 +4,7 @@ import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
@@ -27,6 +28,9 @@ final class DeadlockStressor implements ManagedStressor {
   private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   private final List<Thread> participants;
+
+  /** Set by {@link #close()} before it interrupts the participants: their end is no failure. */
+  private final AtomicBoolean stopped = new AtomicBoolean(false);
 
   DeadlockStressor(final ChaosEffect.DeadlockEffect effect) {
     this(effect, NO_END);
@@ -78,6 +82,7 @@ final class DeadlockStressor implements ManagedStressor {
                       while (!Thread.currentThread().isInterrupted()) {
                         java.util.concurrent.locks.LockSupport.parkNanos(100_000_000L);
                         if (Thread.interrupted()) {
+                          ManagedStressor.interrupted(onEnd, "Deadlock", stopped.get());
                           return;
                         }
                       }
@@ -90,6 +95,7 @@ final class DeadlockStressor implements ManagedStressor {
                 } catch (final InterruptedException e) {
                   Thread.currentThread().interrupt();
                   LOGGER.fine(() -> "[chaos-agent] chaos deadlock thread interrupted: " + name);
+                  ManagedStressor.interrupted(onEnd, "Deadlock", stopped.get());
                 }
               },
               ManagedStressor.failure(onEnd, "Deadlock")));
@@ -112,6 +118,7 @@ final class DeadlockStressor implements ManagedStressor {
     // deactivate-then-reactivate cycle can start a second generation of deadlock threads while
     // the first generation still holds locks. That surfaces as overlapping thread names and a
     // stale aliveCount() — issues that vanished once close() waits for the previous generation.
+    stopped.set(true);
     AgentThreads.stopAll(participants, JOIN_TIMEOUT_MILLIS);
   }
 

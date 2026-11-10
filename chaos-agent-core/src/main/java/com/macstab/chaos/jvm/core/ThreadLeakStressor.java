@@ -72,6 +72,7 @@ final class ThreadLeakStressor implements ManagedStressor {
                 while (!stopped.get() && System.nanoTime() - start < lifespanNanos) {
                   java.util.concurrent.locks.LockSupport.parkNanos(50_000_000L /* 50 ms */);
                   if (Thread.interrupted()) {
+                    ManagedStressor.interrupted(onEnd, "ThreadLeak", stopped.get());
                     return;
                   }
                 }

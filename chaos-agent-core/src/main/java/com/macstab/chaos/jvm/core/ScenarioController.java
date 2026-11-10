@@ -121,6 +121,28 @@ final class ScenarioController {
   /** Why the stressor stopped producing load on its own; {@code null} while it runs. */
   private volatile @Nullable String stressorEnd;
 
+  /**
+   * The build whose stressor may end the scenario: each build of a stressor gets a token of its
+   * own, so the threads of a build whose start failed (and were stopped by its rollback) never end
+   * a later start. Guarded by {@link #stressorEndLock} together with {@link #stressorEnd}.
+   */
+  private @Nullable Object stressorBuild;
+
+  /**
+   * Guards {@link #stressorBuild} and the first write of {@link #stressorEnd}. Not the monitor: a
+   * stressor thread reports its end under it, while {@link #stop()} joins that thread holding the
+   * monitor.
+   */
+  private final Object stressorEndLock = new Object();
+
+  /**
+   * A stressor built by {@link #prepare()} for the next {@link #start()}; guarded by the monitor.
+   */
+  private @Nullable Prepared prepared;
+
+  /** What {@link #prepare()} built: the stressor, or {@code null} for a scenario without one. */
+  private record Prepared(@Nullable ManagedStressor stressor) {}
+
   private volatile @Nullable ClockSkewState clockSkewState;
   private volatile long rateWindowStartMillis;
   private volatile long rateWindowPermits;
@@ -373,48 +395,23 @@ final class ScenarioController {
     // Only a REGISTERED controller starts: a running one is not started twice (a fresh stressor
     // would clobber startedAt and leak the first), and a STOPPED or INACTIVE one has ended for
     // good (L19). Checked before the stressor is built, and again under the monitor below.
+    // The stressor is the one prepare() built before the registration, or is built here (a
+    // MANUAL scenario's start, a start after a failed one).
+    final Prepared ready;
     synchronized (this) {
       if (state != ChaosDiagnostics.ScenarioState.REGISTERED) {
         return;
       }
+      ready = prepared;
+      prepared = null;
     }
-    final ManagedStressor newStressor;
-    ChaosDispatcher.incrementDispatchDepth();
-    try {
-      newStressor =
-          stressorFactory.createIfNeeded(
-              scenario.effect(),
-              scenario.activationPolicy().allowDestructiveEffects(),
-              this::stressorEnded);
-    } catch (final OutOfMemoryError exhausted) {
-      // The stressor could not get its resources: heap, direct memory, or a native thread (the
-      // JVM reports a thread it cannot start as an OutOfMemoryError). The runtime cannot run it,
-      // which is not a configuration error. Any other failure keeps its own type.
-      throw unsupported("stressor " + scenario.effect().getClass().getSimpleName(), exhausted);
-    } finally {
-      ChaosDispatcher.decrementDispatchDepth();
-    }
-    if (timeBounded() || newStressor != null) {
-      // A time-bounded scenario needs the expiry thread to end, and so does a stressor that stops
-      // on its own (stressorEnded hands its end to that thread): without it the start fails and
-      // the controller stays REGISTERED.
-      try {
-        ExpiryScheduler.ensureStarted();
-      } catch (final OutOfMemoryError exhausted) {
-        if (newStressor != null) {
-          newStressor.close();
-        }
-        throw unsupported("the expiry thread", exhausted);
-      }
-    }
+    final ManagedStressor newStressor = ready != null ? ready.stressor() : buildStressor();
     // Carried from phase 1 to phase 2: the clock skew, which takes effect only in phase 2 like
     // every other effect.
     ClockSkewState newClockSkewState = null;
     synchronized (this) {
       if (state != ChaosDiagnostics.ScenarioState.REGISTERED) {
-        if (newStressor != null) {
-          newStressor.close();
-        }
+        closeAsAgentWork(newStressor);
         return;
       }
       // releaseAndReset() atomically unblocks any threads parked on the previous latch and
@@ -484,15 +481,102 @@ final class ScenarioController {
   }
 
   /**
-   * The stressor's end callback: its thread failed, or its duration or lifespan elapsed (L17). Runs
-   * on the stressor's thread, so it only hands the end to the expiry thread: ending here would take
-   * the monitor that a concurrent {@link #stop()} holds while it joins this very thread.
+   * Builds what {@link #start()} needs before the scenario becomes visible: the stressor and, for a
+   * scenario that ends on its own, the expiry thread. The control plane calls it before it
+   * registers the controller, so a stressor that cannot start fails the activation before anything
+   * is registered or published, and a finished scenario of the same id is kept (L21). Does nothing
+   * unless the controller is {@code REGISTERED} and not prepared yet.
+   *
+   * @throws ChaosUnsupportedFeatureException when the stressor or the expiry thread cannot get its
+   *     resources
    */
-  private void stressorEnded(final String newReason) {
-    if (stressorEnd == null) {
-      stressorEnd = newReason;
-      ExpiryScheduler.execute(onExpiryThread(() -> endAfterStressor(newReason)));
+  void prepare() {
+    synchronized (this) {
+      if (state != ChaosDiagnostics.ScenarioState.REGISTERED || prepared != null) {
+        return;
+      }
     }
+    final ManagedStressor built = buildStressor();
+    synchronized (this) {
+      if (state == ChaosDiagnostics.ScenarioState.REGISTERED && prepared == null) {
+        prepared = new Prepared(built);
+        return;
+      }
+    }
+    closeAsAgentWork(built);
+  }
+
+  /**
+   * Releases what {@link #prepare()} built, publishing nothing: the rollback of an activation that
+   * failed before its controller was registered.
+   */
+  void discard() {
+    final Prepared unused;
+    synchronized (this) {
+      unused = prepared;
+      prepared = null;
+    }
+    if (unused != null) {
+      closeAsAgentWork(unused.stressor());
+    }
+  }
+
+  /**
+   * Builds the scenario's stressor, if its effect has one, and starts the expiry thread a scenario
+   * that ends on its own needs. The stressor's set-up is the agent's own work (L3): built with the
+   * dispatch depth raised, so no user scenario applies to its allocations, thread starts or pool
+   * submissions.
+   */
+  private @Nullable ManagedStressor buildStressor() {
+    final Object build = new Object();
+    synchronized (stressorEndLock) {
+      stressorBuild = build;
+      stressorEnd = null;
+    }
+    final ManagedStressor built;
+    ChaosDispatcher.incrementDispatchDepth();
+    try {
+      built =
+          stressorFactory.createIfNeeded(
+              scenario.effect(),
+              scenario.activationPolicy().allowDestructiveEffects(),
+              endReason -> stressorEnded(build, endReason));
+    } catch (final OutOfMemoryError exhausted) {
+      // The stressor could not get its resources: heap, direct memory, or a native thread (the
+      // JVM reports a thread it cannot start as an OutOfMemoryError). The runtime cannot run it,
+      // which is not a configuration error. Any other failure keeps its own type.
+      throw unsupported("stressor " + scenario.effect().getClass().getSimpleName(), exhausted);
+    } finally {
+      ChaosDispatcher.decrementDispatchDepth();
+    }
+    if (timeBounded() || built != null) {
+      // A time-bounded scenario needs the expiry thread to end, and so does a stressor that stops
+      // on its own (stressorEnded hands its end to that thread): without it the start fails and
+      // the controller stays REGISTERED.
+      try {
+        ExpiryScheduler.ensureStarted();
+      } catch (final OutOfMemoryError exhausted) {
+        closeAsAgentWork(built);
+        throw unsupported("the expiry thread", exhausted);
+      }
+    }
+    return built;
+  }
+
+  /**
+   * The stressor's end callback: its thread failed or was interrupted, or its duration or lifespan
+   * elapsed (L17). Runs on the stressor's thread, so it only hands the end to the expiry thread:
+   * ending here would take the monitor that a concurrent {@link #stop()} holds while it joins this
+   * very thread. A report of an earlier build (one whose start failed) is ignored.
+   */
+  private void stressorEnded(final Object build, final String newReason) {
+    synchronized (stressorEndLock) {
+      if (!build.equals(stressorBuild) || stressorEnd != null) {
+        return;
+      }
+      stressorEnd = newReason;
+    }
+    ExpiryScheduler.execute(onExpiryThread(() -> endAfterStressor(newReason)));
   }
 
   /**
@@ -548,6 +632,11 @@ final class ScenarioController {
       reason = "stopped";
       gate.release();
       closeStressor();
+      final Prepared unused = prepared;
+      prepared = null;
+      if (unused != null) {
+        closeAsAgentWork(unused.stressor());
+      }
       cancelExpiry();
       clockSkewState = null;
     }
