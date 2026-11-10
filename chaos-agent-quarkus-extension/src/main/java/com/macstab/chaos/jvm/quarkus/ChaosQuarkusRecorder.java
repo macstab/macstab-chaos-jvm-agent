@@ -39,8 +39,16 @@ public class ChaosQuarkusRecorder {
 
   private static final Logger LOGGER = Logger.getLogger(ChaosQuarkusRecorder.class.getName());
 
+  private final Runnable install;
+
   /** Default constructor invoked by the Quarkus build step. */
-  public ChaosQuarkusRecorder() {}
+  public ChaosQuarkusRecorder() {
+    this(ChaosPlatform::installLocally);
+  }
+
+  ChaosQuarkusRecorder(final Runnable install) {
+    this.install = install;
+  }
 
   /**
    * Installs the chaos agent in the current JVM if {@link #ENABLED_PROPERTY} resolves to {@code
@@ -58,7 +66,7 @@ public class ChaosQuarkusRecorder {
       return new RuntimeValue<>(Boolean.FALSE);
     }
     try {
-      ChaosPlatform.installLocally();
+      install.run();
       return new RuntimeValue<>(Boolean.TRUE);
     } catch (final RuntimeException | LinkageError exception) {
       // LinkageError: self-attach is unavailable in a native image and on JVMs without the

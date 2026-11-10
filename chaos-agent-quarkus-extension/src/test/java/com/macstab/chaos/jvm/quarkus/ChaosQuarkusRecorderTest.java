@@ -4,8 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.smallrye.config.SmallRyeConfigBuilder;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.spi.ConfigSource;
 import org.junit.jupiter.api.AfterEach;
@@ -46,6 +53,60 @@ class ChaosQuarkusRecorderTest {
   void enabled() {
     System.setProperty(ChaosQuarkusRecorder.ENABLED_PROPERTY, "true");
     assertThat(new ChaosQuarkusRecorder().installAgent().getValue()).isTrue();
+  }
+
+  @Test
+  @DisplayName("a failed self-attach is logged and answers false, without failing the start")
+  void failedAttachDoesNotAbort() {
+    System.setProperty(ChaosQuarkusRecorder.ENABLED_PROPERTY, "true");
+    for (final Throwable failure :
+        List.of(
+            new IllegalStateException("attach unavailable"),
+            new UnsatisfiedLinkError("no attach library"))) {
+      final AtomicInteger installs = new AtomicInteger();
+      final List<LogRecord> records = new CopyOnWriteArrayList<>();
+      final Handler handler =
+          new Handler() {
+            @Override
+            public void publish(final LogRecord record) {
+              records.add(record);
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+          };
+      final Logger logger = Logger.getLogger(ChaosQuarkusRecorder.class.getName());
+      logger.addHandler(handler);
+      try {
+        final ChaosQuarkusRecorder recorder =
+            new ChaosQuarkusRecorder(
+                () -> {
+                  installs.incrementAndGet();
+                  if (failure instanceof RuntimeException runtime) {
+                    throw runtime;
+                  }
+                  throw (Error) failure;
+                });
+
+        assertThat(recorder.installAgent().getValue()).as("%s", failure).isFalse();
+      } finally {
+        logger.removeHandler(handler);
+      }
+
+      assertThat(installs).hasValue(1);
+      assertThat(records)
+          .singleElement()
+          .satisfies(
+              record -> {
+                assertThat(record.getLevel()).isEqualTo(Level.WARNING);
+                assertThat(record.getMessage())
+                    .isEqualTo("[chaos-agent] failed to self-attach during Quarkus runtime-init");
+                assertThat(record.getThrown()).isSameAs(failure);
+              });
+    }
   }
 
   @Nested
