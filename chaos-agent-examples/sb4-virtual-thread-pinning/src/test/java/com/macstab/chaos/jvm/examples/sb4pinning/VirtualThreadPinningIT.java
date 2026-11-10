@@ -15,6 +15,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
@@ -24,6 +25,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestClient;
 
+// The agent keeps one carrier free, so the stressor needs two carriers to hold one: on a single
+// CPU the startup plan's scenario is refused and the application does not start. The condition is
+// checked before the context starts, so such a machine skips the class instead of failing it.
+@EnabledIf(
+    value = "hasACarrierToHold",
+    disabledReason = "fewer than 2 CPUs: the virtual-thread scheduler has no carrier to pin")
 @ChaosTest(
     classes = VirtualThreadPinningApplication.class,
     webEnvironment = WebEnvironment.RANDOM_PORT,
@@ -46,7 +53,6 @@ class VirtualThreadPinningIT {
     // ACTIVE alone also holds when the stressor holds nothing (a single carrier skips it): check
     // that carriers are held. The agent keeps one carrier free, so two need three carriers.
     final long held = Math.min(2, Runtime.getRuntime().availableProcessors() - 1);
-    assertThat(held).as("this machine has a carrier to hold").isPositive();
     await()
         .atMost(Duration.ofSeconds(5))
         .untilAsserted(
@@ -107,6 +113,11 @@ class VirtualThreadPinningIT {
     assertThat(snapshot.getBody().get("test"))
         .as("Recorded count must equal the number of successful requests")
         .isEqualTo((long) concurrency);
+  }
+
+  /** Whether this machine has a carrier the stressor can hold while keeping one free. */
+  static boolean hasACarrierToHold() {
+    return Runtime.getRuntime().availableProcessors() >= 2;
   }
 
   /**
