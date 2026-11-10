@@ -246,6 +246,25 @@ class TrustedSourcesTest {
     }
 
     @Test
+    @DisplayName("stays off when a trusted source sets allow-remote-enable to false")
+    void remoteDisallowedByTrusted() {
+      for (final String no : List.of("false", "0", "no", "off")) {
+        assertThat(
+                TrustedSources.switchedOn(
+                    SWITCH,
+                    lookup(
+                        Map.of(
+                            SWITCH,
+                            sourced("true", "consul"),
+                            TrustedSources.ALLOW_REMOTE_ENABLE_PROPERTY,
+                            sourced(no, "local"))),
+                    "local"::equals))
+            .as(no)
+            .isFalse();
+      }
+    }
+
+    @Test
     @DisplayName("stays off when allow-remote-enable comes from the untrusted source too")
     void remoteAllowedOnlyFromTrusted() {
       assertThat(
