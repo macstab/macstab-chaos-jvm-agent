@@ -1234,6 +1234,17 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName(
+        "an expiry thread started before the install is the agent's own once installed: a"
+            + " THREAD_PARK delay never applies on it")
+    void expiryThreadStartedBeforeInstallIsAgentWork() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(InstallerProbeMain.class, "expiry-thread-before-install");
+
+      assertThat(result.value("expiryThreadApplied")).isEqualTo("false");
+    }
+
+    @Test
     @DisplayName("reports created during shutdown fail and leave no writer thread and no listener")
     void reportsDuringShutdownLeaveNothing() throws Exception {
       final ChildJvmProbe.ProbeResult result =

@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.core;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The agent's one expiry thread: it ends time-bounded scenarios when their bounds pass, also
@@ -14,11 +15,17 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>Agent-owned (L3): the thread's body runs with the dispatch depth raised ({@link
  * AgentThreads#platform}), and every call that may start the thread or enqueue a check raises it
- * too, so no scenario applies to the thread's start, its queue or its parking.
+ * too, so no scenario applies to the thread's start, its queue or its parking. A thread started by
+ * a runtime used before the agent's install raised no depth (there was no dispatcher yet), and it
+ * serves the JVM for good: its next task raises the depth for the rest of its life, and the install
+ * hands it one ({@link #adoptAfterInstall()}).
  */
 final class ExpiryScheduler {
 
   private static final ScheduledThreadPoolExecutor EXECUTOR = create();
+
+  /** The expiry thread whose depth a task raised for the thread's life ({@link #owned}). */
+  private static volatile @Nullable Thread raisedFor;
 
   private ExpiryScheduler() {}
 
@@ -53,7 +60,7 @@ final class ExpiryScheduler {
   static void execute(final Runnable end) {
     ChaosDispatcher.incrementDispatchDepth();
     try {
-      EXECUTOR.execute(end);
+      EXECUTOR.execute(owned(end));
     } finally {
       ChaosDispatcher.decrementDispatchDepth();
     }
@@ -69,9 +76,41 @@ final class ExpiryScheduler {
   static ScheduledFuture<?> schedule(final Runnable check, final long delayNanos) {
     ChaosDispatcher.incrementDispatchDepth();
     try {
-      return EXECUTOR.schedule(check, delayNanos, TimeUnit.NANOSECONDS);
+      return EXECUTOR.schedule(owned(check), delayNanos, TimeUnit.NANOSECONDS);
     } finally {
       ChaosDispatcher.decrementDispatchDepth();
     }
+  }
+
+  /**
+   * Hands a running expiry thread a task once the agent is installed, so a thread started before
+   * the install raises its depth now rather than at its next check; starts no thread.
+   */
+  static void adoptAfterInstall() {
+    ChaosDispatcher.incrementDispatchDepth();
+    try {
+      if (EXECUTOR.getPoolSize() > 0) {
+        EXECUTOR.execute(owned(() -> {}));
+      }
+    } finally {
+      ChaosDispatcher.decrementDispatchDepth();
+    }
+  }
+
+  /**
+   * Returns {@code task} preceded, on a thread whose depth no task raised yet, by a raise kept for
+   * the thread's life: once the dispatcher is installed, the thread's parking between tasks is the
+   * agent's own too (L3). A thread whose body did raise it ends up one deeper, which changes
+   * nothing.
+   */
+  private static Runnable owned(final Runnable task) {
+    return () -> {
+      final Thread self = Thread.currentThread();
+      if (raisedFor != self && ChaosDispatcher.dispatcherInstalled()) {
+        ChaosDispatcher.incrementDispatchDepth();
+        raisedFor = self;
+      }
+      task.run();
+    };
   }
 }

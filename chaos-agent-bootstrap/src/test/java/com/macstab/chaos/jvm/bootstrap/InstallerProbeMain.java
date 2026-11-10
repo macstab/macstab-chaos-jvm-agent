@@ -41,6 +41,7 @@ public final class InstallerProbeMain {
       case "bridge-revision-claimed" -> bridgeOfAnotherRevision(true);
       case "bridge-revision-unclaimed" -> bridgeOfAnotherRevision(false);
       case "dispatcher-before-install" -> dispatcherBeforeInstall();
+      case "expiry-thread-before-install" -> expiryThreadBeforeInstall();
       case "reports-during-shutdown" -> reportsDuringShutdown();
       case "retransform-failure" -> retransformFailure();
       case "reset-failure" -> resetFailure();
@@ -242,6 +243,55 @@ public final class InstallerProbeMain {
             .activationPolicy(ActivationPolicy.builder().activeFor(Duration.ofMinutes(5L)).build())
             .build());
     System.out.println("windowedSleepMillis=" + sleepMillis());
+  }
+
+  /**
+   * A runtime whose time-bounded scenario started the JVM-wide expiry thread before the agent was
+   * installed, so the thread raised no depth. After the install, a JVM-wide {@code THREAD_PARK}
+   * delay must not apply on the expiry thread while it ends a 300 ms scenario: prints whether one
+   * did ({@code expiryThreadApplied}).
+   */
+  private static void expiryThreadBeforeInstall() throws Exception {
+    final ChaosRuntime runtime = new ChaosRuntime();
+    runtime
+        .activate(
+            ChaosScenario.builder("before-install")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(
+                    ChaosSelector.thread(
+                        Set.of(OperationType.THREAD_SLEEP), ChaosSelector.ThreadKind.ANY))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1L)))
+                .activationPolicy(
+                    ActivationPolicy.builder().activeFor(Duration.ofMinutes(10L)).build())
+                .build())
+        .close();
+    JdkInstrumentationInstaller.install(
+        net.bytebuddy.agent.ByteBuddyAgent.install(), runtime, false, List.of(), List.of(), null);
+    final Set<String> appliedOn = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    runtime.addEventListener(
+        event -> {
+          if (event.type() == com.macstab.chaos.jvm.api.ChaosEvent.Type.APPLIED) {
+            appliedOn.add(Thread.currentThread().getName());
+          }
+        });
+    runtime.activate(
+        ChaosScenario.builder("timed")
+            .scope(ChaosScenario.ScenarioScope.JVM)
+            .selector(
+                ChaosSelector.thread(
+                    Set.of(OperationType.THREAD_SLEEP), ChaosSelector.ThreadKind.ANY))
+            .effect(ChaosEffect.delay(Duration.ofMillis(1L)))
+            .activationPolicy(ActivationPolicy.builder().activeFor(Duration.ofMillis(300L)).build())
+            .build());
+    runtime.activate(
+        ChaosScenario.builder("park")
+            .scope(ChaosScenario.ScenarioScope.JVM)
+            .selector(ChaosSelector.monitor(Set.of(OperationType.THREAD_PARK)))
+            .effect(ChaosEffect.delay(Duration.ofMillis(1L)))
+            .activationPolicy(ActivationPolicy.always())
+            .build());
+    TimeUnit.MILLISECONDS.sleep(1_500L);
+    System.out.println("expiryThreadApplied=" + appliedOn.contains("macstab-chaos-expiry"));
   }
 
   /**

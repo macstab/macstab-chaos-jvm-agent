@@ -89,6 +89,16 @@ public final class ChaosDispatcher {
   }
 
   /**
+   * Returns whether the bootstrap dispatcher is installed, so {@link #incrementDispatchDepth()}
+   * raises a depth.
+   *
+   * @return {@code true} when the dispatcher is installed
+   */
+  static boolean dispatcherInstalled() {
+    return resolveInternalCalls() != null;
+  }
+
+  /**
    * Raises the bootstrap dispatcher's depth on the current thread, so no chaos interception applies
    * to the agent's own calls (clock reads, park, sleep, …) until the matching {@link
    * #decrementDispatchDepth()}. {@code ScenarioController.start()} uses it so a concurrently active
