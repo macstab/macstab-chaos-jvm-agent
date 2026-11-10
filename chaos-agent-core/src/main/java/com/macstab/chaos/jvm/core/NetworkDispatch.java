@@ -23,18 +23,23 @@ public final class NetworkDispatch {
     this.engine = engine;
   }
 
+  /** The select runs as asked. */
+  public static final long SELECT_PROCEEDS = -1L;
+
   /**
-   * Called before {@link java.nio.channels.Selector#select()}; returns {@code true} to force a
-   * spurious wakeup.
+   * Called before {@link java.nio.channels.Selector#select()}: whether the select runs, returns no
+   * ready channel at once (a spurious wakeup), or stalls first.
    *
    * @param selector the NIO selector being invoked
    * @param timeoutMillis the requested select timeout in milliseconds
-   * @return {@code true} to force a spurious wakeup; {@code false} for normal execution
+   * @return {@link #SELECT_PROCEEDS} for normal execution; {@code 0} to return no ready channel at
+   *     once; a positive count of nanoseconds to stall for first (a {@code timeout()}), which the
+   *     bridge ends early on the selector's {@code wakeup()} or close, as a real select ends
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public boolean beforeNioSelect(final Object selector, final long timeoutMillis) throws Throwable {
+  public long beforeNioSelect(final Object selector, final long timeoutMillis) throws Throwable {
     if (engine.idle(OperationType.NIO_SELECTOR_SELECT) || JdkOwnUse.onHttpClientSelectorThread()) {
-      return false; // idle, or the JDK HttpClient's own selector loop (L3a)
+      return SELECT_PROCEEDS; // idle, or the JDK HttpClient's own selector loop (L3a)
     }
     final RuntimeDecision decision =
         engine.evaluate(
@@ -61,15 +66,81 @@ public final class NetworkDispatch {
         throw thrown.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
-        return true;
+        return 0L;
       }
       if (terminalAction instanceof TerminalAction.Timeout timeout) {
-        // A stalled peer: the select waits out its own timeout and reports no ready channel.
-        engine.sleepNanos(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeout.waitMillis()));
-        return true;
+        // A stalled peer: the select waits out its own timeout and reports no ready channel,
+        // unless a wakeup() or close() ends the wait, which the bridge observes.
+        return Math.max(
+            1L, java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeout.waitMillis()));
       }
     }
-    return false;
+    return SELECT_PROCEEDS;
+  }
+
+  /** How often a stalled read or connect looks whether its endpoint was closed. */
+  private static final long STALL_SLICE_NANOS =
+      java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(10L);
+
+  /**
+   * Waits out a {@code timeout()} of a read or connect on {@code endpoint}, then fails it as timed
+   * out; ends early, failing as closed, when another thread closes the endpoint meanwhile, as the
+   * real wait does.
+   */
+  private Throwable stalled(final Object endpoint, final TerminalAction.Timeout timeout) {
+    final long deadline =
+        System.nanoTime()
+            + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeout.waitMillis());
+    long left;
+    while ((left = deadline - System.nanoTime()) > 0L && !Thread.currentThread().isInterrupted()) {
+      if (EndpointState.closed(endpoint)) {
+        return FailureFactory.closedWhileWaiting(endpoint);
+      }
+      engine.sleepNanos(Math.min(left, STALL_SLICE_NANOS));
+    }
+    return EndpointState.closed(endpoint)
+        ? FailureFactory.closedWhileWaiting(endpoint)
+        : timeout.failure();
+  }
+
+  /** Whether a socket, a socket implementation or a channel has been closed. */
+  static final class EndpointState {
+
+    /** {@code NioSocketImpl.isOpen()}, private; {@code null} where it cannot be read. */
+    private static final java.lang.reflect.@Nullable Method NIO_SOCKET_IMPL_OPEN =
+        nioSocketImplOpen();
+
+    private EndpointState() {}
+
+    static boolean closed(final @Nullable Object endpoint) {
+      if (endpoint instanceof java.net.Socket socket) {
+        return socket.isClosed();
+      }
+      if (endpoint instanceof java.nio.channels.Channel channel) {
+        return !channel.isOpen();
+      }
+      final java.lang.reflect.Method isOpen = NIO_SOCKET_IMPL_OPEN;
+      if (endpoint != null && isOpen != null && isOpen.getDeclaringClass() == endpoint.getClass()) {
+        try {
+          return !(boolean) isOpen.invoke(endpoint);
+        } catch (final ReflectiveOperationException | RuntimeException unreadable) {
+          return false;
+        }
+      }
+      return false;
+    }
+
+    private static java.lang.reflect.@Nullable Method nioSocketImplOpen() {
+      try {
+        final java.lang.reflect.Method isOpen =
+            Class.forName("sun.nio.ch.NioSocketImpl", false, null).getDeclaredMethod("isOpen");
+        isOpen.setAccessible(true);
+        return isOpen;
+      } catch (final ReflectiveOperationException | RuntimeException notOpened) {
+        // The socket implementation's state stays unknown: a stall then waits it out.
+        return null;
+      }
+    }
   }
 
   /**
@@ -177,11 +248,12 @@ public final class NetworkDispatch {
               : java.util.Objects.requireNonNull(inetSocketAddress, "redirected peer").getPort());
     }
     if (decision.terminalAction() instanceof TerminalAction.Timeout timeout) {
-      // A peer that never answers the SYN: the connect waits out its own timeout, then fails.
+      // A peer that never answers the SYN: the connect waits out its own timeout, then fails;
+      // a close from another thread ends the wait.
       engine.applyDelayAndGate(decision);
-      engine.sleepNanos(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeout.waitMillis()));
+      final Throwable failure = stalled(socket, timeout);
       release(socket);
-      throw timeout.failure();
+      throw failure;
     }
     applyClosingOnFailure(decision, socket);
     return null;
@@ -234,7 +306,7 @@ public final class NetworkDispatch {
     if (engine.idle(OperationType.SOCKET_READ)) {
       return len;
     }
-    return engine.transferCount(
+    final RuntimeDecision decision =
         (engine.evaluate(
             new InvocationContext(
                 OperationType.SOCKET_READ,
@@ -250,8 +322,12 @@ public final class NetworkDispatch {
                 remoteAddress instanceof java.net.InetAddress address ? address : null,
                 remoteAddress == null ? InvocationContext.UNKNOWN : remotePort,
                 null,
-                soTimeoutMillis))),
-        len);
+                soTimeoutMillis)));
+    if (decision.terminalAction() instanceof TerminalAction.Timeout timeout) {
+      engine.applyDelayAndGate(decision);
+      throw stalled(stream, timeout);
+    }
+    return engine.transferCount(decision, len);
   }
 
   /**

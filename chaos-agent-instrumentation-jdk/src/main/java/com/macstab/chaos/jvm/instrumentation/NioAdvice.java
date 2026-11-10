@@ -185,6 +185,17 @@ final class NioAdvice {
     }
   }
 
+  /**
+   * After {@code Selector.wakeup()} of a selector implementation (its close wakes it up too): ends
+   * a {@code timeout()} stall of a select on it, as the wakeup ends a real select.
+   */
+  static final class SelectorWakeupAdvice {
+    @Advice.OnMethodExit
+    static void exit(@Advice.This final Object selector) {
+      BootstrapDispatcher.selectorWoken(selector);
+    }
+  }
+
   /** Intercepts {@code SocketChannel.connect(SocketAddress)} (NIO_CHANNEL_CONNECT). */
   static final class NioChannelConnectAdvice {
     @Advice.OnMethodEnter

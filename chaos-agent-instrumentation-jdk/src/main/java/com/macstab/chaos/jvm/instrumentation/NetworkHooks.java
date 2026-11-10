@@ -86,6 +86,11 @@ final class NetworkHooks {
                         advise(
                             NioAdvice.NioSelectNowAdvice.class,
                             ElementMatchers.named("selectNow")
+                                .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        advise(
+                            NioAdvice.SelectorWakeupAdvice.class,
+                            ElementMatchers.named("wakeup")
                                 .and(ElementMatchers.takesArguments(0)))))
         // NIO SocketChannel — the public class is abstract, so name() would only match the
         // abstract copy; instrument concrete subtypes (sun.nio.ch.SocketChannelImpl,

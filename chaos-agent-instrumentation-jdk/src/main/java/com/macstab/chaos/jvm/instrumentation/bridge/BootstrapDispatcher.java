@@ -1618,7 +1618,8 @@ public final class BootstrapDispatcher {
    * @param timeoutMillis the timeout parameter as passed to the overload; {@code 0} for the
    *     no-argument variant
    * @return {@code true} to force a spurious wakeup; {@code false} for normal execution. Returns
-   *     {@code false} as the fallback.
+   *     {@code false} as the fallback. A stall the delegate asks for ({@code timeout()}) is waited
+   *     out here first, ended early by the selector's {@link #selectorWoken(Object) wakeup}.
    * @throws Throwable if the delegate throws
    */
   public static boolean beforeNioSelect(final Object selector, final long timeoutMillis)
@@ -1631,13 +1632,60 @@ public final class BootstrapDispatcher {
     try {
       final MethodHandle[] h = handles;
       final Object d = delegate;
-      return (d != null && h != null)
-          && (boolean) h[BEFORE_NIO_SELECT].invoke(d, selector, timeoutMillis);
+      if (d == null || h == null) {
+        return false;
+      }
+      final long outcome = (long) h[BEFORE_NIO_SELECT].invoke(d, selector, timeoutMillis);
+      if (outcome > 0L) {
+        stallSelect(selector, outcome);
+      }
+      return outcome >= 0L;
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
       return false;
     } finally {
       depth[0]--;
+    }
+  }
+
+  /** The threads stalled in a selector's {@code timeout()}, by selector (identity). */
+  private static final java.util.concurrent.ConcurrentHashMap<Object, Thread> SELECT_STALLS =
+      new java.util.concurrent.ConcurrentHashMap<>();
+
+  /**
+   * Stalls a select for at most {@code nanos}: a real select with no ready channel returns at once
+   * on {@code wakeup()}, the selector's close (which wakes it up) and an interrupt, so the stall
+   * ends on them too.
+   */
+  private static void stallSelect(final Object selector, final long nanos) {
+    final Thread self = Thread.currentThread();
+    SELECT_STALLS.put(selector, self);
+    try {
+      final long deadline = System.nanoTime() + nanos;
+      long left;
+      while (SELECT_STALLS.get(selector) == self
+          && !self.isInterrupted()
+          && (left = deadline - System.nanoTime()) > 0L) {
+        java.util.concurrent.locks.LockSupport.parkNanos(left);
+      }
+    } finally {
+      SELECT_STALLS.remove(selector, self);
+    }
+  }
+
+  /**
+   * Called after a selector's {@code wakeup()} (also the one its close makes): ends a {@code
+   * timeout()} stall of a select on it. Without a stall it only asks whether one exists.
+   *
+   * @param selector the selector woken up
+   */
+  public static void selectorWoken(final Object selector) {
+    if (SELECT_STALLS.isEmpty()) {
+      return;
+    }
+    final Thread stalled = SELECT_STALLS.remove(selector);
+    if (stalled != null) {
+      java.util.concurrent.locks.LockSupport.unpark(stalled);
     }
   }
 

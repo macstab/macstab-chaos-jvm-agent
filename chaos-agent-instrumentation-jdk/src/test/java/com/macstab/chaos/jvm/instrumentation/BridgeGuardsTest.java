@@ -74,6 +74,8 @@ class BridgeGuardsTest {
           "corruptBuffer",
           "corruptionSeed",
           "isArchive",
+          // Ends a stall the bridge itself runs; it calls no delegate.
+          "selectorWoken",
           "currentTimeMillis",
           "nanoTime");
 

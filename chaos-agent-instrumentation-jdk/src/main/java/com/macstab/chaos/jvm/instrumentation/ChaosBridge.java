@@ -417,11 +417,12 @@ final class ChaosBridge implements BridgeDelegate {
    * @param selector the selector about to block
    * @param timeoutMillis the requested select timeout in milliseconds ({@code 0} means {@code
    *     selectNow})
-   * @return {@code true} to allow the select to proceed; {@code false} to skip it
+   * @return {@code -1} to let the select proceed, {@code 0} to skip it, or the nanoseconds to stall
+   *     for before skipping it
    * @throws Throwable if the runtime decides to abort the select
    */
   @Override
-  public boolean beforeNioSelect(final Object selector, final long timeoutMillis) throws Throwable {
+  public long beforeNioSelect(final Object selector, final long timeoutMillis) throws Throwable {
     return runtime.beforeNioSelect(selector, timeoutMillis);
   }
 

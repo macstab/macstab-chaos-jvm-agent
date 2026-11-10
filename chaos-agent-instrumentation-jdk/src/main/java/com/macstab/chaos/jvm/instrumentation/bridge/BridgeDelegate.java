@@ -369,11 +369,12 @@ public interface BridgeDelegate {
    * @param selector the {@link java.nio.channels.Selector} about to block; never {@code null}
    * @param timeoutMillis the timeout parameter as passed to the overload; {@code 0} for the
    *     no-argument variant
-   * @return {@code true} to force a spurious wakeup (advice returns {@code 0}); {@code false} for
-   *     normal execution
+   * @return {@code -1} for normal execution; {@code 0} to return no ready channel at once (the
+   *     advice returns {@code 0}); a positive count of nanoseconds to stall for first, until the
+   *     selector's {@code wakeup()} or close
    * @throws Throwable if the delegate throws
    */
-  boolean beforeNioSelect(Object selector, long timeoutMillis) throws Throwable;
+  long beforeNioSelect(Object selector, long timeoutMillis) throws Throwable;
 
   /**
    * Called before a NIO channel read, write, connect, or accept operation.

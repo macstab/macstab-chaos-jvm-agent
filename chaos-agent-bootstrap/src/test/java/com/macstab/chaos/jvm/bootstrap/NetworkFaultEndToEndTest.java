@@ -107,4 +107,32 @@ class NetworkFaultEndToEndTest {
           });
     }
   }
+
+  @Nested
+  @DisplayName("a timeout() stall")
+  class TimeoutStall {
+
+    @Test
+    @DisplayName("ends on a selector wakeup or close, and on a close of the socket or channel")
+    void endsAsTheRealWaitDoes() throws Exception {
+      final ChildJvmProbe.ProbeResult result = run("stall-ends");
+
+      assertSoftly(
+          softly -> {
+            for (final String row :
+                new String[] {"selectWakeup", "selectClose", "read", "adaptorRead", "connect"}) {
+              softly.assertThat(result.longValue(row + ".millis")).as(row).isLessThan(1_500L);
+            }
+            softly.assertThat(result.value("selectWakeup.outcome")).isEqualTo("ok");
+            softly.assertThat(result.value("read.outcome")).isEqualTo("java.net.SocketException");
+            // The adaptor's stream reports the channel's asynchronous close as it is.
+            softly
+                .assertThat(result.value("adaptorRead.outcome"))
+                .isEqualTo("java.nio.channels.AsynchronousCloseException");
+            softly
+                .assertThat(result.value("connect.outcome"))
+                .isEqualTo("java.net.SocketException");
+          });
+    }
+  }
 }

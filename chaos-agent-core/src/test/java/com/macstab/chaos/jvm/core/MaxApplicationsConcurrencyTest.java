@@ -312,7 +312,7 @@ class MaxApplicationsConcurrencyTest {
                           ready.countDown();
                           go.await();
                           try {
-                            if (runtime.beforeNioSelect(selector, 5000L)) {
+                            if (runtime.beforeNioSelect(selector, 5000L) == 0L) {
                               spuriousCount.incrementAndGet();
                             }
                           } catch (Throwable t) {

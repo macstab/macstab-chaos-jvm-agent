@@ -126,7 +126,7 @@ class RuntimeInterceptionTest {
                   .effect(ChaosEffect.suppress())
                   .activationPolicy(ActivationPolicy.always())
                   .build())) {
-        assertThat(runtime.beforeNioSelect(null, 1000L)).isTrue();
+        assertThat(runtime.beforeNioSelect(null, 1000L)).isZero();
       }
     }
 
@@ -134,7 +134,7 @@ class RuntimeInterceptionTest {
     @DisplayName("no scenario — returns false (no spurious wakeup)")
     void noScenarioReturnsFalse() throws Throwable {
       try (ChaosRuntime runtime = new ChaosRuntime()) {
-        assertThat(runtime.beforeNioSelect(null, 1000L)).isFalse();
+        assertThat(runtime.beforeNioSelect(null, 1000L)).isEqualTo(NetworkDispatch.SELECT_PROCEEDS);
       }
     }
 
@@ -151,9 +151,9 @@ class RuntimeInterceptionTest {
                   .activationPolicy(ActivationPolicy.always())
                   .build())) {
         final long start = System.nanoTime();
-        final boolean result = runtime.beforeNioSelect(null, 1000L);
+        final long result = runtime.beforeNioSelect(null, 1000L);
         final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-        assertThat(result).isFalse();
+        assertThat(result).isEqualTo(NetworkDispatch.SELECT_PROCEEDS);
         assertThat(elapsedMs)
             .as("delay effect should add the whole configured %dms", DELAY_MS)
             .isGreaterThanOrEqualTo(DELAY_MS);

@@ -464,6 +464,21 @@ final class FailureFactory {
   }
 
   /**
+   * The failure of a read or connect whose socket or channel another thread closed while it waited:
+   * {@code SocketException("Socket closed")} for a socket, the {@link
+   * java.nio.channels.AsynchronousCloseException} of a channel (its adaptor translates it).
+   *
+   * @param endpoint the socket implementation, socket or channel
+   * @return the failure, trimmed to the call site
+   */
+  static Throwable closedWhileWaiting(final @Nullable Object endpoint) {
+    return atCallSite(
+        endpoint instanceof java.nio.channels.Channel
+            ? new java.nio.channels.AsynchronousCloseException()
+            : new java.net.SocketException("Socket closed"));
+  }
+
+  /**
    * The failure of a DNS answer a family filter left without an address: the lookup fails as one
    * for a name with no address of that family does.
    *

@@ -535,28 +535,77 @@ class NetworkDispatchTest {
     @Test
     @DisplayName("a spurious wakeup returns from select at once")
     void spuriousWakeup() throws Throwable {
-      assertThat(runtime.beforeNioSelect(this, 0L)).isFalse();
+      assertThat(runtime.beforeNioSelect(this, 0L)).isEqualTo(NetworkDispatch.SELECT_PROCEEDS);
       activate(
           "wakeup",
           ChaosSelector.nio(Set.of(OperationType.NIO_SELECTOR_SELECT)),
           ChaosEffect.spuriousWakeup());
 
-      assertThat(runtime.beforeNioSelect(null, 0L)).isTrue();
+      assertThat(runtime.beforeNioSelect(null, 0L)).isZero();
     }
 
     @Test
-    @DisplayName("a select timeout waits out the select's own timeout and reports no channel")
+    @DisplayName("a select timeout asks the bridge to stall for the select's own timeout")
     void selectTimeout() throws Throwable {
       activate(
           "stall",
           ChaosSelector.nio(Set.of(OperationType.NIO_SELECTOR_SELECT)),
           ChaosEffect.timeout());
 
-      final boolean[] woken = new boolean[1];
-      final Duration elapsed = timed(() -> woken[0] = runtime.beforeNioSelect(this, 60L));
+      assertThat(runtime.beforeNioSelect(this, 60L))
+          .isEqualTo(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(60L));
+      // select() and selectNow() have no timeout of their own: nothing stalls.
+      assertThat(runtime.beforeNioSelect(this, 0L)).isEqualTo(NetworkDispatch.SELECT_PROCEEDS);
+    }
 
-      assertThat(woken[0]).isTrue();
-      assertThat(elapsed).isGreaterThanOrEqualTo(Duration.ofMillis(60));
+    @Test
+    @DisplayName(
+        "a read or connect timeout ends early, failing as closed, when the endpoint closes")
+    void stallEndsOnClose() throws Throwable {
+      activate(
+          "stall",
+          ChaosSelector.network(Set.of(OperationType.SOCKET_READ, OperationType.SOCKET_CONNECT)),
+          ChaosEffect.timeout());
+      final Socket reading = new Socket();
+      final Socket connecting = new Socket();
+      final java.nio.channels.SocketChannel channel = java.nio.channels.SocketChannel.open();
+      final Thread closer =
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    try {
+                      Thread.sleep(100L);
+                      reading.close();
+                      connecting.close();
+                      channel.close();
+                    } catch (final Exception ignored) {
+                      // the stalls below then time out and fail the test
+                    }
+                  });
+
+      final Duration read =
+          timed(
+              () ->
+                  assertThatThrownBy(() -> runtime.beforeSocketRead(reading, 8, null, 0, 5_000))
+                      .isInstanceOf(SocketException.class)
+                      .isNotInstanceOf(SocketTimeoutException.class));
+      final Duration connect =
+          timed(
+              () ->
+                  assertThatThrownBy(
+                          () ->
+                              runtime.beforeSocketConnect(
+                                  connecting,
+                                  new InetSocketAddress(InetAddress.getLoopbackAddress(), 9),
+                                  5_000))
+                      .isInstanceOf(SocketException.class));
+      assertThatThrownBy(() -> runtime.beforeSocketRead(channel, 8, null, 0, 5_000))
+          .isInstanceOf(java.nio.channels.AsynchronousCloseException.class);
+      closer.join();
+
+      assertThat(read).isLessThan(Duration.ofSeconds(2));
+      assertThat(connect).isLessThan(Duration.ofSeconds(2));
+      assertThat(NetworkDispatch.EndpointState.closed(new Object())).isFalse();
     }
   }
 

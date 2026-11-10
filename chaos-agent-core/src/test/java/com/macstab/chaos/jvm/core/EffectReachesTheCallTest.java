@@ -437,7 +437,7 @@ class EffectReachesTheCallTest {
     // NIO
     INVOKERS.put(
         OperationType.NIO_SELECTOR_SELECT,
-        runtime -> "wake up " + runtime.beforeNioSelect(null, TIMEOUT_MILLIS));
+        runtime -> "wake up " + (runtime.beforeNioSelect(null, TIMEOUT_MILLIS) >= 0L));
     INVOKERS.put(OperationType.NIO_CHANNEL_READ, runtime -> channelOp(runtime, "NIO_CHANNEL_READ"));
     INVOKERS.put(
         OperationType.NIO_CHANNEL_CONNECT, runtime -> channelOp(runtime, "NIO_CHANNEL_CONNECT"));

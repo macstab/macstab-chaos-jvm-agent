@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.bootstrap;
 
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
@@ -34,6 +35,7 @@ public final class NetworkFaultProbeMain {
       case "close-reject" -> closeReject();
       case "connect-reject" -> connectReject();
       case "handshake-reject" -> handshakeReject();
+      case "stall-ends" -> stallEnds();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
   }
@@ -210,6 +212,77 @@ public final class NetworkFaultProbeMain {
         RealCallRows.during(
             "engine", handshake, ChaosEffect.reject("chaos handshake"), engine::beginHandshake));
     System.out.println("engine.outboundDone=" + engine.isOutboundDone());
+  }
+
+  // ── a timeout() stall ended by a wakeup or a close ────────────────────────
+
+  /**
+   * A {@code timeout()} stall of a 3 s select, socket read, adaptor read and connect, each ended
+   * 200 ms in by another thread: a {@code wakeup()} or {@code close()} of the selector, a close of
+   * the socket or channel. Prints {@code <row>.millis} (how long the call took) and {@code
+   * <row>.outcome} (what it returned or threw).
+   */
+  private static void stallEnds() throws Exception {
+    final ChaosSelector select = ChaosSelector.nio(Set.of(OperationType.NIO_SELECTOR_SELECT));
+    try (java.nio.channels.Selector selector = java.nio.channels.Selector.open()) {
+      stall("selectWakeup", select, () -> selector.select(3_000L), selector::wakeup);
+    }
+    final java.nio.channels.Selector closing = java.nio.channels.Selector.open();
+    stall("selectClose", select, () -> closing.select(3_000L), closing::close);
+
+    final ChaosSelector read = ChaosSelector.network(Set.of(OperationType.SOCKET_READ));
+    try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+      final Socket client = new Socket(InetAddress.getLoopbackAddress(), server.getLocalPort());
+      try (Socket peer = server.accept()) {
+        client.setSoTimeout(3_000);
+        stall("read", read, () -> client.getInputStream().read(), client::close);
+      }
+    }
+    try (ServerSocketChannel server = loopbackServer()) {
+      final SocketChannel client = SocketChannel.open(server.getLocalAddress());
+      try (SocketChannel peer = server.accept()) {
+        client.socket().setSoTimeout(3_000);
+        stall("adaptorRead", read, () -> client.socket().getInputStream().read(), client::close);
+      }
+    }
+    try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+      final Socket connecting = new Socket();
+      stall(
+          "connect",
+          ChaosSelector.network(Set.of(OperationType.SOCKET_CONNECT)),
+          () -> connecting.connect(server.getLocalSocketAddress(), 3_000),
+          connecting::close);
+    }
+  }
+
+  private static void stall(
+      final String row,
+      final ChaosSelector selector,
+      final RealCallRows.Call call,
+      final RealCallRows.Call interruption)
+      throws Exception {
+    // Active (and its hooks woven) before the other thread starts: the wakeup or close comes
+    // while the call waits.
+    try (ChaosActivationHandle timeout =
+        RealCallRows.activate(row, selector, ChaosEffect.timeout())) {
+      final Thread ender =
+          Thread.ofPlatform()
+              .daemon()
+              .start(
+                  () -> {
+                    try {
+                      Thread.sleep(200L);
+                      interruption.run();
+                    } catch (final Exception failed) {
+                      System.out.println(row + ".ender=" + failed);
+                    }
+                  });
+      final long start = System.nanoTime();
+      final String outcome = RealCallRows.outcome(call);
+      System.out.println(row + ".millis=" + (System.nanoTime() - start) / 1_000_000L);
+      System.out.println(row + ".outcome=" + outcome);
+      ender.join();
+    }
   }
 
   private static ServerSocketChannel loopbackServer() throws IOException {

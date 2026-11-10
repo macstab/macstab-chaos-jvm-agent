@@ -778,10 +778,11 @@ public final class ChaosRuntime implements ChaosControlPlane {
    *
    * @param selector the NIO Selector
    * @param timeoutMillis the select timeout
-   * @return {@code true} if the select should proceed
+   * @return {@link NetworkDispatch#SELECT_PROCEEDS}, {@code 0} for no ready channel at once, or the
+   *     nanoseconds to stall for first
    * @throws Throwable if a chaos effect injects an exception
    */
-  public boolean beforeNioSelect(final Object selector, final long timeoutMillis) throws Throwable {
+  public long beforeNioSelect(final Object selector, final long timeoutMillis) throws Throwable {
     return networkDispatch.beforeNioSelect(selector, timeoutMillis);
   }
 
