@@ -27,7 +27,6 @@ final class FinalizerBacklogStressor implements ManagedStressor {
   private final int createdCount;
   private final AtomicBoolean stopped = new AtomicBoolean(false);
 
-  @SuppressWarnings({"deprecation", "removal"})
   FinalizerBacklogStressor(final ChaosEffect.FinalizerBacklogEffect effect) {
     final long delayMs = effect.finalizerDelay().toMillis();
 

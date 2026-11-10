@@ -83,7 +83,7 @@ final class ObservabilityBus {
    *
    * @param metricsSink the sink to which metric increments are forwarded; must not be {@code null}
    */
-  @SuppressWarnings("removal")
+  @SuppressWarnings("removal") // the deprecated sink is still fed until it is removed
   ObservabilityBus(final ChaosMetricsSink metricsSink) {
     this.metricsSink = metricsSink;
     listeners.add(this::log);
@@ -404,7 +404,7 @@ final class ObservabilityBus {
    * @param tags dimensional labels to attach to the counter; may be empty but must not be {@code
    *     null}
    */
-  @SuppressWarnings("removal")
+  @SuppressWarnings("removal") // the deprecated sink is still fed until it is removed
   void incrementMetric(final String name, final Map<String, String> tags) {
     try {
       metricsSink.increment(name, tags);

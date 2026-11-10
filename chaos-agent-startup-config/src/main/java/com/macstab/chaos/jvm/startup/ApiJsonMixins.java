@@ -157,7 +157,7 @@ final class ApiJsonMixins {
     }
   }
 
-  @SuppressWarnings("UnusedVariable")
+  @SuppressWarnings("UnusedVariable") // the parameters only name the JSON properties Jackson binds
   private abstract static class NamePatternMixin {
     @JsonCreator
     NamePatternMixin(
@@ -168,7 +168,7 @@ final class ApiJsonMixins {
   // The private JSON constructors of the records, which apply the documented defaults to omitted
   // fields (a primitive component would read an omitted field as false or 0).
 
-  @SuppressWarnings("UnusedVariable")
+  @SuppressWarnings("UnusedVariable") // the parameters only name the JSON properties Jackson binds
   private abstract static class ExceptionInjectionMixin {
     @JsonCreator
     ExceptionInjectionMixin(
@@ -177,7 +177,7 @@ final class ApiJsonMixins {
         @JsonProperty("withStackTrace") final Boolean withStackTrace) {}
   }
 
-  @SuppressWarnings("UnusedVariable")
+  @SuppressWarnings("UnusedVariable") // the parameters only name the JSON properties Jackson binds
   private abstract static class MetaspacePressureMixin {
     @JsonCreator
     MetaspacePressureMixin(
@@ -186,7 +186,7 @@ final class ApiJsonMixins {
         @JsonProperty("retain") final Boolean retain) {}
   }
 
-  @SuppressWarnings("UnusedVariable")
+  @SuppressWarnings("UnusedVariable") // the parameters only name the JSON properties Jackson binds
   private abstract static class GcPressureMixin {
     @JsonCreator
     GcPressureMixin(
@@ -196,7 +196,7 @@ final class ApiJsonMixins {
         @JsonProperty("duration") final Duration duration) {}
   }
 
-  @SuppressWarnings("UnusedVariable")
+  @SuppressWarnings("UnusedVariable") // the parameters only name the JSON properties Jackson binds
   private abstract static class DeadlockMixin {
     @JsonCreator
     DeadlockMixin(
@@ -204,7 +204,7 @@ final class ApiJsonMixins {
         @JsonProperty("acquisitionDelay") final Duration acquisitionDelay) {}
   }
 
-  @SuppressWarnings("UnusedVariable")
+  @SuppressWarnings("UnusedVariable") // the parameters only name the JSON properties Jackson binds
   private abstract static class ObservabilityMixin {
     @JsonCreator
     ObservabilityMixin(

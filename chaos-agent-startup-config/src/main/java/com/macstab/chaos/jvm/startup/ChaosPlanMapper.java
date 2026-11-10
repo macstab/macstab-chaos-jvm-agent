@@ -178,7 +178,7 @@ public final class ChaosPlanMapper {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings("unchecked") // a problem handler's replacement is of the handled type
     public T deserialize(final JsonParser parser, final DeserializationContext context)
         throws IOException {
       if (!parser.hasToken(JsonToken.VALUE_STRING)) {

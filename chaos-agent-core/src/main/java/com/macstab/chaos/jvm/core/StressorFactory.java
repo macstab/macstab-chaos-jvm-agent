@@ -45,7 +45,6 @@ class StressorFactory {
    * @param instrumentationSupplier supplier for the JVM instrumentation handle; may return {@link
    *     Optional#empty()} when running outside an agent context
    */
-  @SuppressWarnings("unchecked")
   StressorFactory(final Supplier<Optional<Instrumentation>> instrumentationSupplier) {
     registry = new LinkedHashMap<>();
     register(ChaosEffect.HeapPressureEffect.class, (e, onEnd) -> new HeapPressureStressor(e));
@@ -81,7 +80,7 @@ class StressorFactory {
         (e, onEnd) -> new VirtualThreadCarrierPinningStressor(e, onEnd));
   }
 
-  @SuppressWarnings("unchecked")
+  @SuppressWarnings("unchecked") // the map is keyed by the exact effect type the factory takes
   private <E extends ChaosEffect> void register(final Class<E> type, final Factory<E> factory) {
     registry.put(type, (Factory<ChaosEffect>) factory);
   }

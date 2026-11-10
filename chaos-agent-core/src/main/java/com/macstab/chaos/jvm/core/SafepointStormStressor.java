@@ -119,7 +119,8 @@ final class SafepointStormStressor implements ManagedStressor {
         inst.retransformClasses(cls);
         retransformed++;
       } catch (final Exception exception) {
-        // Some system classes cannot be retransformed; skip silently.
+        // Some system classes cannot be retransformed: skip the class, with a trace.
+        LOGGER.fine(() -> "SafepointStormStressor skipped " + cls.getName() + ": " + exception);
       }
     }
   }

@@ -573,10 +573,6 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     this.instrumentation = Optional.of(Objects.requireNonNull(inst, "inst"));
   }
 
-  Optional<Instrumentation> instrumentation() {
-    return instrumentation;
-  }
-
   DefaultChaosActivationHandle activateInSession(
       final DefaultChaosSession session, final ChaosScenario scenario) {
     return registerScenario(scenario, "session:" + session.id(), session.id());

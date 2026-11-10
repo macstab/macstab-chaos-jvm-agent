@@ -3,7 +3,6 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
@@ -82,7 +81,6 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
       final Consumer<String> onEnd) {
     final long pinNanos = ManagedStressor.nanos(effect.pinDuration());
     final int count = effect.pinnedThreadCount();
-    final CountDownLatch ready = new CountDownLatch(count);
     final List<Thread> threads = new ArrayList<>(count);
     for (int i = 0; i < count; i++) {
       final String name = "chaos-carrier-pin-" + i;
@@ -94,7 +92,6 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
               .unstarted(
                   AgentThreads.owned(
                       () -> {
-                        ready.countDown();
                         body.run();
                         LOGGER.fine(() -> "chaos carrier-pin thread terminated: " + name);
                       },

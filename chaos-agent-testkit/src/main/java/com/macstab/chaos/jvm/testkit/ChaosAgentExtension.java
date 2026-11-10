@@ -206,7 +206,7 @@ public final class ChaosAgentExtension
    * @param context the JUnit extension context for the test that just ran
    */
   @Override
-  @SuppressWarnings("unchecked")
+  @SuppressWarnings("unchecked") // the store holds the handle list beforeTestExecution put there
   public void afterTestExecution(final ExtensionContext context) {
     WithChaosSupport.close(
         (List<ChaosActivationHandle>)
