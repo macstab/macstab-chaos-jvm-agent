@@ -60,8 +60,9 @@ class SlaValidationTest {
   /**
    * How far the P99 under the probabilistic delay may rise above the baseline. The three calls of a
    * request run in parallel, so the delay adds at most 80 ms to it; the rest is room for a slow
-   * runner's GC and scheduling pauses. A delay applied outside its 20–80 ms range, or more than
-   * once per call, still exceeds it.
+   * runner's GC and scheduling pauses. The budget is that wide for shared CI runners, so only a
+   * gross error exceeds it, such as a delay of seconds (a unit mix-up); a delay a little outside
+   * its 20–80 ms range, or applied twice per call, stays within it.
    */
   private static final Duration SLA_BUDGET = Duration.ofSeconds(2);
 

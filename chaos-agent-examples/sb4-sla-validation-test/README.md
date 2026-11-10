@@ -15,8 +15,9 @@ tests run `GET /fanout` 30 times per measurement:
   `HTTP_CLIENT_SEND` by 120 ms, and asserts that each step raises the P99 by at least 96 ms per
   scenario over the baseline median.
 
-This pattern encodes the SLA directly in the test suite: if latency regresses (e.g. a developer
-accidentally makes the fan-out sequential), the budget is exceeded under chaos.
+This pattern encodes the SLA directly in the test suite. The 2 s budget here leaves room for a
+shared CI runner, so it only catches a gross regression; size the budget to your real SLA, and a
+regression such as a fan-out that became sequential then exceeds it under chaos.
 
 ## Application components
 
