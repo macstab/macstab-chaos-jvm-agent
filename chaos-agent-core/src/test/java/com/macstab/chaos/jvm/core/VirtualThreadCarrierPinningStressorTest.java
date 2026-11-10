@@ -104,4 +104,30 @@ class VirtualThreadCarrierPinningStressorTest {
       }
     }
   }
+
+  @Nested
+  @DisplayName("Spin-wait holding (JDK 24+)")
+  class SpinWait {
+
+    @Test
+    @DisplayName("a spin thread ends on interrupt alone, as after the rollback of a partial start")
+    void spinEndsOnInterrupt() throws InterruptedException {
+      final VirtualThreadCarrierPinningStressor stressor =
+          new VirtualThreadCarrierPinningStressor(
+              new ChaosEffect.VirtualThreadCarrierPinningEffect(1, Duration.ofSeconds(10)), false);
+      // The rollback of a failed start interrupts the threads it started without setting the stop
+      // flag: a spin that ignores the interrupt keeps its carrier and a CPU until the JVM exits.
+      final Thread spinner =
+          new Thread(() -> stressor.occupyWithSpin(Duration.ofSeconds(10).toNanos()));
+      try {
+        spinner.start();
+        spinner.interrupt();
+        spinner.join(TimeUnit.SECONDS.toMillis(3));
+        assertThat(spinner.isAlive()).isFalse();
+      } finally {
+        stressor.close();
+        spinner.join(TimeUnit.SECONDS.toMillis(3));
+      }
+    }
+  }
 }

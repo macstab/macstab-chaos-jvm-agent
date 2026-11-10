@@ -176,11 +176,16 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
     }
   }
 
-  /** Holds the carrier by never blocking; checks the stop flag between spin iterations. */
-  private void occupyWithSpin(final long pinNanos) {
-    while (!stopped.get()) {
+  /**
+   * Holds the carrier by never blocking; checks the stop flag and the interrupt between spin
+   * iterations. The interrupt alone ends it: the rollback of a failed start interrupts the threads
+   * it started without setting the stop flag.
+   */
+  void occupyWithSpin(final long pinNanos) {
+    final Thread self = Thread.currentThread();
+    while (!stopped.get() && !self.isInterrupted()) {
       final long start = System.nanoTime();
-      while (!stopped.get() && System.nanoTime() - start < pinNanos) {
+      while (!stopped.get() && !self.isInterrupted() && System.nanoTime() - start < pinNanos) {
         Thread.onSpinWait();
       }
     }
