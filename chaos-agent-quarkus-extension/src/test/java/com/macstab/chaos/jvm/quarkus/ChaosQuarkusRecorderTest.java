@@ -81,17 +81,18 @@ class ChaosQuarkusRecorderTest {
       final Logger logger = Logger.getLogger(ChaosQuarkusRecorder.class.getName());
       logger.addHandler(handler);
       try {
-        final ChaosQuarkusRecorder recorder =
-            new ChaosQuarkusRecorder(
-                () -> {
-                  installs.incrementAndGet();
-                  if (failure instanceof RuntimeException runtime) {
-                    throw runtime;
-                  }
-                  throw (Error) failure;
-                });
+        final Runnable failingInstall =
+            () -> {
+              installs.incrementAndGet();
+              if (failure instanceof RuntimeException runtime) {
+                throw runtime;
+              }
+              throw (Error) failure;
+            };
 
-        assertThat(recorder.installAgent().getValue()).as("%s", failure).isFalse();
+        assertThat(ChaosQuarkusRecorder.installAgent(failingInstall).getValue())
+            .as("%s", failure)
+            .isFalse();
       } finally {
         logger.removeHandler(handler);
       }

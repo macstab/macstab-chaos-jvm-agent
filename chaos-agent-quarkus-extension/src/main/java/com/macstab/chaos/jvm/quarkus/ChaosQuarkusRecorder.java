@@ -39,16 +39,11 @@ public class ChaosQuarkusRecorder {
 
   private static final Logger LOGGER = Logger.getLogger(ChaosQuarkusRecorder.class.getName());
 
-  private final Runnable install;
-
-  /** Default constructor invoked by the Quarkus build step. */
-  public ChaosQuarkusRecorder() {
-    this(ChaosPlatform::installLocally);
-  }
-
-  ChaosQuarkusRecorder(final Runnable install) {
-    this.install = install;
-  }
+  /**
+   * Default constructor invoked by the Quarkus build step. A recorder has exactly this one
+   * constructor: Quarkus refuses a recorder whose constructor it cannot determine.
+   */
+  public ChaosQuarkusRecorder() {}
 
   /**
    * Installs the chaos agent in the current JVM if {@link #ENABLED_PROPERTY} resolves to {@code
@@ -62,6 +57,11 @@ public class ChaosQuarkusRecorder {
    *     — production traffic must not fail to boot because of an optional observability add-on.
    */
   public RuntimeValue<Boolean> installAgent() {
+    return installAgent(ChaosPlatform::installLocally);
+  }
+
+  /** {@link #installAgent()} with {@code install} attaching the agent. */
+  static RuntimeValue<Boolean> installAgent(final Runnable install) {
     if (!chaosEnabled()) {
       return new RuntimeValue<>(Boolean.FALSE);
     }
