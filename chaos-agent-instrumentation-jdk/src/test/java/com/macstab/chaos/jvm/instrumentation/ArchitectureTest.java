@@ -106,8 +106,10 @@ class ArchitectureTest {
       }
       for (final Dependency dependency : advice.getDirectDependenciesFromSelf()) {
         final JavaClass target = dependency.getTargetClass().getBaseComponentType();
+        // Advice reaches only the classes of its own nest (the holder and its nested classes),
+        // not the advice of another holder.
         if (target.getName().startsWith(AGENT)
-            && !isAdvice(target)
+            && !(isAdvice(target) && outermost(target).equals(outermost(advice)))
             && !bridge.contains(target.getName())) {
           violations.add(dependency.getDescription());
         }
@@ -227,6 +229,13 @@ class ArchitectureTest {
         && type.getName()
             .substring(type.getName().lastIndexOf('.') + 1)
             .matches("\\w*Advice(\\$.*)?");
+  }
+
+  /** The name of the top-level class that encloses {@code type}, or of {@code type} itself. */
+  private static String outermost(final JavaClass type) {
+    final String name = type.getName();
+    final int nested = name.indexOf('$');
+    return nested < 0 ? name : name.substring(0, nested);
   }
 
   private static boolean isDomainDispatch(final JavaClass type) {
