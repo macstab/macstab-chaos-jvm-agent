@@ -219,6 +219,32 @@ class JfrChaosEventSinkTest {
         .containsExactly(APPLIED);
   }
 
+  @Test
+  @DisplayName("with the events disabled nothing is committed, and an application still counts")
+  void allDisabled() throws Exception {
+    final List<RecordedEvent> events;
+    try (JfrChaosEventSink sink = new JfrChaosEventSink(runtime.diagnostics());
+        Recording recording = new Recording()) {
+      recording.disable(LIFECYCLE);
+      recording.disable(APPLIED);
+      recording.start();
+      sink.onEvent(event(ChaosEvent.Type.STARTED, "s1", Map.of("scope", "jvm")));
+      sink.onEvent(event(ChaosEvent.Type.APPLIED, "s1", Map.of("operation", "SOCKET_READ")));
+      sink.onEvent(event(ChaosEvent.Type.STOPPED, "s1", Map.of()));
+      recording.stop();
+      events = read(recording);
+
+      // The snapshot's total counts the application nobody recorded.
+      awaitSnapshot(snapshot -> snapshot.getLong("totalAppliedCount") == 1);
+    }
+
+    assertThat(events)
+        .noneMatch(
+            e ->
+                e.getEventType().getName().equals(LIFECYCLE)
+                    || e.getEventType().getName().equals(APPLIED));
+  }
+
   /** Streams periodic snapshots until one that {@code wanted} accepts arrives. */
   private static void awaitSnapshot(final java.util.function.Predicate<RecordedEvent> wanted)
       throws InterruptedException {
