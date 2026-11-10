@@ -77,6 +77,11 @@ final class ExecutorAdvice {
     }
   }
 
+  /**
+   * {@code beforeExecute(Thread, Runnable)} of {@code ThreadPoolExecutor} and of every subclass
+   * that overrides it (Spring's executors do, without calling {@code super}): one {@code
+   * EXECUTOR_WORKER_RUN} per task ({@link BootstrapDispatcher#SCOPE_WORKER_RUN}).
+   */
   static final class BeforeExecuteAdvice {
     @Advice.OnMethodEnter
     static void enter(
@@ -84,7 +89,20 @@ final class ExecutorAdvice {
         @Advice.Argument(0) final Thread worker,
         @Advice.Argument(1) final Runnable task)
         throws Throwable {
-      BootstrapDispatcher.beforeWorkerRun(executor, worker, task);
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_WORKER_RUN)) {
+        return;
+      }
+      try {
+        BootstrapDispatcher.beforeWorkerRun(executor, worker, task);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_WORKER_RUN);
+        throw throwable;
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_WORKER_RUN);
     }
   }
 

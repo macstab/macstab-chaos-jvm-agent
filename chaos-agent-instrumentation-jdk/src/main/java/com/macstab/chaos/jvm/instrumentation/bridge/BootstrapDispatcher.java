@@ -247,8 +247,15 @@ public final class BootstrapDispatcher {
    */
   public static final int SCOPE_JDBC_INTERNAL = 32;
 
+  /**
+   * Scope of a {@code ThreadPoolExecutor}'s {@code beforeExecute(Thread, Runnable)}, the JDK's and
+   * every subclass's own: one {@code EXECUTOR_WORKER_RUN} per task, also when an override calls
+   * {@code super}.
+   */
+  public static final int SCOPE_WORKER_RUN = 33;
+
   /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
-  static final int SCOPE_COUNT = 33;
+  static final int SCOPE_COUNT = 34;
 
   /**
    * Enters a call-depth scope on the current thread.

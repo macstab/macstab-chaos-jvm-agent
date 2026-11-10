@@ -95,7 +95,26 @@ final class ConcurrencyHooks {
 
   /** ThreadPoolExecutor execute/beforeExecute/shutdown/shutdownNow/awaitTermination. */
   static AgentBuilder applyThreadPoolExecutorTransformations(final AgentBuilder builder) {
+    final net.bytebuddy.matcher.ElementMatcher.Junction<
+            net.bytebuddy.description.method.MethodDescription>
+        beforeExecute =
+            ElementMatchers.named("beforeExecute")
+                .and(ElementMatchers.takesArguments(Thread.class, Runnable.class));
     return builder
+        // A subclass that overrides beforeExecute (Spring's executors, without calling super):
+        // the JDK method never runs for its tasks. Matched by the method it declares first, so
+        // the superclass walk runs only for those few classes.
+        .type(
+            ElementMatchers.declaresMethod(beforeExecute)
+                .and(
+                    TypeMatchers.superClass(
+                        ElementMatchers.named("java.util.concurrent.ThreadPoolExecutor"))))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    advise(
+                        ExecutorAdvice.BeforeExecuteAdvice.class,
+                        beforeExecute.and(ElementMatchers.not(ElementMatchers.isAbstract())))))
         .type(ElementMatchers.named("java.util.concurrent.ThreadPoolExecutor"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
