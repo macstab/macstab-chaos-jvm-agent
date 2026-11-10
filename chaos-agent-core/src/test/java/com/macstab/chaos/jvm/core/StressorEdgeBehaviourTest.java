@@ -977,6 +977,12 @@ class StressorEdgeBehaviourTest {
       }
     }
 
+    /**
+     * Fails only on JDK 21 to 23, where a thread keeps the access-control context of the frames
+     * that made it; JDK 24 dropped that context, so there it passes either way. {@link
+     * #callerFramesKeepTheLoaderOfAPlainThread} proves that the frame of the throwaway loader's
+     * class does carry that loader into the context of a thread made outside {@code doPrivileged}.
+     */
     @Test
     @DisplayName(
         "the event delivery thread of an asynchronous listener keeps no loader through the"
@@ -1002,6 +1008,63 @@ class StressorEdgeBehaviourTest {
       } finally {
         bus.close();
       }
+    }
+
+    /**
+     * The control of the caller-frame tests: the copy of {@link LoaderFrame} that the throwaway
+     * loader defines has a protection domain that references that loader, so a thread made with
+     * {@code new Thread} from its frame keeps the loader through the access-control context it
+     * inherits, and through nothing else: the loader is collected once the thread has ended.
+     */
+    @Test
+    @DisplayName(
+        "a thread made with new Thread from a frame of the throwaway loader's class keeps that"
+            + " loader until it ends (JDK 21 to 23), so the caller-frame tests can fail")
+    void callerFramesKeepTheLoaderOfAPlainThread() throws Exception {
+      org.junit.jupiter.api.Assumptions.assumeTrue(
+          Runtime.version().feature() < 24,
+          "JDK 24 dropped the access-control context a thread inherits");
+      // Arrange
+      ClassLoader application = new ThrowawayLoader();
+      final java.lang.ref.WeakReference<ClassLoader> loader =
+          new java.lang.ref.WeakReference<>(application);
+      final java.util.concurrent.CountDownLatch release =
+          new java.util.concurrent.CountDownLatch(1);
+      final AtomicReference<@Nullable Thread> plain = new AtomicReference<>();
+      // Act: an ordinary thread, made from a frame of a class the throwaway loader defined
+      LoaderFrame.in(application)
+          .accept(
+              () -> {
+                final Thread thread = new Thread(() -> awaitQuietly(release), "edge-acc-plain");
+                thread.setDaemon(true);
+                thread.start();
+                plain.set(thread);
+              });
+      application = null;
+      final boolean keptWhileRunning;
+      try {
+        keptWhileRunning = survives(loader);
+      } finally {
+        release.countDown();
+        final Thread thread = plain.getAndSet(null);
+        if (thread != null) {
+          thread.join(5_000L);
+        }
+      }
+
+      // Assert
+      assertThat(keptWhileRunning).as("the running thread keeps the loader").isTrue();
+      assertThat(collected(loader)).as("the loader is collected once the thread ended").isTrue();
+    }
+
+    /** Whether {@code loader} survives five full GCs. */
+    private static boolean survives(final java.lang.ref.WeakReference<ClassLoader> loader)
+        throws InterruptedException {
+      for (int gc = 0; gc < 5 && loader.get() != null; gc++) {
+        System.gc();
+        Thread.sleep(20);
+      }
+      return loader.get() != null;
     }
 
     private static void awaitQuietly(final java.util.concurrent.CountDownLatch release) {
