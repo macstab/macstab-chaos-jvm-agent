@@ -37,11 +37,12 @@ final class HttpClientAdvice {
                 typing = net.bytebuddy.implementation.bytecode.assign.Assigner.Typing.DYNAMIC)
             Object request)
         throws Throwable {
-      // Inside a session, a request to an internal host carries its id to the next service.
-      if (request instanceof java.net.http.HttpRequest httpRequest
-          && httpRequest.headers().firstValue(BootstrapDispatcher.SESSION_HEADER).isEmpty()) {
+      // Inside a session, a request to an internal host carries its id to the next service. The
+      // session first: outside one (nearly every call) the headers are never read.
+      if (request instanceof java.net.http.HttpRequest httpRequest) {
         final String session = BootstrapDispatcher.sessionHeaderFor(httpRequest.uri().getHost());
-        if (session != null) {
+        if (session != null
+            && httpRequest.headers().firstValue(BootstrapDispatcher.SESSION_HEADER).isEmpty()) {
           try {
             request =
                 java.net.http.HttpRequest.newBuilder(httpRequest, BootstrapDispatcher.ALL_HEADERS)
@@ -89,11 +90,12 @@ final class HttpClientAdvice {
                 readOnly = false,
                 typing = net.bytebuddy.implementation.bytecode.assign.Assigner.Typing.DYNAMIC)
             Object request) {
-      // Inside a session, a request to an internal host carries its id to the next service.
-      if (request instanceof java.net.http.HttpRequest httpRequest
-          && httpRequest.headers().firstValue(BootstrapDispatcher.SESSION_HEADER).isEmpty()) {
+      // Inside a session, a request to an internal host carries its id to the next service. The
+      // session first: outside one (nearly every call) the headers are never read.
+      if (request instanceof java.net.http.HttpRequest httpRequest) {
         final String session = BootstrapDispatcher.sessionHeaderFor(httpRequest.uri().getHost());
-        if (session != null) {
+        if (session != null
+            && httpRequest.headers().firstValue(BootstrapDispatcher.SESSION_HEADER).isEmpty()) {
           try {
             request =
                 java.net.http.HttpRequest.newBuilder(httpRequest, BootstrapDispatcher.ALL_HEADERS)
