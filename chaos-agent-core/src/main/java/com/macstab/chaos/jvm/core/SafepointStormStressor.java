@@ -52,7 +52,8 @@ final class SafepointStormStressor implements ManagedStressor {
       final ChaosEffect.SafepointStormEffect effect,
       final Optional<Instrumentation> instrumentation,
       final Consumer<String> onEnd) {
-    final long intervalMillis = effect.gcInterval().toMillis();
+    // Slept as a Duration: one too large for milliseconds lasts until close().
+    final java.time.Duration interval = effect.gcInterval();
     final int retransformCount = effect.retransformClassCount();
 
     stormThread =
@@ -70,7 +71,7 @@ final class SafepointStormStressor implements ManagedStressor {
                   break;
                 }
                 try {
-                  Thread.sleep(intervalMillis);
+                  Thread.sleep(interval);
                 } catch (final InterruptedException interruptedException) {
                   Thread.currentThread().interrupt();
                   ManagedStressor.interrupted(onEnd, "SafepointStorm", !running.get());
@@ -82,8 +83,8 @@ final class SafepointStormStressor implements ManagedStressor {
     LOGGER.fine(
         () ->
             "[chaos-agent] SafepointStormStressor started; gcInterval="
-                + intervalMillis
-                + "ms, retransformClassCount="
+                + interval
+                + ", retransformClassCount="
                 + retransformCount);
   }
 

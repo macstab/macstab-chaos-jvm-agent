@@ -58,7 +58,8 @@ final class KeepAliveStressor implements ManagedStressor {
             () -> {
               while (running.get()) {
                 try {
-                  Thread.sleep(effect.heartbeat().toMillis());
+                  // A Duration: a heartbeat too large for milliseconds lasts until close().
+                  Thread.sleep(effect.heartbeat());
                 } catch (final InterruptedException interruptedException) {
                   Thread.currentThread().interrupt();
                   ManagedStressor.interrupted(onEnd, "KeepAlive", !running.get());

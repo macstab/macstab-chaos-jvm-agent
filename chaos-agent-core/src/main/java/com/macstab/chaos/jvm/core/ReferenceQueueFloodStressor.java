@@ -68,7 +68,8 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
       final Consumer<String> onEnd,
       final @Nullable Runnable cycle) {
     final int referenceCount = effect.referenceCount();
-    final long intervalMillis = effect.floodInterval().toMillis();
+    // Slept as a Duration: one too large for milliseconds lasts until close().
+    final java.time.Duration interval = effect.floodInterval();
     final Runnable floodCycle =
         cycle != null
             ? cycle
@@ -89,7 +90,7 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
                   break;
                 }
                 try {
-                  Thread.sleep(intervalMillis);
+                  Thread.sleep(interval);
                 } catch (final InterruptedException interruptedException) {
                   Thread.currentThread().interrupt();
                   ManagedStressor.interrupted(onEnd, "ReferenceQueueFlood", !running.get());
@@ -103,8 +104,7 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
             "[chaos-agent] ReferenceQueueFloodStressor started; referenceCount="
                 + referenceCount
                 + ", floodInterval="
-                + intervalMillis
-                + "ms");
+                + interval);
   }
 
   @Override

@@ -769,7 +769,7 @@ class StressorEdgeBehaviourTest {
         stressor.close();
         assertThat(log.messages())
             .contains(
-                "[chaos-agent] chaos finalizer-backlog stressor created 1 objects with 3 ms"
+                "[chaos-agent] chaos finalizer-backlog stressor created 1 objects with PT0.003S"
                     + " finalizer delay");
       }
     }

@@ -44,7 +44,8 @@ final class DeadlockStressor implements ManagedStressor {
    */
   DeadlockStressor(final ChaosEffect.DeadlockEffect effect, final Consumer<String> onEnd) {
     final int participantCount = effect.participantCount();
-    final long acquisitionDelayMs = effect.acquisitionDelay().toMillis();
+    // Slept as a Duration: kept below a millisecond, and lasting until close() above ~292 years.
+    final java.time.Duration acquisitionDelay = effect.acquisitionDelay();
 
     // Create one independent lock per participant.
     final ReentrantLock[] locks = new ReentrantLock[participantCount];
@@ -72,8 +73,8 @@ final class DeadlockStressor implements ManagedStressor {
                     firstLockAcquired.countDown();
                     // Wait until all participants hold their first lock, then attempt second.
                     firstLockAcquired.await();
-                    if (acquisitionDelayMs > 0) {
-                      Thread.sleep(acquisitionDelayMs);
+                    if (!acquisitionDelay.isZero()) {
+                      Thread.sleep(acquisitionDelay);
                     }
                     second.lockInterruptibly();
                     try {

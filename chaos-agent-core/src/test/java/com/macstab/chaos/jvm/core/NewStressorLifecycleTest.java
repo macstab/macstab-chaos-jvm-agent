@@ -226,7 +226,8 @@ class NewStressorLifecycleTest {
                           + " each"))
           .anyMatch(
               line ->
-                  line.startsWith("[chaos-agent] SafepointStormStressor started; gcInterval=20ms"))
+                  line.startsWith(
+                      "[chaos-agent] SafepointStormStressor started; gcInterval=PT0.02S"))
           .anyMatch(line -> line.startsWith("[chaos-agent] SafepointStormStressor stopped after "))
           .anyMatch(
               line ->
