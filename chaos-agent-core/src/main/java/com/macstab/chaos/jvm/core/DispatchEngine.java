@@ -22,6 +22,46 @@ final class DispatchEngine {
   final ScenarioRegistry registry;
 
   /**
+   * What {@link NetworkDispatch#beforeDatagram} returns for a send a scenario suppresses: drop the
+   * datagram.
+   */
+  static final int DATAGRAM_DROPPED = Integer.MIN_VALUE;
+
+  /**
+   * Tag of {@code scheduleAtFixedRate} / {@code scheduleWithFixedDelay}: a {@code SCHEDULE_SUBMIT}
+   * of a periodic task ({@code SchedulingSelector.periodicOnly}).
+   */
+  static final String SCHEDULE_SUBMIT_PERIODIC = "SCHEDULE_SUBMIT_PERIODIC";
+
+  /** Tag of {@code FileChannel.transferTo}: a read whose bytes never reach a buffer. */
+  static final String TRANSFER_TO = "FILE_IO_TRANSFER_TO";
+
+  /** Tag of {@code FileChannel.transferFrom}: a write, torn as a short count. */
+  static final String TRANSFER_FROM = "FILE_IO_TRANSFER_FROM";
+
+  /**
+   * Whether the session {@code sessionId} has a scenario of its own (ADR 0006: the domains reach
+   * the registry only through the engine).
+   *
+   * @param sessionId the session id
+   * @return {@code true} when a scenario is registered for it
+   */
+  boolean hasScenarios(final String sessionId) {
+    return registry.hasScenarios(sessionId);
+  }
+
+  /**
+   * The scenarios that select {@code operation}: the clock reads walk them for their clock skew,
+   * which bypasses {@code evaluate}.
+   *
+   * @param operation the operation
+   * @return the candidates, possibly empty
+   */
+  ScenarioController[] candidates(final OperationType operation) {
+    return registry.candidates(operation);
+  }
+
+  /**
    * Returns the session id bound to the current thread, or {@code null} if none is active.
    *
    * @return the current thread's session id, or {@code null} when no session is bound

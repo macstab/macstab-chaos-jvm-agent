@@ -37,7 +37,7 @@ public final class ClockDispatch {
     // thousands of times per second. Routing through engine.evaluate() would exhaust any activation
     // policy budget within milliseconds. Instead, iterate controllers directly: check started
     // + selector + ClockSkewEffect without touching policy accounting.
-    final ScenarioController[] candidates = engine.registry.candidates(clockType);
+    final ScenarioController[] candidates = engine.candidates(clockType);
     if (candidates.length == 0) {
       return realValue;
     }
@@ -65,7 +65,7 @@ public final class ClockDispatch {
   private java.time.Instant skewInstant(
       final java.time.Instant realInstant, final OperationType clockType) {
     // See applyClockSkew: clock reads bypass engine.evaluate() and its policy accounting.
-    final ScenarioController[] candidates = engine.registry.candidates(clockType);
+    final ScenarioController[] candidates = engine.candidates(clockType);
     if (candidates.length == 0) {
       return realInstant;
     }

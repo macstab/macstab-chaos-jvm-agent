@@ -153,7 +153,7 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
 
     @Override
     protected void compute() {
-      ChaosDispatcher.incrementDispatchDepth();
+      DispatchDepth.increment();
       try {
         local.set(holder);
         LOGGER.fine(
@@ -161,7 +161,7 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
                 "[chaos-agent] chaos thread-local-leak planted entry on "
                     + Thread.currentThread().getName());
       } finally {
-        ChaosDispatcher.decrementDispatchDepth();
+        DispatchDepth.decrement();
       }
     }
   }

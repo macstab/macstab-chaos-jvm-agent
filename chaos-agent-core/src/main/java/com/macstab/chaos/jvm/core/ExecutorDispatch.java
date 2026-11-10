@@ -48,11 +48,11 @@ public final class ExecutorDispatch {
   private static final Callable<?> NO_OP_CALLABLE = () -> null;
 
   /**
-   * The operation of a submission tag: {@link ChaosDispatcher#SCHEDULE_SUBMIT_PERIODIC} is a {@code
+   * The operation of a submission tag: {@link DispatchEngine#SCHEDULE_SUBMIT_PERIODIC} is a {@code
    * SCHEDULE_SUBMIT}.
    */
   private static OperationType submitOperation(final String operation) {
-    return ChaosDispatcher.SCHEDULE_SUBMIT_PERIODIC.equals(operation)
+    return DispatchEngine.SCHEDULE_SUBMIT_PERIODIC.equals(operation)
         ? OperationType.SCHEDULE_SUBMIT
         : OperationType.valueOf(operation);
   }
@@ -65,7 +65,7 @@ public final class ExecutorDispatch {
    * {@code ForkJoinPool} implements that interface too.
    */
   private static boolean periodic(final String operation, final @Nullable Object executor) {
-    return ChaosDispatcher.SCHEDULE_SUBMIT_PERIODIC.equals(operation)
+    return DispatchEngine.SCHEDULE_SUBMIT_PERIODIC.equals(operation)
         || (OperationType.EXECUTOR_SUBMIT.name().equals(operation)
             && executor instanceof ScheduledThreadPoolExecutor);
   }
@@ -89,7 +89,7 @@ public final class ExecutorDispatch {
     // Only a session with a registered scenario is carried: a task submitted before the session's
     // first scenario is activated stays unwrapped.
     final Runnable scoped =
-        sessionId != null && engine.registry.hasScenarios(sessionId)
+        sessionId != null && engine.hasScenarios(sessionId)
             ? engine.scopeContext.wrap(sessionId, task)
             : task;
     final OperationType indexedOp = submitOperation(operation);
@@ -155,7 +155,7 @@ public final class ExecutorDispatch {
     Objects.requireNonNull(task, "task");
     final String sessionId = engine.scopeContext.currentSessionId();
     final Callable<T> scoped =
-        sessionId != null && engine.registry.hasScenarios(sessionId)
+        sessionId != null && engine.hasScenarios(sessionId)
             ? engine.scopeContext.wrap(sessionId, task)
             : task;
     final OperationType indexedOp = submitOperation(operation);
@@ -411,11 +411,11 @@ public final class ExecutorDispatch {
   private static boolean completeExceptionallyOutsideDispatch(
       final CompletableFuture<?> future, final Throwable failure) {
     COMPLETING.set(future);
-    ChaosDispatcher.decrementDispatchDepth();
+    DispatchDepth.decrement();
     try {
       return future.completeExceptionally(failure);
     } finally {
-      ChaosDispatcher.incrementDispatchDepth();
+      DispatchDepth.increment();
       COMPLETING.remove();
     }
   }

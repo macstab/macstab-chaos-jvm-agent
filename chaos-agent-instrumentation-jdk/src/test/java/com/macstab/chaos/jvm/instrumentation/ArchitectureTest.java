@@ -190,6 +190,31 @@ class ArchitectureTest {
 
   @Test
   @DisplayName(
+      "the domain dispatchers reach the composition root and the registry only through the engine")
+  void domainDispatchersDependOnlyOnTheEngine() {
+    final Set<String> forbidden =
+        Set.of(
+            "com.macstab.chaos.jvm.core.ChaosDispatcher",
+            "com.macstab.chaos.jvm.core.ScenarioRegistry",
+            "com.macstab.chaos.jvm.core.ChaosControlPlaneImpl");
+    final List<String> couplings = new ArrayList<>();
+    for (final JavaClass domain : classes) {
+      if (!isDomainDispatch(domain)
+          && !(domain.isNestedClass()
+              && isDomainDispatch(domain.getEnclosingClass().orElseThrow()))) {
+        continue;
+      }
+      for (final Dependency dependency : domain.getDirectDependenciesFromSelf()) {
+        if (forbidden.contains(dependency.getTargetClass().getName())) {
+          couplings.add(dependency.getDescription());
+        }
+      }
+    }
+    assertThat(couplings).isEmpty();
+  }
+
+  @Test
+  @DisplayName(
       "the API depends on nothing of the agent; the core not on instrumentation or parsing")
   void layering() {
     final List<String> violations = new ArrayList<>();

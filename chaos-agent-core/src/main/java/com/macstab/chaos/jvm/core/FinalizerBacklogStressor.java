@@ -93,7 +93,7 @@ final class FinalizerBacklogStressor implements ManagedStressor {
       if (delayNanos > 0) {
         // Agent work on the JVM's Finalizer thread (L3): a user THREAD_SLEEP scenario never
         // applies to this sleep.
-        ChaosDispatcher.incrementDispatchDepth();
+        DispatchDepth.increment();
         try {
           java.util.concurrent.TimeUnit.NANOSECONDS.sleep(delayNanos);
         } catch (final InterruptedException ignored) {
@@ -108,7 +108,7 @@ final class FinalizerBacklogStressor implements ManagedStressor {
           // through individual-object completion. The interrupt was delivered by close() or
           // JVM shutdown and the thread is already being torn down.
         } finally {
-          ChaosDispatcher.decrementDispatchDepth();
+          DispatchDepth.decrement();
         }
       }
     }

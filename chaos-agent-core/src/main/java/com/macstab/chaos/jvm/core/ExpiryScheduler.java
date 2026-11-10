@@ -44,11 +44,11 @@ final class ExpiryScheduler {
    * @throws OutOfMemoryError when the JVM cannot start the thread
    */
   static void ensureStarted() {
-    ChaosDispatcher.incrementDispatchDepth();
+    DispatchDepth.increment();
     try {
       EXECUTOR.prestartCoreThread();
     } finally {
-      ChaosDispatcher.decrementDispatchDepth();
+      DispatchDepth.decrement();
     }
   }
 
@@ -58,11 +58,11 @@ final class ExpiryScheduler {
    * @param end the end of a scenario
    */
   static void execute(final Runnable end) {
-    ChaosDispatcher.incrementDispatchDepth();
+    DispatchDepth.increment();
     try {
       EXECUTOR.execute(owned(end));
     } finally {
-      ChaosDispatcher.decrementDispatchDepth();
+      DispatchDepth.decrement();
     }
   }
 
@@ -74,11 +74,11 @@ final class ExpiryScheduler {
    * @return the scheduled check, to cancel when the scenario ends otherwise
    */
   static ScheduledFuture<?> schedule(final Runnable check, final long delayNanos) {
-    ChaosDispatcher.incrementDispatchDepth();
+    DispatchDepth.increment();
     try {
       return EXECUTOR.schedule(owned(check), delayNanos, TimeUnit.NANOSECONDS);
     } finally {
-      ChaosDispatcher.decrementDispatchDepth();
+      DispatchDepth.decrement();
     }
   }
 
@@ -87,13 +87,13 @@ final class ExpiryScheduler {
    * the install raises its depth now rather than at its next check; starts no thread.
    */
   static void adoptAfterInstall() {
-    ChaosDispatcher.incrementDispatchDepth();
+    DispatchDepth.increment();
     try {
       if (EXECUTOR.getPoolSize() > 0) {
         EXECUTOR.execute(owned(() -> {}));
       }
     } finally {
-      ChaosDispatcher.decrementDispatchDepth();
+      DispatchDepth.decrement();
     }
   }
 
@@ -106,8 +106,8 @@ final class ExpiryScheduler {
   private static Runnable owned(final Runnable task) {
     return () -> {
       final Thread self = Thread.currentThread();
-      if (raisedFor != self && ChaosDispatcher.dispatcherInstalled()) {
-        ChaosDispatcher.incrementDispatchDepth();
+      if (raisedFor != self && DispatchDepth.installed()) {
+        DispatchDepth.increment();
         raisedFor = self;
       }
       task.run();

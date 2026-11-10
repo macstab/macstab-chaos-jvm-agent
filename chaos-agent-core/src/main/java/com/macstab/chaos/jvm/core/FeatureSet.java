@@ -262,13 +262,13 @@ final class FeatureSet {
    * unexpected.
    */
   private static <T> T probe(final Supplier<T> read, final T unknown) {
-    ChaosDispatcher.incrementDispatchDepth();
+    DispatchDepth.increment();
     try {
       return read.get();
     } catch (final RuntimeException | LinkageError unavailable) {
       return unknown;
     } finally {
-      ChaosDispatcher.decrementDispatchDepth();
+      DispatchDepth.decrement();
     }
   }
 

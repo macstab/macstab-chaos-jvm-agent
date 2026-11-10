@@ -391,7 +391,7 @@ public final class NetworkDispatch {
     if (decision.terminalAction() != null
         && decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
       engine.applyDelayAndGate(decision);
-      return ChaosDispatcher.DATAGRAM_DROPPED;
+      return DispatchEngine.DATAGRAM_DROPPED;
     }
     return engine.transferCount(decision, length);
   }

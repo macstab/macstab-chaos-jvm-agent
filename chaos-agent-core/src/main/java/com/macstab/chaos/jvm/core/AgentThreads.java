@@ -51,11 +51,11 @@ public final class AgentThreads {
    */
   static Runnable owned(final Runnable body) {
     return () -> {
-      ChaosDispatcher.incrementDispatchDepth();
+      DispatchDepth.increment();
       try {
         body.run();
       } finally {
-        ChaosDispatcher.decrementDispatchDepth();
+        DispatchDepth.decrement();
       }
     };
   }
@@ -229,7 +229,7 @@ public final class AgentThreads {
    */
   static List<Thread> startAll(final List<Thread> threads) {
     final List<Thread> started = new ArrayList<>(threads.size());
-    ChaosDispatcher.incrementDispatchDepth();
+    DispatchDepth.increment();
     try {
       for (final Thread thread : threads) {
         thread.start();
@@ -243,7 +243,7 @@ public final class AgentThreads {
       }
       throw failure;
     } finally {
-      ChaosDispatcher.decrementDispatchDepth();
+      DispatchDepth.decrement();
     }
     return List.copyOf(started);
   }
@@ -262,7 +262,7 @@ public final class AgentThreads {
     final Thread self = Thread.currentThread();
     final List<Thread> survivors = new ArrayList<>();
     boolean interrupted = false;
-    ChaosDispatcher.incrementDispatchDepth();
+    DispatchDepth.increment();
     try {
       for (final Thread thread : threads) {
         thread.interrupt();
@@ -285,7 +285,7 @@ public final class AgentThreads {
         }
       }
     } finally {
-      ChaosDispatcher.decrementDispatchDepth();
+      DispatchDepth.decrement();
       if (interrupted) {
         self.interrupt();
       }

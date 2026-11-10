@@ -26,7 +26,7 @@ public final class FileDispatch {
    * map or channel transfer.
    *
    * @param operation the name of a {@code FILE_IO_*} operation, or a transfer tag ({@link
-   *     ChaosDispatcher#TRANSFER_TO}, {@link ChaosDispatcher#TRANSFER_FROM})
+   *     DispatchEngine#TRANSFER_TO}, {@link DispatchEngine#TRANSFER_FROM})
    * @param stream the stream instance
    * @param path the path the stream was opened with, or {@code null}
    * @param byteCount the bytes read (requested) or written by the call
@@ -67,8 +67,8 @@ public final class FileDispatch {
   /** The method a transfer tag stands for, as the context's target name; {@code null} otherwise. */
   private static @Nullable String transferTag(final String operationTag) {
     return switch (operationTag) {
-      case ChaosDispatcher.TRANSFER_TO -> "transferTo";
-      case ChaosDispatcher.TRANSFER_FROM -> "transferFrom";
+      case DispatchEngine.TRANSFER_TO -> "transferTo";
+      case DispatchEngine.TRANSFER_FROM -> "transferFrom";
       default -> null;
     };
   }
@@ -86,8 +86,8 @@ public final class FileDispatch {
       case "FILE_IO_CLOSE" -> OperationType.FILE_IO_CLOSE;
       case "FILE_IO_MOVE_TARGET" -> OperationType.FILE_IO_MOVE_TARGET;
       // FileChannel.transferTo reads the channel's file, transferFrom writes it.
-      case ChaosDispatcher.TRANSFER_TO -> OperationType.FILE_IO_READ;
-      case ChaosDispatcher.TRANSFER_FROM -> OperationType.FILE_IO_WRITE;
+      case DispatchEngine.TRANSFER_TO -> OperationType.FILE_IO_READ;
+      case DispatchEngine.TRANSFER_FROM -> OperationType.FILE_IO_WRITE;
       default ->
           throw new IllegalArgumentException(
               "Unknown file I/O operation tag '" + operationTag + "'");

@@ -203,11 +203,11 @@ final class ObservabilityBus {
       this.dropped = dropped;
       // Keeps no loader of the registering thread: the thread lives as long as the listener.
       this.thread = AgentThreads.unstarted("macstab-chaos-events", true, this::deliver);
-      ChaosDispatcher.incrementDispatchDepth();
+      DispatchDepth.increment();
       try {
         this.thread.start();
       } finally {
-        ChaosDispatcher.decrementDispatchDepth();
+        DispatchDepth.decrement();
       }
     }
 
@@ -218,11 +218,11 @@ final class ObservabilityBus {
     @Override
     public void onEvent(final ChaosEvent event) {
       final boolean queued;
-      ChaosDispatcher.incrementDispatchDepth();
+      DispatchDepth.increment();
       try {
         queued = !closed && queue.offer(event);
       } finally {
-        ChaosDispatcher.decrementDispatchDepth();
+        DispatchDepth.decrement();
       }
       if (!queued) {
         dropped.incrementAndGet();
@@ -231,7 +231,7 @@ final class ObservabilityBus {
 
     @SuppressWarnings("ReferenceEquality") // END is the one sentinel instance
     private void deliver() {
-      ChaosDispatcher.incrementDispatchDepth();
+      DispatchDepth.increment();
       boolean failedBefore = false;
       try {
         while (true) {
@@ -261,7 +261,7 @@ final class ObservabilityBus {
           }
         }
       } finally {
-        ChaosDispatcher.decrementDispatchDepth();
+        DispatchDepth.decrement();
       }
     }
 
@@ -287,13 +287,13 @@ final class ObservabilityBus {
 
     /** Waits for the event in progress, at most {@link #CLOSE_JOIN_MILLIS}; keeps an interrupt. */
     private void awaitDeliveryEnd() {
-      ChaosDispatcher.incrementDispatchDepth();
+      DispatchDepth.increment();
       try {
         thread.join(CLOSE_JOIN_MILLIS);
       } catch (final InterruptedException interrupted) {
         Thread.currentThread().interrupt();
       } finally {
-        ChaosDispatcher.decrementDispatchDepth();
+        DispatchDepth.decrement();
       }
       if (thread.isAlive()) {
         LOGGER.warning(
@@ -379,7 +379,7 @@ final class ObservabilityBus {
       final Map<String, String> attributes) {
     // Capture the timestamp first, before any other work in this method, so that event ordering
     // reflects publish()-arrival order as closely as possible even under listener backpressure.
-    final Instant timestamp = ChaosDispatcher.unskewedInstant(java.time.Clock.systemUTC());
+    final Instant timestamp = DispatchDepth.unskewedInstant(java.time.Clock.systemUTC());
     final ChaosEvent event = new ChaosEvent(timestamp, type, scenarioId, message, attributes);
     for (final ChaosEventListener listener : listeners) {
       try {

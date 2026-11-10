@@ -473,7 +473,7 @@ final class ScenarioRegistry implements ChaosDiagnostics {
       recentFailures = List.copyOf(failures);
     }
     return new Snapshot(
-        Instant.ofEpochMilli(ChaosDispatcher.unskewedInstant(clock).toEpochMilli()),
+        Instant.ofEpochMilli(DispatchDepth.unskewedInstant(clock).toEpochMilli()),
         reports,
         recentFailures,
         runtimeDetailsSupplier.get());

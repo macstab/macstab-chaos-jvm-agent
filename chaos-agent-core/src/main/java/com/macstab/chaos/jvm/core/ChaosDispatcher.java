@@ -2,10 +2,6 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
-import java.lang.invoke.MethodHandle;
-import java.lang.invoke.MethodHandles;
-import java.lang.invoke.MethodType;
-import java.time.Instant;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -33,135 +29,22 @@ import org.jspecify.annotations.Nullable;
 public final class ChaosDispatcher {
 
   /**
-   * The bootstrap dispatcher's {@code beginInternalCall} / {@code endInternalCall}, resolved on
-   * first use; holds {@code null} without the agent (a plain runtime in a unit test). The
-   * dispatcher lives on the bootstrap class path, not a compile-time dependency of this module, so
-   * it is reached through method handles.
-   */
-  private static volatile java.util.concurrent.atomic.@Nullable AtomicReference<
-          @Nullable InternalCalls>
-      internalCalls = null;
-
-  private record InternalCalls(MethodHandle begin, MethodHandle end) {}
-
-  /**
-   * Forgets a dispatcher found absent, so the next use looks it up again: called when a runtime is
-   * connected to the instrumentation, which injects the dispatcher. A runtime used before that (a
-   * scenario started before the install) would otherwise never raise the depth.
-   */
-  static void forgetAbsentDispatcher() {
-    synchronized (ChaosDispatcher.class) {
-      final var resolved = internalCalls;
-      if (resolved != null && resolved.get() == null) {
-        internalCalls = null;
-      }
-    }
-  }
-
-  private static @Nullable InternalCalls resolveInternalCalls() {
-    final var resolved = internalCalls;
-    if (resolved != null) {
-      return resolved.get();
-    }
-    synchronized (ChaosDispatcher.class) {
-      if (internalCalls != null) {
-        return internalCalls.get();
-      }
-      InternalCalls calls;
-      try {
-        final Class<?> dispatcher =
-            Class.forName(
-                "com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher",
-                false,
-                ClassLoader.getPlatformClassLoader());
-        final MethodType noArgs = MethodType.methodType(void.class);
-        final MethodHandles.Lookup lookup = MethodHandles.publicLookup();
-        calls =
-            new InternalCalls(
-                lookup.findStatic(dispatcher, "beginInternalCall", noArgs),
-                lookup.findStatic(dispatcher, "endInternalCall", noArgs));
-      } catch (final ReflectiveOperationException notInstalled) {
-        calls = null;
-      }
-      internalCalls = new java.util.concurrent.atomic.AtomicReference<>(calls);
-      return calls;
-    }
-  }
-
-  /**
-   * Returns whether the bootstrap dispatcher is installed, so {@link #incrementDispatchDepth()}
-   * raises a depth.
-   *
-   * @return {@code true} when the dispatcher is installed
-   */
-  static boolean dispatcherInstalled() {
-    return resolveInternalCalls() != null;
-  }
-
-  /**
-   * Raises the bootstrap dispatcher's depth on the current thread, so no chaos interception applies
-   * to the agent's own calls (clock reads, park, sleep, …) until the matching {@link
-   * #decrementDispatchDepth()}. {@code ScenarioController.start()} uses it so a concurrently active
-   * clock skew cannot shift the {@code startedAt} anchor of the {@code activeFor} window.
-   */
-  static void incrementDispatchDepth() {
-    final InternalCalls calls = resolveInternalCalls();
-    if (calls != null) {
-      invoke(calls.begin());
-    }
-  }
-
-  /** Paired decrement for {@link #incrementDispatchDepth()}. Always call in a {@code finally}. */
-  static void decrementDispatchDepth() {
-    final InternalCalls calls = resolveInternalCalls();
-    if (calls != null) {
-      invoke(calls.end());
-    }
-  }
-
-  private static void invoke(final MethodHandle handle) {
-    try {
-      handle.invokeExact();
-    } catch (final RuntimeException | Error unchecked) {
-      throw unchecked;
-    } catch (final Throwable checked) {
-      throw new IllegalStateException(checked);
-    }
-  }
-
-  /**
-   * Reads the real time: with the dispatch depth raised, so an active clock-skew scenario does not
-   * apply to the agent's own timestamps.
-   *
-   * @param clock the clock to read
-   * @return the clock's instant
-   */
-  static Instant unskewedInstant(final java.time.Clock clock) {
-    incrementDispatchDepth();
-    try {
-      return clock.instant();
-    } finally {
-      decrementDispatchDepth();
-    }
-  }
-
-  /**
    * What {@link NetworkDispatch#beforeDatagram} returns for a send a scenario suppresses: drop the
    * datagram.
    */
-  public static final int DATAGRAM_DROPPED = Integer.MIN_VALUE;
+  public static final int DATAGRAM_DROPPED = DispatchEngine.DATAGRAM_DROPPED;
 
   /**
    * Tag of {@code scheduleAtFixedRate} / {@code scheduleWithFixedDelay}: a {@code SCHEDULE_SUBMIT}
    * of a periodic task ({@code SchedulingSelector.periodicOnly}).
    */
-  public static final String SCHEDULE_SUBMIT_PERIODIC = "SCHEDULE_SUBMIT_PERIODIC";
+  public static final String SCHEDULE_SUBMIT_PERIODIC = DispatchEngine.SCHEDULE_SUBMIT_PERIODIC;
 
   /** Tag of {@code FileChannel.transferTo}: a read whose bytes never reach a buffer. */
-  public static final String TRANSFER_TO = "FILE_IO_TRANSFER_TO";
+  public static final String TRANSFER_TO = DispatchEngine.TRANSFER_TO;
 
   /** Tag of {@code FileChannel.transferFrom}: a write, torn as a short count. */
-  public static final String TRANSFER_FROM = "FILE_IO_TRANSFER_FROM";
+  public static final String TRANSFER_FROM = DispatchEngine.TRANSFER_FROM;
 
   private final DispatchEngine engine;
   private final ThreadDispatch thread;

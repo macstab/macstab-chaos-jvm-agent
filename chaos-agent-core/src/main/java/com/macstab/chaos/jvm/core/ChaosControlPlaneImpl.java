@@ -427,11 +427,11 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       if (plan.observability().debugDumpOnStart()) {
         // The agent's own write (L3): no FILE_IO_WRITE scenario sees it.
         final String dump = registry.debugDump();
-        ChaosDispatcher.incrementDispatchDepth();
+        DispatchDepth.increment();
         try {
           System.err.println(dump);
         } finally {
-          ChaosDispatcher.decrementDispatchDepth();
+          DispatchDepth.decrement();
         }
       }
       return planHandle;

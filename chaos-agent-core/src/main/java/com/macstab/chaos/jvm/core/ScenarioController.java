@@ -423,7 +423,7 @@ final class ScenarioController {
       // DEPTH=0 (outside any dispatcher path), so clock intercepts would skew startedAt and
       // the ClockSkewState reference timestamps. A +1h skew on startedAt would silently turn
       // a 5-minute activeFor window into 65 minutes; a -1h skew would make it expire instantly.
-      ChaosDispatcher.incrementDispatchDepth();
+      DispatchDepth.increment();
       try {
         startedAt = clock.instant();
         // Anchor the rate-limit window at activation, so the first window ends one window after
@@ -431,20 +431,20 @@ final class ScenarioController {
         rateWindowStartMillis = startedAt.toEpochMilli();
         rateWindowPermits = 0;
       } finally {
-        ChaosDispatcher.decrementDispatchDepth();
+        DispatchDepth.decrement();
       }
       // Construct ClockSkewState before setting started/state so that if the constructor
       // throws (e.g. Duration.toNanos() overflow), started remains false and the controller
       // does not enter a half-initialised ACTIVE state with a null clockSkewState.
       if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect skewEffect) {
-        ChaosDispatcher.incrementDispatchDepth();
+        DispatchDepth.increment();
         final long wallMillis;
         final long nanoRef;
         try {
           wallMillis = System.currentTimeMillis();
           nanoRef = System.nanoTime();
         } finally {
-          ChaosDispatcher.decrementDispatchDepth();
+          DispatchDepth.decrement();
         }
         newClockSkewState =
             new ClockSkewState(
@@ -534,7 +534,7 @@ final class ScenarioController {
       stressorEnd = null;
     }
     final ManagedStressor built;
-    ChaosDispatcher.incrementDispatchDepth();
+    DispatchDepth.increment();
     try {
       built =
           stressorFactory.createIfNeeded(
@@ -547,7 +547,7 @@ final class ScenarioController {
       // which is not a configuration error. Any other failure keeps its own type.
       throw unsupported("stressor " + scenario.effect().getClass().getSimpleName(), exhausted);
     } finally {
-      ChaosDispatcher.decrementDispatchDepth();
+      DispatchDepth.decrement();
     }
     if (timeBounded() || built != null) {
       // A time-bounded scenario needs the expiry thread to end, and so does a stressor that stops
@@ -955,7 +955,7 @@ final class ScenarioController {
     if (closing == null) {
       return;
     }
-    ChaosDispatcher.incrementDispatchDepth();
+    DispatchDepth.increment();
     try {
       closing.close();
     } catch (final RuntimeException | Error closeFailure) {
@@ -965,7 +965,7 @@ final class ScenarioController {
               closeFailure,
               () -> "[chaos-agent] could not close the stressor of scenario " + scenario.id());
     } finally {
-      ChaosDispatcher.decrementDispatchDepth();
+      DispatchDepth.decrement();
     }
   }
 
@@ -1067,7 +1067,7 @@ final class ScenarioController {
     }
     final long nanos;
     try {
-      nanos = Duration.between(ChaosDispatcher.unskewedInstant(clock), end).toNanos();
+      nanos = Duration.between(DispatchDepth.unskewedInstant(clock), end).toNanos();
     } catch (final ArithmeticException overflow) {
       return; // beyond ~292 years: effectively never expires
     }
@@ -1180,7 +1180,7 @@ final class ScenarioController {
     if (activeFor == null && activeFrom == null && activeUntil == null) {
       return Window.OPEN;
     }
-    final Instant now = ChaosDispatcher.unskewedInstant(clock);
+    final Instant now = DispatchDepth.unskewedInstant(clock);
     if (activeUntil != null && !now.isBefore(activeUntil)) {
       return Window.EXPIRED;
     }

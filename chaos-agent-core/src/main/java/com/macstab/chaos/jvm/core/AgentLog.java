@@ -125,22 +125,22 @@ public final class AgentLog {
         return;
       }
       // The line's time is read here: the agent's own clock read (L3).
-      ChaosDispatcher.incrementDispatchDepth();
+      DispatchDepth.increment();
       try {
         if (held(level, thrown, message)) {
           return;
         }
       } finally {
-        ChaosDispatcher.decrementDispatchDepth();
+        DispatchDepth.decrement();
       }
     }
     // The agent's own work (L3): writing the line (its handlers' file writes, its clock read) is
     // no target of a scenario, whichever thread logs it.
-    ChaosDispatcher.incrementDispatchDepth();
+    DispatchDepth.increment();
     try {
       logger().log(level, thrown, message);
     } finally {
-      ChaosDispatcher.decrementDispatchDepth();
+      DispatchDepth.decrement();
     }
   }
 
@@ -201,13 +201,13 @@ public final class AgentLog {
     if (taken.lost() > 0) {
       named(AGENT).warning(() -> droppedLine(taken.lost()));
     }
-    ChaosDispatcher.incrementDispatchDepth();
+    DispatchDepth.increment();
     try {
       for (final LogRecord line : taken.lines()) {
         Logger.getLogger(line.getLoggerName()).log(line);
       }
     } finally {
-      ChaosDispatcher.decrementDispatchDepth();
+      DispatchDepth.decrement();
     }
   }
 
