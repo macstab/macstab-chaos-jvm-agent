@@ -38,6 +38,28 @@ class WithChaosTest {
         .hasNoFailuresFor("wc-class-jvm")
         .scenario("wc-class-jvm")
         .hasState(ChaosDiagnostics.ScenarioState.ACTIVE);
+    assertClassScenarioDelaysAShutdown(controlPlane);
+  }
+
+  /**
+   * The class-level plan delays {@code ThreadPoolExecutor.shutdown()} by 200 ms: a real shutdown
+   * takes at least that long, and the scenario counts the application.
+   */
+  static void assertClassScenarioDelaysAShutdown(final ChaosControlPlane controlPlane) {
+    final long appliedBefore = applied(controlPlane);
+    final ExecutorService executor = Executors.newSingleThreadExecutor();
+    final long start = System.nanoTime();
+    executor.shutdown();
+    final long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+    assertThat(elapsedMillis)
+        .as("the shutdown waited for the scenario's delay")
+        .isGreaterThanOrEqualTo(180);
+    assertThat(applied(controlPlane)).isGreaterThan(appliedBefore);
+  }
+
+  private static long applied(final ChaosControlPlane controlPlane) {
+    return controlPlane.diagnostics().scenario("wc-class-jvm").orElseThrow().appliedCount();
   }
 
   @Test
@@ -84,7 +106,12 @@ class WithChaosTest {
     @Test
     @DisplayName("the outer class's scenarios apply to the nested test")
     void outerScenariosApply(final ChaosControlPlane controlPlane) {
-      assertThat(controlPlane.diagnostics().scenario("wc-class-jvm")).isPresent();
+      // Present alone also holds for a stopped scenario: it must be running and reach a call.
+      assertThat(controlPlane.diagnostics().scenario("wc-class-jvm"))
+          .hasValueSatisfying(
+              report ->
+                  assertThat(report.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE));
+      assertClassScenarioDelaysAShutdown(controlPlane);
     }
   }
 

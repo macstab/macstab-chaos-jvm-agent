@@ -5,7 +5,7 @@
       "id": "wc-class-jvm",
       "scope": "JVM",
       "selector": { "type": "executor", "operations": ["EXECUTOR_SHUTDOWN"] },
-      "effect": { "type": "delay", "minDelay": "PT0.001S", "maxDelay": "PT0.001S" }
+      "effect": { "type": "delay", "minDelay": "PT0.2S", "maxDelay": "PT0.2S" }
     }
   ]
 }
