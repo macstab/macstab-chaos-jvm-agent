@@ -31,6 +31,12 @@ import org.jspecify.annotations.Nullable;
  * the top frame is the intercepted method; without a bridge frame (the manual {@code ChaosRuntime}
  * hooks) the frames up to the last frame of this package are dropped.
  *
+ * <p>Two injected failures are built on the bootstrap side of the bridge, which cannot reach this
+ * class, and are therefore not trimmed: the {@code CancellationException} a suppressed periodic
+ * tick completes its {@code ScheduledFuture} with ({@code ScheduledCallableWrapper}), and the
+ * {@code SocketException("Connection reset")} a torn socket write throws after its short write
+ * ({@code BootstrapDispatcher.tornWriteFailure}). Each is what the JDK raises for that outcome.
+ *
  * <h2>Thread safety</h2>
  *
  * <p>This class is stateless; all methods are static and may be called concurrently without
