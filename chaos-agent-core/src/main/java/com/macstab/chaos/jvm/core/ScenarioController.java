@@ -861,8 +861,29 @@ final class ScenarioController {
   private void closeStressor() {
     final ManagedStressor current = stressor;
     stressor = null;
-    if (current != null) {
-      current.close();
+    closeAsAgentWork(current);
+  }
+
+  /**
+   * Closes a stressor as the agent's own work (L3), with the dispatch depth raised, so no user
+   * scenario applies to its teardown (the direct-buffer stressor frees its buffers reflectively). A
+   * close that fails is logged: the scenario has ended either way, and still reports its end.
+   */
+  private void closeAsAgentWork(final @Nullable ManagedStressor closing) {
+    if (closing == null) {
+      return;
+    }
+    ChaosDispatcher.incrementDispatchDepth();
+    try {
+      closing.close();
+    } catch (final RuntimeException | Error closeFailure) {
+      AgentLog.named(AgentLog.AGENT)
+          .log(
+              Level.WARNING,
+              closeFailure,
+              () -> "[chaos-agent] could not close the stressor of scenario " + scenario.id());
+    } finally {
+      ChaosDispatcher.decrementDispatchDepth();
     }
   }
 
@@ -898,16 +919,8 @@ final class ScenarioController {
           gate.release();
         }
         cancelExpiry();
-        try {
-          closeStressor();
-        } catch (final RuntimeException | Error closeFailure) {
-          // The scenario has ended: it still reports its end (INACTIVE) to the caller.
-          AgentLog.named(AgentLog.AGENT)
-              .log(
-                  Level.WARNING,
-                  closeFailure,
-                  () -> "[chaos-agent] could not close the stressor of scenario " + scenario.id());
-        }
+        // The scenario has ended: it still reports its end (INACTIVE) if the close fails.
+        closeStressor();
         return true;
       }
       return false;

@@ -134,7 +134,11 @@ public final class DefaultChaosActivationHandle implements ChaosActivationHandle
     if (!destroyed.compareAndSet(false, true)) {
       return;
     }
-    controller.destroy();
-    registry.unregister(controller);
+    try {
+      controller.destroy();
+    } finally {
+      // Unregistered even when the stop fails: a retry does nothing, so the id would stay taken.
+      registry.unregister(controller);
+    }
   }
 }

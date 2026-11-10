@@ -22,6 +22,9 @@ import org.jspecify.annotations.Nullable;
  * exits before that. Otherwise a line goes to the JUL logger of its name, looked up when the first
  * line is written.
  *
+ * <p>Writing a line is the agent's own work (L3): it runs with the dispatch depth raised, so no
+ * scenario sees the handlers' file writes or the line's clock read, whichever thread logs it.
+ *
  * <p>Thread-safe. Agent-internal; not an API.
  */
 @Internal
@@ -118,11 +121,27 @@ public final class AgentLog {
     if (holding) {
       // Below INFO, a held line is dropped unbuilt: per-call FINE lines (APPLIED, RELEASED) would
       // push the start's WARNINGs out of the buffer, and JUL's default level drops them anyway.
-      if (!keptWhileHeld(level) || held(level, thrown, message)) {
+      if (!keptWhileHeld(level)) {
         return;
       }
+      // The line's time is read here: the agent's own clock read (L3).
+      ChaosDispatcher.incrementDispatchDepth();
+      try {
+        if (held(level, thrown, message)) {
+          return;
+        }
+      } finally {
+        ChaosDispatcher.decrementDispatchDepth();
+      }
     }
-    logger().log(level, thrown, message);
+    // The agent's own work (L3): writing the line (its handlers' file writes, its clock read) is
+    // no target of a scenario, whichever thread logs it.
+    ChaosDispatcher.incrementDispatchDepth();
+    try {
+      logger().log(level, thrown, message);
+    } finally {
+      ChaosDispatcher.decrementDispatchDepth();
+    }
   }
 
   private boolean held(
@@ -182,8 +201,13 @@ public final class AgentLog {
     if (taken.lost() > 0) {
       named(AGENT).warning(() -> droppedLine(taken.lost()));
     }
-    for (final LogRecord line : taken.lines()) {
-      Logger.getLogger(line.getLoggerName()).log(line);
+    ChaosDispatcher.incrementDispatchDepth();
+    try {
+      for (final LogRecord line : taken.lines()) {
+        Logger.getLogger(line.getLoggerName()).log(line);
+      }
+    } finally {
+      ChaosDispatcher.decrementDispatchDepth();
     }
   }
 

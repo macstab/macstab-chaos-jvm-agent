@@ -1204,8 +1204,8 @@ class ControlPlaneLifecycleTest {
 
     @Test
     @DisplayName(
-        "close() stops every scenario and closes the listeners although a stop fails; the failure"
-            + " is rethrown with the later ones suppressed")
+        "close() stops every scenario and closes the listeners although a stressor's close fails;"
+            + " each failure is logged at WARNING")
     void closeContinuesAfterAFailingStop() {
       // Arrange
       final List<RuntimeException> closeFailures = new CopyOnWriteArrayList<>();
@@ -1215,17 +1215,20 @@ class ControlPlaneLifecycleTest {
       plane.activate(submitScenario("first", ActivationPolicy.always()));
       plane.activate(submitScenario("second", ActivationPolicy.always()));
 
-      // Act
-      final Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(plane::close);
+      try (LogCapture log = LogCapture.agent()) {
+        // Act
+        final Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(plane::close);
 
-      // Assert
-      assertThat(closeFailures).hasSize(2);
-      assertThat(thrown).isIn(closeFailures.get(0), closeFailures.get(1));
-      assertThat(thrown.getSuppressed())
-          .containsExactly(
-              thrown == closeFailures.get(0) ? closeFailures.get(1) : closeFailures.get(0));
-      assertThat(plane.registry().controllers()).isEmpty();
-      assertThat(listenerCloses).hasValue(1);
+        // Assert
+        assertThat(thrown).isNull();
+        assertThat(closeFailures).hasSize(2);
+        assertThat(log.records())
+            .filteredOn(record -> record.getLevel() == java.util.logging.Level.WARNING)
+            .extracting(java.util.logging.LogRecord::getThrown)
+            .containsExactlyInAnyOrderElementsOf(closeFailures);
+        assertThat(plane.registry().controllers()).isEmpty();
+        assertThat(listenerCloses).hasValue(1);
+      }
     }
   }
 

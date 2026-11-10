@@ -211,9 +211,20 @@ final class ObservabilityBus {
       }
     }
 
+    /**
+     * Hands the event to the delivery thread. The hand-off is the agent's own work (L3): its queue
+     * offer runs with the dispatch depth raised, so no {@code QUEUE_OFFER} scenario sees it.
+     */
     @Override
     public void onEvent(final ChaosEvent event) {
-      if (closed || !queue.offer(event)) {
+      final boolean queued;
+      ChaosDispatcher.incrementDispatchDepth();
+      try {
+        queued = !closed && queue.offer(event);
+      } finally {
+        ChaosDispatcher.decrementDispatchDepth();
+      }
+      if (!queued) {
         dropped.incrementAndGet();
       }
     }

@@ -425,7 +425,14 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
               handles,
               () -> clearPlanObservability(scopeKey, ids, owner));
       if (plan.observability().debugDumpOnStart()) {
-        System.err.println(registry.debugDump());
+        // The agent's own write (L3): no FILE_IO_WRITE scenario sees it.
+        final String dump = registry.debugDump();
+        ChaosDispatcher.incrementDispatchDepth();
+        try {
+          System.err.println(dump);
+        } finally {
+          ChaosDispatcher.decrementDispatchDepth();
+        }
       }
       return planHandle;
     } catch (final RuntimeException failure) {
