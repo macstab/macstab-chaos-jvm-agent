@@ -372,13 +372,14 @@ public final class DefectProbeMain {
   }
 
   /**
-   * Resolves IP literals, which the JDK never looks up, and names it does look up; connects to a
-   * loopback server by its literal. Prints each outcome: {@code ok} or the exception class.
+   * Resolves IP literals and the null name ({@code getByName(null)}, the loopback address), which
+   * the JDK never looks up, and names it does look up; connects to a loopback server by its
+   * literal. Prints each outcome: {@code ok} or the exception class.
    */
   private static void dnsLiteral() throws Exception {
     for (final String name :
         new String[] {
-          "127.0.0.1", "::1", "[::1]", "localhost", "1.2.3.4.5", "999.1.1.1", "0x7f.0.0.1"
+          "127.0.0.1", "::1", "[::1]", null, "localhost", "1.2.3.4.5", "999.1.1.1", "0x7f.0.0.1"
         }) {
       try {
         InetAddress.getByName(name);
@@ -394,9 +395,9 @@ public final class DefectProbeMain {
     }
   }
 
-  /** Resolves only IP literals: no answer is looked up, so none is reshaped. */
+  /** Resolves only IP literals and the null name: no answer is looked up, so none is reshaped. */
   private static void dnsLiteralAnswers() throws Exception {
-    for (final String name : new String[] {"127.0.0.1", "::1"}) {
+    for (final String name : new String[] {"127.0.0.1", "::1", null}) {
       System.out.println(
           "answer." + name + "=" + InetAddress.getAllByName(name)[0].getHostAddress());
     }

@@ -402,7 +402,9 @@ class AgentEndToEndTest {
     }
 
     @Test
-    @DisplayName("an IP literal is not a DNS lookup; names the JDK looks up are evaluated")
+    @DisplayName(
+        "an IP literal and getByName(null) are not a DNS lookup; names the JDK looks up are"
+            + " evaluated")
     void dnsLiteralIsNotALookup() throws Exception {
       final ChildJvmProbe.ProbeResult result =
           probe.run(
@@ -414,7 +416,7 @@ class AgentEndToEndTest {
               DefectProbeMain.class,
               "dns-literal",
               null);
-      for (final String literal : List.of("127.0.0.1", "::1", "[::1]")) {
+      for (final String literal : List.of("127.0.0.1", "::1", "[::1]", "null")) {
         assertThat(result.value("resolve." + literal)).as(literal).isEqualTo("ok");
       }
       assertThat(result.value("connect")).isEqualTo("true");
@@ -429,7 +431,7 @@ class AgentEndToEndTest {
     }
 
     @Test
-    @DisplayName("the answer of an IP literal is not a DNS_ANSWER")
+    @DisplayName("the answer of an IP literal or of getAllByName(null) is not a DNS_ANSWER")
     void dnsLiteralAnswerIsNotEvaluated() throws Exception {
       final ChildJvmProbe.ProbeResult result =
           probe.run(
@@ -442,6 +444,7 @@ class AgentEndToEndTest {
               "dns-literal-answers",
               null);
       assertThat(result.value("answer.127.0.0.1")).isEqualTo("127.0.0.1");
+      assertThat(result.value("answer.null")).isEqualTo("127.0.0.1");
       assertThat(result.longValue("matched.answers")).isZero();
     }
 

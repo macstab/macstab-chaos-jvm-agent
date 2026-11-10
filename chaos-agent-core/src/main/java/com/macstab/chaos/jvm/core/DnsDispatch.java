@@ -135,8 +135,8 @@ public final class DnsDispatch {
    * Allocation-free.
    *
    * @param name the name resolved; {@code null} is not a literal: it stands for {@code
-   *     getLocalHost()}, which looks its name up (the advice passes it for {@code getByName(null)}
-   *     too)
+   *     getLocalHost()}, which looks its name up ({@code getByName(null)} reaches here as the empty
+   *     name)
    * @return {@code true} for an IP literal
    */
   static boolean isAddressLiteral(final @Nullable String name) {

@@ -46,7 +46,9 @@ final class DnsAdvice {
    *
    * <p>These are static methods, so no {@code @Advice.This} is present. The hostname argument is
    * forwarded to the dispatcher, which can inject latency or throw {@link
-   * java.net.UnknownHostException}.
+   * java.net.UnknownHostException}. A {@code null} hostname is forwarded as the empty name: the JDK
+   * answers both with the loopback address without a lookup, and {@code null} at the dispatcher
+   * stands for {@code getLocalHost()} ({@link DnsLocalHostAdvice}), which does look its name up.
    */
   static final class DnsResolveAdvice {
     @Advice.OnMethodEnter
@@ -54,7 +56,7 @@ final class DnsAdvice {
         throws Throwable {
       if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_DNS)) {
         try {
-          hostname = BootstrapDispatcher.beforeDnsResolve(hostname);
+          hostname = BootstrapDispatcher.beforeDnsResolve(hostname == null ? "" : hostname);
         } catch (final Throwable throwable) {
           BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_DNS);
           throw throwable;
@@ -95,7 +97,8 @@ final class DnsAdvice {
   /**
    * Reshapes the answer of {@link java.net.InetAddress#getAllByName(String)} under a {@code
    * DnsAnswerEffect}: on return, or on an {@link java.net.UnknownHostException} an override can
-   * replace. {@code getByName} resolves through it, so both see the reshaped answer.
+   * replace. {@code getByName} resolves through it, so both see the reshaped answer. A {@code null}
+   * hostname is the loopback address without a lookup, forwarded as the empty name.
    */
   static final class DnsAnswerAdvice {
     @Advice.OnMethodExit(onThrowable = Throwable.class)
@@ -108,7 +111,7 @@ final class DnsAdvice {
         return;
       }
       final java.net.InetAddress[] reshaped =
-          BootstrapDispatcher.afterDnsAnswer(hostname, answer, failure);
+          BootstrapDispatcher.afterDnsAnswer(hostname == null ? "" : hostname, answer, failure);
       if (reshaped != null) {
         answer = reshaped;
         failure = null;
