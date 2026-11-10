@@ -4,11 +4,22 @@ import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import java.lang.ref.WeakReference;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.jspecify.annotations.Nullable;
 
 /**
  * Wraps a {@link Callable} scheduled on an executor so that chaos tick hooks fire around each
  * invocation.
+ *
+ * <p>A suppressed tick cancels the future {@code schedule} returned for the task ({@link
+ * #bind(Future)}), as the JDK cancels a task it will not run (a shutdown that drops delayed tasks):
+ * {@code get()} throws {@link CancellationException} and {@code isCancelled()} is {@code true} (ADR
+ * 0005). The task's future is bound when {@code schedule} returns; a tick that runs before that
+ * waits for it, at most one second, unless the scheduling thread runs the tick itself. A future
+ * that is never bound (a pool whose {@code decorateTask} runs the task itself) leaves the tick to
+ * throw {@link CancellationException}, which the future reports as the cause of an {@code
+ * ExecutionException}.
  *
  * @param <T> the result type produced by the wrapped callable
  */
@@ -24,6 +35,15 @@ public final class ScheduledCallableWrapper<T> implements Callable<T> {
 
   /** The wrapped callable to invoke after chaos hooks have been applied. */
   private final Callable<T> delegate;
+
+  /** The longest wait of a suppressed tick for its future ({@link #bind(Future)}). */
+  private static final long BIND_WAIT_NANOS = TimeUnit.SECONDS.toNanos(1L);
+
+  /** The thread that scheduled the task: a tick it runs itself cannot wait for the binding. */
+  private final Thread scheduler = Thread.currentThread();
+
+  /** The future {@code schedule} returned for the task; a suppressed tick cancels it. */
+  private volatile @Nullable Future<?> future;
 
   /**
    * Creates a wrapper holding a weak reference to {@code executor} and a strong reference to {@code
@@ -55,13 +75,19 @@ public final class ScheduledCallableWrapper<T> implements Callable<T> {
       return null; // unreachable
     }
     if (!proceed) {
-      // Suppression contract: the scenario has vetoed execution. A Callable<T> cannot
-      // honour that by silently returning null — the caller's Future.get() would then
-      // yield null and NPE on unboxing downstream (for Callable<Integer> etc.) with no
-      // chaos signal in the stack trace. Throwing CancellationException is the only
-      // honest option: the ScheduledFutureTask wraps it into ExecutionException whose
-      // cause clearly identifies the chaos scenario as the source. The Runnable path
-      // can no-op because it has no return value; Callable must not.
+      // The scenario vetoed the tick. Returning a value would hand the caller a result the task
+      // never produced (a null that NPEs on unboxing): the task is cancelled instead, as the JDK
+      // cancels a task it will not run. The cancelled future ignores the null returned here.
+      final Future<?> own = boundFuture();
+      if (own != null) {
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          own.cancel(false);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        return null;
+      }
       throw new CancellationException(
           "chaos: scheduled callable suppressed by scenario (task="
               + delegate.getClass().getName()
@@ -69,6 +95,39 @@ public final class ScheduledCallableWrapper<T> implements Callable<T> {
     }
     // The delegate's own exceptions pass through untouched, its interrupt status as it left it.
     return delegate.call();
+  }
+
+  /**
+   * Binds the future the executor returned for this task, which a suppressed tick cancels. Called
+   * by the scheduling advice once the task is queued.
+   *
+   * @param taskFuture the task's future
+   */
+  public void bind(final Future<?> taskFuture) {
+    this.future = taskFuture;
+  }
+
+  /**
+   * Returns the task's future, waiting up to {@link #BIND_WAIT_NANOS} for {@code schedule} to
+   * return when the tick runs first; {@code null} when it is not bound by then, or when the
+   * scheduling thread runs the tick itself.
+   */
+  private @Nullable Future<?> boundFuture() {
+    Future<?> own = future;
+    if (own != null || Thread.currentThread() == scheduler) {
+      return own;
+    }
+    // Agent work: the spin is no application's call.
+    BootstrapDispatcher.beginInternalCall();
+    try {
+      final long deadline = System.nanoTime() + BIND_WAIT_NANOS;
+      while ((own = future) == null && System.nanoTime() - deadline < 0L) {
+        Thread.onSpinWait();
+      }
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
+    return own;
   }
 
   /**

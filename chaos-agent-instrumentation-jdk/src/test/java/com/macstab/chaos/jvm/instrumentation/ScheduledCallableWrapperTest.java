@@ -8,6 +8,9 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -55,10 +58,50 @@ class ScheduledCallableWrapperTest {
   @DisplayName("when tick is suppressed")
   class WhenTickSuppressed {
 
-    // Returning null here would silently inject a null into the caller's Future.get() —
-    // any unboxing (e.g., Callable<Integer>) would then NPE downstream with no chaos
-    // signal in the stack. CancellationException is the only honest option for a
-    // Callable<T> that has been vetoed.
+    @Test
+    @DisplayName("cancels the bound future, as the JDK cancels a task it will not run")
+    void cancelsBoundFuture() throws Exception {
+      installTickBridge((e, t, p) -> false);
+      final ScheduledCallableWrapper<String> wrapper =
+          new ScheduledCallableWrapper<>(executor, () -> "should-not-run");
+      final FutureTask<String> future = new FutureTask<>(wrapper);
+      wrapper.bind(future);
+      future.run();
+      assertThat(future.isCancelled()).isTrue();
+      assertThatThrownBy(future::get).isExactlyInstanceOf(CancellationException.class);
+    }
+
+    @Test
+    @DisplayName("a tick that runs before schedule returns waits for its future")
+    void waitsForTheBinding() throws Exception {
+      installTickBridge((e, t, p) -> false);
+      final ScheduledCallableWrapper<String> wrapper =
+          new ScheduledCallableWrapper<>(executor, () -> "should-not-run");
+      final FutureTask<String> future = new FutureTask<>(wrapper);
+      final Thread worker = new Thread(future);
+      worker.start();
+      Thread.sleep(50L);
+      wrapper.bind(future);
+      worker.join(TimeUnit.SECONDS.toMillis(5L));
+      assertThat(future.isCancelled()).isTrue();
+    }
+
+    @Test
+    @DisplayName("a future never bound leaves the tick to throw CancellationException")
+    void unboundFutureThrowsAfterTheWait() throws Exception {
+      installTickBridge((e, t, p) -> false);
+      final ScheduledCallableWrapper<String> wrapper =
+          new ScheduledCallableWrapper<>(executor, () -> "should-not-run");
+      final FutureTask<String> future = new FutureTask<>(wrapper);
+      final Thread worker = new Thread(future);
+      worker.start();
+      worker.join(TimeUnit.SECONDS.toMillis(5L));
+      assertThatThrownBy(future::get)
+          .isInstanceOf(ExecutionException.class)
+          .hasCauseExactlyInstanceOf(CancellationException.class);
+    }
+
+    // Unbound and run on the scheduling thread itself: no wait, the tick throws.
     @Test
     @DisplayName("throws CancellationException (not null) when bridge returns false")
     void throwsCancellationWhenTickSuppressed() throws Exception {

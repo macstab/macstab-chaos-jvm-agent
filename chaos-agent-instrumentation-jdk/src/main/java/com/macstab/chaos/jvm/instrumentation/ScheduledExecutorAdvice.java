@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.instrumentation;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import java.util.concurrent.Callable;
+import java.util.concurrent.Future;
 import net.bytebuddy.asm.Advice;
 
 /**
@@ -40,9 +41,13 @@ final class ScheduledExecutorAdvice {
     }
   }
 
+  /**
+   * Wraps the callable, and binds the future {@code schedule} returns to the wrapper, which a
+   * suppressed tick cancels.
+   */
   static final class ScheduleCallableAdvice {
     @Advice.OnMethodEnter
-    static void enter(
+    static ScheduledCallableWrapper<?> enter(
         @Advice.This final Object executor,
         @Advice.Argument(value = 0, readOnly = false) Callable<?> task)
         throws Throwable {
@@ -51,7 +56,16 @@ final class ScheduledExecutorAdvice {
             BootstrapDispatcher.decorateExecutorCallable(
                 OperationTags.SCHEDULE_SUBMIT, executor, task);
       }
-      task = new ScheduledCallableWrapper<>(executor, task);
+      final ScheduledCallableWrapper<?> wrapper = new ScheduledCallableWrapper<>(executor, task);
+      task = wrapper;
+      return wrapper;
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final ScheduledCallableWrapper<?> wrapper,
+        @Advice.Return final Future<?> future) {
+      wrapper.bind(future);
     }
   }
 

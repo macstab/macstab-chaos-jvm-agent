@@ -144,6 +144,7 @@ public final class DefectProbeMain {
       case "http-url-connection" -> withHttpServer(DefectProbeMain::httpUrlConnection);
       case "agent-owned-stressors" -> agentOwnedStressors();
       case "finalizer-backlog-sleep" -> finalizerBacklogSleep();
+      case "scheduled-callable-suppress" -> scheduledCallableSuppress();
       case "plan-reload-under-file-reject" -> planReloadUnderFileReject();
       case "plan-reload" -> planReload();
       case "tick-warning-to-log-file" -> tickWarningToLogFile();
@@ -3965,6 +3966,43 @@ public final class DefectProbeMain {
       System.out.println("submit=" + submit.matchedCount());
     } finally {
       stpe.shutdownNow();
+    }
+  }
+
+  /**
+   * A SCHEDULE_TICK suppress and a one-shot {@code schedule(Callable)}, with a delay and without
+   * one: prints how each future ends ({@code delayed}, {@code immediate}): {@code cancelled} when
+   * {@code get()} throws {@code CancellationException} and the future is cancelled, else the
+   * exception and its cause, or the value.
+   */
+  private static void scheduledCallableSuppress() throws Exception {
+    try (ChaosActivationHandle ignored =
+        ChaosPlatform.current()
+            .activate(
+                ChaosScenario.builder("tick-suppress")
+                    .selector(ChaosSelector.scheduling(Set.of(OperationType.SCHEDULE_TICK)))
+                    .effect(ChaosEffect.suppress())
+                    .activationPolicy(ActivationPolicy.always())
+                    .build())) {
+      final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
+      try {
+        System.out.println(
+            "delayed=" + outcome(executor.schedule(() -> "ran", 20L, TimeUnit.MILLISECONDS)));
+        System.out.println(
+            "immediate=" + outcome(executor.schedule(() -> "ran", 0L, TimeUnit.MILLISECONDS)));
+      } finally {
+        executor.shutdownNow();
+      }
+    }
+  }
+
+  private static String outcome(final ScheduledFuture<String> future) throws Exception {
+    try {
+      return "value:" + future.get(5L, TimeUnit.SECONDS);
+    } catch (final java.util.concurrent.CancellationException cancelled) {
+      return future.isCancelled() ? "cancelled" : "cancellation-not-cancelled";
+    } catch (final java.util.concurrent.ExecutionException failed) {
+      return "execution:" + failed.getCause();
     }
   }
 

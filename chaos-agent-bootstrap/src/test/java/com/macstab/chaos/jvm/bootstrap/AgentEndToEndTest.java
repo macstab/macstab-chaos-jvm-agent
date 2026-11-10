@@ -2779,6 +2779,16 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName(
+        "a suppressed tick of a one-shot Callable cancels its future, as the JDK cancels a task")
+    void suppressedCallableTickCancelsItsFuture() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "scheduled-callable-suppress");
+      assertThat(result.value("delayed")).isEqualTo("cancelled");
+      assertThat(result.value("immediate")).isEqualTo("cancelled");
+    }
+
+    @Test
     @DisplayName("a THREAD_SLEEP delay on the Finalizer thread never matches the backlog's sleeps")
     void finalizerBacklogSleepIsAgentWork() throws Exception {
       final ChildJvmProbe.ProbeResult result =
