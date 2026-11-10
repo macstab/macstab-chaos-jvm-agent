@@ -55,7 +55,9 @@ jobs:
           workdir: /home/runner/work/${{ github.repository }}/${{ github.repository }}
           # The image's config without @semantic-release/changelog: CHANGELOG.md is written by hand
           # (RELEASE.md), and the plugin would prepend a generated section for the same version.
-          args: -c "pwd && jq '.plugins |= map(select(((arrays | .[0]) // .) != env.SKIP_PLUGIN))' /configs/$CONFIG_FILE > .releaserc && git config --global --add safe.directory $GITHUB_WORKSPACE && npx semantic-release --branches $RELEASE_BRANCH"
+          # jq -e fails the job unless the plugin is listed in .plugins (not pulled in through
+          # extends) and is gone after the filter, so it can never come back unnoticed.
+          args: -c "pwd && jq -e '.extends == null and any(.plugins[]; ((arrays | .[0]) // .) == env.SKIP_PLUGIN)' /configs/$CONFIG_FILE > /dev/null && jq '.plugins |= map(select(((arrays | .[0]) // .) != env.SKIP_PLUGIN))' /configs/$CONFIG_FILE > .releaserc && jq -e 'all(.plugins[]; ((arrays | .[0]) // .) != env.SKIP_PLUGIN)' .releaserc > /dev/null && git config --global --add safe.directory $GITHUB_WORKSPACE && npx semantic-release --branches $RELEASE_BRANCH"
         env:
           GITHUB_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

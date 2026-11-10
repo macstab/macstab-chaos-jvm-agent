@@ -98,7 +98,10 @@ rebuilds `latest/` from the newest release tag; it never publishes a branch.
 `# Unreleased — X.Y.Z`. The workflow drops `@semantic-release/changelog` from the image's
 config (`jq` over `/configs/.releaserc-gradle.json`), because the plugin prepends a generated
 `# X.Y.Z (date)` section of every commit subject since the last tag, a second section for the
-same version above the hand-written one. Before merging a release into main, rename the top
+same version above the hand-written one. The step fails, before semantic-release runs, when the
+plugin is not listed in the config's `plugins` (for example pulled in through `extends`) or is
+still there after the filter. The pinned image's config lists it directly, as
+`["@semantic-release/changelog", {"changelogFile": "CHANGELOG.md"}]`. Before merging a release into main, rename the top
 heading to the version and date, for example `# 2.0.0 (2026-11-30)`. The generated notes still
 become the GitHub release's text and the release commit's message.
 
