@@ -143,6 +143,7 @@ public final class DefectProbeMain {
       case "jdk-send-async-reject" -> withHttpServer(DefectProbeMain::jdkSendAsyncReject);
       case "http-url-connection" -> withHttpServer(DefectProbeMain::httpUrlConnection);
       case "agent-owned-stressors" -> agentOwnedStressors();
+      case "finalizer-backlog-sleep" -> finalizerBacklogSleep();
       case "plan-reload-under-file-reject" -> planReloadUnderFileReject();
       case "plan-reload" -> planReload();
       case "tick-warning-to-log-file" -> tickWarningToLogFile();
@@ -3123,6 +3124,43 @@ public final class DefectProbeMain {
       for (final ChaosActivationHandle handle : handles) {
         handle.close();
       }
+    }
+  }
+
+  /**
+   * Runs a finalizer backlog while a THREAD_SLEEP delay matches the Finalizer thread, and prints
+   * how often that delay matched a sleep ({@code finalizerSleepsMatched}) and how many objects the
+   * stressor made ({@code finalizable}).
+   */
+  private static void finalizerBacklogSleep() {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    try (ChaosActivationHandle sleeps =
+            plane.activate(
+                ChaosScenario.builder("finalizer-sleep")
+                    .selector(
+                        new ChaosSelector.ThreadSelector(
+                            Set.of(OperationType.THREAD_SLEEP),
+                            ChaosSelector.ThreadKind.ANY,
+                            NamePattern.exact("Finalizer"),
+                            null))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        ChaosActivationHandle backlog =
+            plane.activate(
+                ChaosScenario.builder("finalizer-backlog")
+                    .selector(ChaosSelector.stress(ChaosSelector.StressTarget.FINALIZER_BACKLOG))
+                    .effect(new ChaosEffect.FinalizerBacklogEffect(20, Duration.ofMillis(2)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build())) {
+      System.out.println("finalizable=" + backlog.state());
+      // The objects are garbage at once: a few collections queue them for the Finalizer thread,
+      // whose finalize() sleeps 2 ms each.
+      for (int i = 0; i < 10; i++) {
+        System.gc();
+        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(50));
+      }
+      System.out.println("finalizerSleepsMatched=" + sleeps.matchedCount());
     }
   }
 

@@ -2768,6 +2768,15 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName("a THREAD_SLEEP delay on the Finalizer thread never matches the backlog's sleeps")
+    void finalizerBacklogSleepIsAgentWork() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "finalizer-backlog-sleep");
+      assertThat(result.value("finalizable")).isEqualTo("ACTIVE");
+      assertThat(result.longValue("finalizerSleepsMatched")).isZero();
+    }
+
+    @Test
     @DisplayName("the agent's WARNING for a suppressed tick is not seen by FILE_IO_WRITE")
     void tickWarningIsAgentWork() throws Exception {
       final ChildJvmProbe.ProbeResult result =

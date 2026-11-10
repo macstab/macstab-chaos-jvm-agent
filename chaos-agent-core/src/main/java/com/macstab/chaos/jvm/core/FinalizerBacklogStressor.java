@@ -79,6 +79,9 @@ final class FinalizerBacklogStressor implements ManagedStressor {
         return;
       }
       if (delayMs > 0) {
+        // Agent work on the JVM's Finalizer thread (L3): a user THREAD_SLEEP scenario never
+        // applies to this sleep.
+        ChaosDispatcher.incrementDispatchDepth();
         try {
           Thread.sleep(delayMs);
         } catch (final InterruptedException ignored) {
@@ -92,6 +95,8 @@ final class FinalizerBacklogStressor implements ManagedStressor {
           // stressor's backlog effect is only observable through delay accumulation, not
           // through individual-object completion. The interrupt was delivered by close() or
           // JVM shutdown and the thread is already being torn down.
+        } finally {
+          ChaosDispatcher.decrementDispatchDepth();
         }
       }
     }
