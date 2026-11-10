@@ -98,7 +98,7 @@ This is the most constrained part of the codebase. Read this section before touc
 
 - **No instance fields** in advice classes. All state must be local variables or statics on `BootstrapDispatcher`.
 - **No references to agent-classloader types** from advice bytecode. The bootstrap classloader cannot see `com.macstab.chaos.jvm.core.*` or any ByteBuddy type except what is explicitly in the bootstrap JAR.
-- **Only `BootstrapDispatcher` methods** may be called from `@Advice` methods. Route everything through one of its `before*` / `after*` / `decorate*` / `adjust*` methods.
+- **Only bridge classes** may be referenced from `@Advice` methods: the classes listed in `BridgeInjector.BRIDGE_CLASSES` (`BootstrapDispatcher`, `ChannelBuffers`, `OperationTags`, the scheduled task wrappers, `HttpUrlExtractor`, `JdbcTargetExtractor`, `ClientCallExtractor`, `SessionHeaderPolicy` and their nested classes), which are injected into the bootstrap class loader (ADR 0003). `ArchitectureTest.adviceReferencesOnlyBridgeClasses` enforces it. Route the dispatch itself through one of `BootstrapDispatcher`'s `before*` / `after*` / `decorate*` / `adjust*` methods. A new class the advice must reach goes into `BRIDGE_CLASSES` and into the `bridgeClasses` pattern of `chaos-agent-bootstrap/build.gradle.kts`.
 - **`@Advice` methods must be `static`** — ByteBuddy inlines them; instance dispatch is impossible.
 
 ### 2. Add the operation tag
@@ -107,13 +107,32 @@ Add a constant to `OperationType` in `chaos-agent-api`, next to its family, and 
 
 ### 3. Implement the `BootstrapDispatcher` entry point
 
-Add a `static` method to `BootstrapDispatcher` that:
-1. Checks the reentrancy guard (`DEPTH.get() > 0 → return immediately`)
-2. Increments depth in a `try/finally`
-3. Delegates to the bridge: `delegate.beforeXxx(operationTag, ...)`
-4. Decrements depth in `finally`
+A new entry point needs a handle slot of its own (ADR 0001). Every step is required; `buildMethodHandles` refuses the install when one is missing:
+1. Append a `public static final int BEFORE_XXX = <next index>;` slot constant to `BootstrapDispatcher`, after the last one. Slot numbers are hand-written and contiguous: never reuse or renumber an index.
+2. Raise `BootstrapDispatcher.HANDLE_COUNT` by one, and update the slot count in ADR 0001 and the table in `docs/instrumentation.md` §7.
+3. Add the method to `BridgeDelegate`, named after the slot (`BEFORE_XXX` → `beforeXxx`), and implement it in `ChaosBridge`, which forwards to `ChaosRuntime`.
+4. Add the `public static` method to `BootstrapDispatcher`. Its body is the pattern of every existing entry point:
 
-Copy the pattern from any existing `before*` method exactly. The reentrancy guard is not optional — omitting it causes infinite recursion when your advice fires inside a method the agent itself calls.
+```java
+public static void beforeXxx(final Object target, final int arg) throws Throwable {
+    final int[] depth = DEPTH.get();
+    final MethodHandle[] h = handles;
+    final Object d = delegate;
+    if (depth[0] > 0 || d == null || h == null) {
+        return; // agent-internal call, or the bridge is not installed
+    }
+    depth[0]++;
+    try {
+        h[BEFORE_XXX].invoke(d, target, arg);
+    } catch (final Throwable throwable) {
+        sneakyThrow(throwable);
+    } finally {
+        depth[0]--;
+    }
+}
+```
+
+The reentrancy guard (`depth[0] > 0`, where `DEPTH` is a `ThreadLocal<int[]>`) is not optional — omitting it causes infinite recursion when your advice fires inside a method the agent itself calls. If the advice references a class other than `BootstrapDispatcher`, add it to `BridgeInjector.BRIDGE_CLASSES` as well (§1).
 
 ### 4. Write the advice class
 

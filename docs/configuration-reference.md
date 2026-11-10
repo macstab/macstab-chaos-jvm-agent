@@ -2184,7 +2184,7 @@ No heap allocation occurs on the interception hot path from the API layer — al
 - `AtomicLong appliedCount` and `matchedCount` (`matchedCount` drives `activateAfterMatches`)
 - `volatile Instant startedAt` (for `activeFor` evaluation)
 - A fixed-window counter for `rateLimit` (window start + permits, guarded by `synchronized`)
-- The effect's own state object (e.g., `ClockSkewState`, `GateState`, stressor thread references)
+- The effect's own state object (e.g., `ClockSkewState`, `ManualGate`, stressor thread references)
 
 ## 15.3 JVM Layer
 
