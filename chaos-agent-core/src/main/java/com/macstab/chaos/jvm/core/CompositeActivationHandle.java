@@ -32,20 +32,6 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
       new java.util.concurrent.atomic.AtomicBoolean();
 
   /**
-   * Creates a composite handle with the given logical ID and delegate handles.
-   *
-   * <p>The delegate list is defensively copied at construction time via {@link List#copyOf}.
-   *
-   * @param id a logical identifier for this composite, typically combining the source context and
-   *     the plan name (e.g. {@code "session-plan:myPlan"})
-   * @param delegates the individual handles to which all operations will be broadcast; must not be
-   *     {@code null} or contain {@code null} elements
-   */
-  CompositeActivationHandle(final String id, final List<ChaosActivationHandle> delegates) {
-    this(id, delegates, () -> {});
-  }
-
-  /**
    * Creates a composite handle that runs {@code onClose} after closing its delegates.
    *
    * @param id the logical identifier

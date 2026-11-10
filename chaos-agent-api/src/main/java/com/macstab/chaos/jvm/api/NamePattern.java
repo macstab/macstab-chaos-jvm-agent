@@ -226,11 +226,8 @@ public record NamePattern(MatchMode mode, String value) {
    * @return {@code true} if the candidate satisfies this pattern
    */
   public boolean matches(final @Nullable String candidate) {
-    if (mode == MatchMode.ANY) {
-      return true;
-    }
     if (candidate == null) {
-      return false;
+      return mode == MatchMode.ANY;
     }
     return switch (mode) {
       case EXACT -> candidate.equals(value);

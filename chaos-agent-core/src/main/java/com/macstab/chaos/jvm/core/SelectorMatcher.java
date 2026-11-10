@@ -73,8 +73,7 @@ final class SelectorMatcher {
           methodSelector.operations().contains(context.operationType())
               && methodSelector.classPattern().matches(context.targetClassName())
               && methodSelector.methodNamePattern().matches(context.targetName())
-              && (methodSelector.signaturePattern() == null
-                  || methodSelector.signaturePattern().matches(context.signature()));
+              && methodSelector.signaturePattern().matches(context.signature());
       case ChaosSelector.MonitorSelector monitorSelector ->
           monitorSelector.operations().contains(context.operationType())
               && monitorSelector.monitorClassPattern().matches(context.targetClassName())

@@ -174,8 +174,8 @@ public final class ChaosDispatcher {
   /**
    * Returns whether no scenario is indexed for the operation an operation tag names, so advice can
    * return before reading its target. {@link #SCHEDULE_SUBMIT_PERIODIC} is a {@code
-   * SCHEDULE_SUBMIT}, {@link #TRANSFER_TO} a {@code FILE_IO_READ} and {@link #TRANSFER_FROM} a
-   * {@code FILE_IO_WRITE}; every other tag is an {@link OperationType} name.
+   * SCHEDULE_SUBMIT}; every other tag is an {@link OperationType} name (the file-channel transfers
+   * check their {@code FILE_IO_*} operation through {@code beforeFileIo}, not here).
    *
    * @param operationTag the tag
    * @return {@code true} when no scenario is indexed for the operation
@@ -184,8 +184,6 @@ public final class ChaosDispatcher {
     final OperationType operation =
         switch (operationTag) {
           case SCHEDULE_SUBMIT_PERIODIC -> OperationType.SCHEDULE_SUBMIT;
-          case TRANSFER_TO -> OperationType.FILE_IO_READ;
-          case TRANSFER_FROM -> OperationType.FILE_IO_WRITE;
           default -> OperationType.valueOf(operationTag);
         };
     return engine.idle(operation);

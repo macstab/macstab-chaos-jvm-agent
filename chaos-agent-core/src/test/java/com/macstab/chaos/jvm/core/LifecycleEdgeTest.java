@@ -839,7 +839,7 @@ class LifecycleEdgeTest {
     void aggregatesDelegateFailures() {
       final CompositeActivationHandle composite =
           new CompositeActivationHandle(
-              "two", List.of(new FailingHandle("a"), new FailingHandle("b")));
+              "two", List.of(new FailingHandle("a"), new FailingHandle("b")), () -> {});
       assertThatThrownBy(composite::start)
           .isExactlyInstanceOf(RuntimeException.class)
           .hasMessage("one or more delegates failed during composite start")
@@ -856,7 +856,7 @@ class LifecycleEdgeTest {
     @Test
     @DisplayName("a composite without delegates is neither active nor stopped")
     void emptyCompositeIsInactive() {
-      assertThat(new CompositeActivationHandle("none", List.of()).state())
+      assertThat(new CompositeActivationHandle("none", List.of(), () -> {}).state())
           .isEqualTo(ChaosDiagnostics.ScenarioState.INACTIVE);
     }
   }

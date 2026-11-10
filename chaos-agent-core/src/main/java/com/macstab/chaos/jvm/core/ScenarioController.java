@@ -1293,11 +1293,9 @@ final class ScenarioController {
       return java.util.Arrays.binarySearch(replayMatches, matched) >= 0;
     }
     final double probability = scenario.activationPolicy().probability();
+    // ActivationPolicy refuses a probability outside (0, 1].
     if (probability >= 1.0d) {
       return true;
-    }
-    if (probability <= 0.0d) {
-      return false;
     }
     return splittableRandom(matched).nextDouble() < probability;
   }

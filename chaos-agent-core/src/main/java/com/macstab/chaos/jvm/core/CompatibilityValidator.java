@@ -640,12 +640,11 @@ final class CompatibilityValidator {
     }
     // The class must be one the agent can throw: refused now, not when the method is called.
     FailureFactory.injectedConstructor(injection.exceptionClassName());
-    if (!(selector instanceof ChaosSelector.MethodSelector)) {
+    if (!(selector instanceof ChaosSelector.MethodSelector methodSelector)) {
       throw new ChaosValidationException("ExceptionInjectionEffect requires MethodSelector");
     }
     // METHOD_EXIT is semantically wrong for injection: the method body has already run.
-    if (selector instanceof ChaosSelector.MethodSelector methodSelector
-        && methodSelector.operations().contains(OperationType.METHOD_EXIT)) {
+    if (methodSelector.operations().contains(OperationType.METHOD_EXIT)) {
       throw new ChaosValidationException(
           "ExceptionInjectionEffect requires METHOD_ENTER operations only;"
               + " found METHOD_EXIT in the selector");
@@ -657,12 +656,11 @@ final class CompatibilityValidator {
     if (!(effect instanceof ChaosEffect.ReturnValueCorruptionEffect)) {
       return;
     }
-    if (!(selector instanceof ChaosSelector.MethodSelector)) {
+    if (!(selector instanceof ChaosSelector.MethodSelector methodSelector)) {
       throw new ChaosValidationException("ReturnValueCorruptionEffect requires MethodSelector");
     }
     // METHOD_ENTER is wrong: the return value does not exist yet at entry.
-    if (selector instanceof ChaosSelector.MethodSelector methodSelector
-        && methodSelector.operations().contains(OperationType.METHOD_ENTER)) {
+    if (methodSelector.operations().contains(OperationType.METHOD_ENTER)) {
       throw new ChaosValidationException(
           "ReturnValueCorruptionEffect requires METHOD_EXIT operations only;"
               + " found METHOD_ENTER in the selector");
@@ -674,13 +672,12 @@ final class CompatibilityValidator {
     if (!(effect instanceof ChaosEffect.SpuriousWakeupEffect)) {
       return;
     }
-    if (!(selector instanceof ChaosSelector.NioSelector)) {
+    if (!(selector instanceof ChaosSelector.NioSelector nioSelector)) {
       throw new ChaosValidationException("SpuriousWakeupEffect requires NioSelector");
     }
     // A wakeup is a select() that returns 0 keys: on any other NIO call the same terminal would
     // skip the call instead.
-    if (selector instanceof ChaosSelector.NioSelector nioSelector
-        && !nioSelector.operations().equals(Set.of(OperationType.NIO_SELECTOR_SELECT))) {
+    if (!nioSelector.operations().equals(Set.of(OperationType.NIO_SELECTOR_SELECT))) {
       throw new ChaosValidationException(
           "SpuriousWakeupEffect requires NioSelector with NIO_SELECTOR_SELECT as its only"
               + " operation, not "
