@@ -25,7 +25,7 @@ class DirectoryTrustTest {
     assumePosix();
     final Path directory = Files.createDirectory(tempDir.resolve("own"));
 
-    assertThat(DirectoryTrust.distrust(directory)).isEmpty();
+    assertThat(DirectoryTrust.distrust(directory, directory.toRealPath())).isEmpty();
   }
 
   @Test
@@ -35,7 +35,7 @@ class DirectoryTrustTest {
     final Path directory = Files.createDirectory(tempDir.resolve("open"));
     Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("rwxrwxrwx"));
 
-    assertThat(DirectoryTrust.distrust(directory))
+    assertThat(DirectoryTrust.distrust(directory, directory.toRealPath()))
         .hasValue("it is world-writable without the sticky bit");
   }
 
@@ -49,7 +49,7 @@ class DirectoryTrustTest {
         new ProcessBuilder("chmod", "1777", directory.toString()).inheritIO().start();
     assumeTrue(chmod.waitFor() == 0, "chmod 1777 not available");
 
-    assertThat(DirectoryTrust.distrust(directory)).isEmpty();
+    assertThat(DirectoryTrust.distrust(directory, directory.toRealPath())).isEmpty();
   }
 
   @Test
@@ -61,7 +61,7 @@ class DirectoryTrustTest {
     Files.setPosixFilePermissions(parent, PosixFilePermissions.fromString("rwxrwxrwx"));
     final String realParent = parent.toRealPath().toString();
 
-    assertThat(DirectoryTrust.distrust(directory))
+    assertThat(DirectoryTrust.distrust(directory, directory.toRealPath()))
         .hasValueSatisfying(
             reason ->
                 assertThat(reason)
@@ -127,7 +127,7 @@ class DirectoryTrustTest {
     Files.setPosixFilePermissions(shared, PosixFilePermissions.fromString("rwxrwxrwx"));
     final String realShared = shared.toRealPath().toString();
 
-    assertThat(DirectoryTrust.distrust(directory))
+    assertThat(DirectoryTrust.distrust(directory, directory.toRealPath()))
         .hasValueSatisfying(
             reason ->
                 assertThat(reason)
@@ -151,9 +151,9 @@ class DirectoryTrustTest {
   void missingOrFileRefused() throws Exception {
     final Path file = Files.writeString(tempDir.resolve("file"), "x");
 
-    assertThat(DirectoryTrust.distrust(tempDir.resolve("missing")))
+    assertThat(DirectoryTrust.distrust(tempDir.resolve("missing"), POSIX, path -> "alice", "alice"))
         .hasValueSatisfying(reason -> assertThat(reason).startsWith("it cannot be resolved"));
-    assertThat(DirectoryTrust.distrust(file)).hasValue("it is not a directory");
+    assertThat(DirectoryTrust.distrust(file, file.toRealPath())).hasValue("it is not a directory");
   }
 
   private static void assumePosix() {

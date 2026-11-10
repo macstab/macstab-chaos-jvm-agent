@@ -18,9 +18,11 @@ import org.jspecify.annotations.Nullable;
  * excepted), no directory above it world-writable without the sticky bit or owned by another user,
  * and no link on the configured path owned by another user. Any of them would let another local
  * user replace what the agent writes there, or move it. The caller resolves the real path once and
- * uses it for every file operation ({@link #distrust(Path, Path)}). The plan file follows the same
- * rule ({@link StartupConfigLoader}). Modes and owners are POSIX notions: on a file system without
- * a {@code posix} view (Windows) only the existence of the directory is checked.
+ * uses it for every file operation ({@link #distrust(Path, Path)}). The plan file follows only the
+ * mode rule, for the file and its own directory ({@link StartupConfigLoader}); the owner, ancestor
+ * and link rules apply to the directory the agent writes code into. Modes and owners are POSIX
+ * notions: on a file system without a {@code posix} view (Windows) only the existence of the
+ * directory is checked.
  */
 @Internal
 public final class DirectoryTrust {
@@ -30,22 +32,8 @@ public final class DirectoryTrust {
   private DirectoryTrust() {}
 
   /**
-   * Returns why a directory is not trusted.
-   *
-   * @param directory the directory, as configured
-   * @return the reason, or empty when the directory is trusted
-   */
-  public static Optional<String> distrust(final Path directory) {
-    return distrust(
-        directory,
-        directory.getFileSystem().supportedFileAttributeViews(),
-        DirectoryTrust::ownerName,
-        System.getProperty("user.name", ""));
-  }
-
-  /**
-   * Test seam of {@link #distrust(Path)}: the file system's attribute views, the owner lookup and
-   * the JVM's user name are passed in.
+   * Test seam of {@link #distrust(Path, Path)} that resolves the real path itself: the file
+   * system's attribute views, the owner lookup and the JVM's user name are passed in.
    *
    * @param directory the directory, as configured
    * @param supportedViews the attribute views of the directory's file system
