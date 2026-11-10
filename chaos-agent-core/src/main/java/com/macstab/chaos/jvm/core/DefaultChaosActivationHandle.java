@@ -120,6 +120,15 @@ public final class DefaultChaosActivationHandle implements ChaosActivationHandle
   }
 
   /**
+   * Whether {@link #destroy()} has run; a session drops such a handle.
+   *
+   * @return {@code true} once destroyed
+   */
+  boolean destroyed() {
+    return destroyed.get();
+  }
+
+  /**
    * Permanently stops the scenario and removes it from the {@link ScenarioRegistry}.
    *
    * <p>Calling this method ensures that the scenario no longer appears in registry lookups and

@@ -104,6 +104,9 @@ final class DefaultChaosSession implements ChaosSession {
       throw new IllegalStateException("cannot activate scenario on a closed session");
     }
     final DefaultChaosActivationHandle handle = controlPlane.activateInSession(this, scenario);
+    // A handle the caller closed has nothing left for close() to end: dropped here, so a
+    // long-lived session keeps no closed scenario reachable and copies no growing list.
+    handles.removeIf(DefaultChaosActivationHandle::destroyed);
     handles.add(handle);
     // Guard against the race where close() iterated handles before add() above completed.
     // If the session was closed concurrently, destroy the handle immediately rather than leaking.
@@ -185,6 +188,15 @@ final class DefaultChaosSession implements ChaosSession {
   @Override
   public <T> Callable<T> wrap(final Callable<T> callable) {
     return scopeContext.wrap(id, callable);
+  }
+
+  /**
+   * The number of handles this session keeps; package-private as a test seam.
+   *
+   * @return the handles kept for {@link #close()}
+   */
+  int handleCount() {
+    return handles.size();
   }
 
   /**

@@ -211,4 +211,34 @@ class ScenarioLifecycleEdgesTest {
       }
     }
   }
+
+  @Nested
+  @DisplayName("A long-lived session")
+  class LongLivedSession {
+
+    @Test
+    @DisplayName("keeps no handle of a scenario it activated and the caller closed")
+    void closedHandlesAreDropped() {
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final ChaosSession session = runtime.openSession("long-lived");
+        try {
+          for (int i = 0; i < 1_000; i++) {
+            session
+                .activate(
+                    ChaosScenario.builder("s" + i)
+                        .scope(ChaosScenario.ScenarioScope.SESSION)
+                        .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                        .effect(ChaosEffect.delay(Duration.ZERO))
+                        .activationPolicy(ActivationPolicy.always())
+                        .build())
+                .close();
+          }
+
+          assertThat(((DefaultChaosSession) session).handleCount()).isLessThanOrEqualTo(1);
+        } finally {
+          session.close();
+        }
+      }
+    }
+  }
 }
