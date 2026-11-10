@@ -1,10 +1,14 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.reflect.Method;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.jspecify.annotations.Nullable;
@@ -58,6 +62,37 @@ public final class HttpUrlExtractor {
   /** OkHttp 4's end of a call: {@code RealCall.noMoreExchanges$okhttp(IOException)}. */
   private static final String OKHTTP_NO_MORE_EXCHANGES = "noMoreExchanges$okhttp";
 
+  /**
+   * {@code noMoreExchanges} per call class, typed {@code (Object, IOException)Object}; empty when
+   * the class has none (OkHttp 3) or it cannot be made callable. A {@link MethodHandle}, not a
+   * {@link Method}: calling it is no {@code Method.invoke}, so a REFLECTION_INVOKE scenario never
+   * sees the agent's own call, while the listeners it runs still run as application code.
+   */
+  private static final ClassValue<Optional<MethodHandle>> OKHTTP_END = new OkHttpEnd();
+
+  /** Finds {@code noMoreExchanges} of a call class ({@link #OKHTTP_END}). */
+  private static final class OkHttpEnd extends ClassValue<Optional<MethodHandle>> {
+    @Override
+    protected Optional<MethodHandle> computeValue(final Class<?> callType) {
+      try {
+        final Method method =
+            callType.getDeclaredMethod(OKHTTP_NO_MORE_EXCHANGES, java.io.IOException.class);
+        try {
+          method.setAccessible(true);
+        } catch (final RuntimeException encapsulated) {
+          // public: callable without it when its package is exported
+        }
+        return Optional.of(
+            MethodHandles.lookup()
+                .unreflect(method)
+                .asType(
+                    MethodType.methodType(Object.class, Object.class, java.io.IOException.class)));
+      } catch (final ReflectiveOperationException | RuntimeException absent) {
+        return Optional.empty();
+      }
+    }
+  }
+
   private HttpUrlExtractor() {}
 
   /**
@@ -67,58 +102,35 @@ public final class HttpUrlExtractor {
    * call timeout turns the failure into an {@code InterruptedIOException}) and reports {@code
    * EventListener.callFailed}. For any other failure its {@code finally} calls {@code
    * noMoreExchanges(null)}, which reports {@code callEnd}. The reject is thrown from the advice
-   * before that body runs, so the advice runs this same step.
+   * before that body runs, so the advice runs this same step. Only the lookup is agent-internal;
+   * {@code noMoreExchanges} itself runs as the application's code, as it does in OkHttp.
    *
    * @param call the {@code RealCall}
    * @param rejected what the dispatch threw
    * @return what to throw: {@code noMoreExchanges}' answer for an {@code IOException}, else {@code
    *     rejected}; also {@code rejected} when the call has no such method (OkHttp 3) or it cannot
-   *     be called, and the listener's own failure when it throws, as OkHttp lets it propagate
+   *     be made callable, and the listener's own failure when it throws, as OkHttp lets it
+   *     propagate
    */
   public static Throwable okHttpCallFailed(final Object call, final Throwable rejected) {
-    final @Nullable Method end;
+    final Optional<MethodHandle> end;
     BootstrapDispatcher.beginInternalCall();
     try {
-      end = okHttpNoMoreExchanges(call.getClass());
+      end = OKHTTP_END.get(call.getClass());
     } finally {
       BootstrapDispatcher.endInternalCall();
     }
-    if (end == null) {
+    if (end.isEmpty()) {
       return rejected;
     }
     final java.io.@Nullable IOException failure =
         rejected instanceof java.io.IOException io ? io : null;
     try {
-      final Object thrown = end.invoke(call, failure);
+      final Object thrown = (Object) end.get().invokeExact(call, failure);
       return failure != null && thrown instanceof Throwable replacement ? replacement : rejected;
-    } catch (final java.lang.reflect.InvocationTargetException listenerFailed) {
-      final Throwable cause = listenerFailed.getCause();
-      return cause == null ? rejected : cause;
-    } catch (final ReflectiveOperationException | RuntimeException uncallable) {
-      return rejected;
+    } catch (final Throwable listenerFailed) {
+      return listenerFailed;
     }
-  }
-
-  private static @Nullable Method okHttpNoMoreExchanges(final Class<?> callType) {
-    final ConcurrentHashMap<String, Method> perClass = METHOD_CACHE.get(callType);
-    Method method = perClass.get(OKHTTP_NO_MORE_EXCHANGES);
-    if (method == null) {
-      try {
-        method = callType.getDeclaredMethod(OKHTTP_NO_MORE_EXCHANGES, java.io.IOException.class);
-        try {
-          method.setAccessible(true);
-        } catch (final RuntimeException encapsulated) {
-          // public: callable without it when its package is exported
-        }
-      } catch (final NoSuchMethodException | RuntimeException absent) {
-        method = NEGATIVE_CACHE_MARKER;
-      }
-      final Method existing = perClass.putIfAbsent(OKHTTP_NO_MORE_EXCHANGES, method);
-      if (existing != null) {
-        method = existing;
-      }
-    }
-    return isNegativeMarker(method) ? null : method;
   }
 
   /**

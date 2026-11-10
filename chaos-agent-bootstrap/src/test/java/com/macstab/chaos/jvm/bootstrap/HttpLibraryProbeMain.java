@@ -15,7 +15,9 @@ public final class HttpLibraryProbeMain {
 
   public static void main(final String[] args) throws Exception {
     switch (args[0]) {
-      case "okhttp-execute" -> DefectProbeMain.withHttpServer(HttpLibraryProbeMain::okHttpExecute);
+      case "okhttp-execute" -> DefectProbeMain.withHttpServer(url -> okHttpExecute(url, null));
+      case "okhttp-execute-reflection-reject" ->
+          DefectProbeMain.withHttpServer(HttpLibraryProbeMain::okHttpExecuteBesideReflectionReject);
       case "okhttp-enqueue-reject" ->
           DefectProbeMain.withHttpServer(HttpLibraryProbeMain::okHttpEnqueueReject);
       case "okhttp-interceptor-nested-request" ->
@@ -38,11 +40,47 @@ public final class HttpLibraryProbeMain {
     DefectProbeMain.printCounts();
   }
 
-  private static void okHttpExecute(final String url) throws Exception {
+  /**
+   * {@link #okHttpExecute} with a REFLECTION_INVOKE reject active for the call's execution only:
+   * activated once the client and the call exist (the client's TLS setup reflects, and loading
+   * {@code RealCall} weaves it), it prints how often it matched as {@code reflection.matched}.
+   */
+  private static void okHttpExecuteBesideReflectionReject(final String url) throws Exception {
+    final com.macstab.chaos.jvm.api.ChaosActivationHandle[] reflection =
+        new com.macstab.chaos.jvm.api.ChaosActivationHandle[1];
+    try {
+      okHttpExecute(
+          url,
+          () ->
+              reflection[0] =
+                  ChaosPlatform.current()
+                      .activate(
+                          com.macstab.chaos.jvm.api.ChaosScenario.builder("reflection")
+                              .scope(com.macstab.chaos.jvm.api.ChaosScenario.ScenarioScope.JVM)
+                              .selector(
+                                  com.macstab.chaos.jvm.api.ChaosSelector.jvmRuntime(
+                                      java.util.Set.of(
+                                          com.macstab.chaos.jvm.api.OperationType
+                                              .REFLECTION_INVOKE)))
+                              .effect(com.macstab.chaos.jvm.api.ChaosEffect.reject("reflection"))
+                              .activationPolicy(com.macstab.chaos.jvm.api.ActivationPolicy.always())
+                              .build()));
+    } finally {
+      if (reflection[0] != null) {
+        System.out.println("reflection.matched=" + reflection[0].matchedCount());
+        reflection[0].close();
+      }
+    }
+  }
+
+  private static void okHttpExecute(final String url, final Runnable beforeCall) throws Exception {
     final java.util.List<String> events = new java.util.concurrent.CopyOnWriteArrayList<>();
     final okhttp3.OkHttpClient client = recordingClient(events);
-    try (okhttp3.Response response =
-        client.newCall(new okhttp3.Request.Builder().url(url).build()).execute()) {
+    final okhttp3.Call call = client.newCall(new okhttp3.Request.Builder().url(url).build());
+    if (beforeCall != null) {
+      beforeCall.run();
+    }
+    try (okhttp3.Response response = call.execute()) {
       System.out.println("status=" + response.code());
     } catch (final java.io.IOException rejected) {
       System.out.println("rejected=" + rejected.getClass().getName());

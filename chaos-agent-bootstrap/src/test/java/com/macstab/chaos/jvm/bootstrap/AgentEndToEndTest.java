@@ -699,6 +699,31 @@ class AgentEndToEndTest {
 
     @Test
     @DisplayName(
+        "an OkHttp reject still ends the call (callFailed) while a REFLECTION_INVOKE reject is"
+            + " active: the agent's own call of noMoreExchanges is no Method.invoke")
+    void okHttpRejectBesideReflectionReject() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "okhttp",
+                      ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND)),
+                      ChaosEffect.reject("service down"))),
+              HttpLibraryProbeMain.class,
+              "okhttp-execute-reflection-reject",
+              httpClasspath);
+      assertThat(result.value("rejected")).isEqualTo("java.io.IOException");
+      assertThat(result.value("events"))
+          .as("the reflection reject did not skip OkHttp's noMoreExchanges")
+          .isEqualTo("callStart,callFailed");
+      assertThat(result.longValue("matched.okhttp")).isEqualTo(1L);
+      assertThat(result.longValue("reflection.matched"))
+          .as("the agent's own call is invisible to REFLECTION_INVOKE")
+          .isZero();
+    }
+
+    @Test
+    @DisplayName(
         "OkHttp enqueue: a reject reaches Callback.onFailure on OkHttp's dispatcher thread, enqueue"
             + " does not throw, and EventListener.callFailed runs")
     void okHttpEnqueueReject() throws Exception {
