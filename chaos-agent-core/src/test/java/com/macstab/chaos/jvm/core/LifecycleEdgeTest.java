@@ -541,6 +541,86 @@ class LifecycleEdgeTest {
   }
 
   @Nested
+  @DisplayName("a failed method weave")
+  class FailedMethodWeave {
+
+    /** Models MethodWeaver: keeps the set last woven, and nothing after a failure. */
+    static final class FailingWeaver
+        implements java.util.function.Consumer<Set<ChaosSelector.MethodSelector>> {
+      Set<ChaosSelector.MethodSelector> woven = Set.of();
+      boolean failNext;
+
+      @Override
+      public void accept(final Set<ChaosSelector.MethodSelector> selectors) {
+        if (failNext) {
+          failNext = false;
+          woven = Set.of();
+          throw new IllegalStateException("refused retransformation");
+        }
+        woven = selectors;
+      }
+    }
+
+    private ChaosSelector.MethodSelector selector(final String className) {
+      return new ChaosSelector.MethodSelector(
+          Set.of(OperationType.METHOD_ENTER), NamePattern.exact(className), null, null);
+    }
+
+    private ScenarioController controller(
+        final String id, final ChaosSelector.MethodSelector selector) {
+      return new ScenarioController(
+          ChaosScenario.builder(id)
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(selector)
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .build(),
+          "jvm",
+          null,
+          Clock.systemUTC(),
+          new ObservabilityBus(ChaosMetricsSink.NOOP),
+          Optional::empty);
+    }
+
+    @Test
+    @DisplayName("of an activation weaves the still active scenarios' selectors again")
+    void failedActivationRestoresTheActiveHooks() {
+      final ScenarioRegistry registry = new ScenarioRegistry(Clock.systemUTC(), Map::of);
+      final FailingWeaver weaver = new FailingWeaver();
+      registry.onMethodSelectorsChanged(weaver);
+      final ChaosSelector.MethodSelector active = selector("com.example.A");
+      registry.register(controller("a", active));
+      weaver.failNext = true;
+
+      assertThatThrownBy(
+              () -> registry.weaveBeforeRegistering(Set.of(selector("com.example.B")), weaver))
+          .isInstanceOf(IllegalStateException.class);
+      // What the control plane does after a failed weave.
+      registry.reconcileMethodSelectors();
+
+      assertThat(weaver.woven).containsExactly(active);
+    }
+
+    @Test
+    @DisplayName("after a removal leaves the next reconcile to weave the rest again")
+    void failedRemovalWeavesTheRestAgain() {
+      final ScenarioRegistry registry = new ScenarioRegistry(Clock.systemUTC(), Map::of);
+      final FailingWeaver weaver = new FailingWeaver();
+      registry.onMethodSelectorsChanged(weaver);
+      final ChaosSelector.MethodSelector kept = selector("com.example.A");
+      registry.register(controller("a", kept));
+      final ScenarioController removed = controller("b", selector("com.example.B"));
+      registry.register(removed);
+      weaver.failNext = true;
+
+      registry.unregister(removed);
+      assertThat(weaver.woven).isEmpty();
+      registry.reconcileMethodSelectors();
+
+      assertThat(weaver.woven).containsExactly(kept);
+    }
+  }
+
+  @Nested
   @DisplayName("registry")
   class Registry {
 

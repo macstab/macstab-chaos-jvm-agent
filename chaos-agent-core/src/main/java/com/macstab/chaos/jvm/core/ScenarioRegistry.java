@@ -95,8 +95,12 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    */
   private final Object weaveLock = new Object();
 
-  /** The method selectors last handed to the weaver; guarded by {@link #weaveLock}. */
-  private Set<ChaosSelector.MethodSelector> wovenMethodSelectors = Set.of();
+  /**
+   * The method selectors last handed to the weaver; {@code null} after a weave failed, when the
+   * weaver holds no method hooks and the next hand-over must weave whatever is registered. Guarded
+   * by {@link #weaveLock}.
+   */
+  private @Nullable Set<ChaosSelector.MethodSelector> wovenMethodSelectors = Set.of();
 
   /** How many activation failures the diagnostics keep: the most recent ones. */
   static final int MAX_FAILURES = 256;
@@ -266,8 +270,14 @@ final class ScenarioRegistry implements ChaosDiagnostics {
       final Set<ChaosSelector.MethodSelector> current = collectMethodSelectors();
       final Set<ChaosSelector.MethodSelector> next = trim ? current : union(current, Set.of());
       if (!next.equals(wovenMethodSelectors)) {
-        wovenMethodSelectors = next;
-        methodSelectorListener.accept(next);
+        try {
+          methodSelectorListener.accept(next);
+          wovenMethodSelectors = next;
+        } catch (final RuntimeException failure) {
+          // The weaver keeps no hooks after a failure (its listener reported it): unknown, so the
+          // next reconcile weaves the registered selectors again instead of finding them equal.
+          wovenMethodSelectors = null;
+        }
       }
     }
   }
@@ -278,7 +288,9 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    * of the registered scenarios and {@code added}; nothing when that adds none. Pre-weaves add up
    * (a plan weaves all its selectors in one call, the plan-file reloader one per checked scenario)
    * until the next removal or failed registration trims them ({@link #reconcileMethodSelectors()}).
-   * A failure of {@code weaver} propagates and leaves the woven set as it was.
+   * A failure of {@code weaver} propagates and leaves the woven set unknown: a weaver that fails
+   * keeps no method hooks, so the next {@link #reconcileMethodSelectors()} weaves the registered
+   * scenarios' selectors again.
    *
    * @param added the method selectors of the scenarios about to be registered
    * @param weaver weaves the given selectors
@@ -289,7 +301,12 @@ final class ScenarioRegistry implements ChaosDiagnostics {
     synchronized (weaveLock) {
       final Set<ChaosSelector.MethodSelector> next = union(collectMethodSelectors(), added);
       if (!next.equals(wovenMethodSelectors)) {
-        weaver.accept(next);
+        try {
+          weaver.accept(next);
+        } catch (final RuntimeException failure) {
+          wovenMethodSelectors = null;
+          throw failure;
+        }
         wovenMethodSelectors = next;
       }
     }
@@ -299,7 +316,9 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   private Set<ChaosSelector.MethodSelector> union(
       final Set<ChaosSelector.MethodSelector> registered,
       final Set<ChaosSelector.MethodSelector> added) {
-    final Set<ChaosSelector.MethodSelector> selectors = new HashSet<>(wovenMethodSelectors);
+    final Set<ChaosSelector.MethodSelector> woven = wovenMethodSelectors;
+    final Set<ChaosSelector.MethodSelector> selectors =
+        woven == null ? new HashSet<>() : new HashSet<>(woven);
     selectors.addAll(registered);
     selectors.addAll(added);
     return Set.copyOf(selectors);

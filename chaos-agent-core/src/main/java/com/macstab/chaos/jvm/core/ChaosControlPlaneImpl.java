@@ -767,10 +767,11 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     try {
       hookDemand.methods(selectors);
     } catch (final RuntimeException failure) {
-      // Unweaving after a removal: the scenario is already gone, so leftover advice only costs an
-      // evaluation that matches nothing. Report it and carry on.
+      // After a removal or a failed registration: the scenarios still active may have lost their
+      // hooks. Report it; the registry, which the failure reaches, weaves them again next time.
       AgentLog.named(AgentLog.AGENT)
           .warning(() -> "[chaos-agent] could not update method hooks: " + failure);
+      throw failure;
     }
   }
 
