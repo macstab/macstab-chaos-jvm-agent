@@ -72,11 +72,27 @@ final class LoggingStart {
    * jdk.internal.misc} open the agent holds. Loading the class is no sign: every {@code
    * ManagementFactory} use loads it. Answers {@code true} on a runtime without {@code
    * java.logging}, and {@code false} for good when the state cannot be read, so the work waits for
-   * the limit.
+   * the limit. The lookups run with the dispatch depth raised: premain calls this on its own thread
+   * after the startup plan is active, and the agent's {@code Method.invoke} is no {@code
+   * REFLECTION_INVOKE} target (L3).
    *
    * @return the probe
    */
   static BooleanSupplier logManagerInitialised() {
+    BootstrapDispatcher.beginInternalCall();
+    try {
+      return probe();
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
+  }
+
+  /**
+   * Builds the probe {@link #logManagerInitialised()} returns.
+   *
+   * @return the probe
+   */
+  private static BooleanSupplier probe() {
     final Class<?> logManager;
     try {
       logManager = Class.forName("java.util.logging.LogManager", false, null);

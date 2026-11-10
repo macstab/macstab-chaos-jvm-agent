@@ -197,6 +197,40 @@ class StartupAgentIntegrationTest {
   }
 
   @Nested
+  @DisplayName("reflection invoke rejection")
+  class ReflectionInvokeRejection {
+
+    @Test
+    @DisplayName(
+        "a reject without a filter, applied once, leaves premain's own reflection alone and"
+            + " rejects the application's first call")
+    void unfilteredRejectSkipsPremainReflection() throws Exception {
+      final ChaosPlan plan =
+          new ChaosPlan(
+              new ChaosPlan.Metadata("startup-reflection", ""),
+              null,
+              List.of(
+                  ChaosScenario.builder("reflection-reject")
+                      .scope(ChaosScenario.ScenarioScope.JVM)
+                      .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.REFLECTION_INVOKE)))
+                      .effect(ChaosEffect.reject("chaos-reflection-rejection"))
+                      .activationPolicy(ActivationPolicy.count(1L))
+                      .build()));
+
+      final ChildJvmProbe.ProbeResult result = runProbe(plan, "reflection-first");
+
+      assertThat(result.longValue("before.matched.reflection-reject"))
+          .as("matches before the application reflects: %s", result.output())
+          .isZero();
+      assertThat(result.output())
+          .as("the deferred start follows the application's JUL initialisation, not the 30 s limit")
+          .contains("mbeanRegistered=true");
+      assertThat(result.output()).contains("reflection=rejected");
+      assertThat(result.longValue("applied.reflection-reject")).isEqualTo(1L);
+    }
+  }
+
+  @Nested
   @DisplayName("class load rejection")
   class ClassLoadRejection {
 

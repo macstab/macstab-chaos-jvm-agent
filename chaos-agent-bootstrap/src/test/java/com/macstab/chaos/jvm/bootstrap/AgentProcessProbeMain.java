@@ -78,6 +78,7 @@ public final class AgentProcessProbeMain {
       case "executor" -> executor();
       case "resource" -> resource();
       case "thread" -> thread();
+      case "reflection-first" -> reflectionFirst();
       case "app-hooks" -> appHooks();
       case "classload" -> classload();
       case "gc" -> gc();
@@ -213,6 +214,39 @@ public final class AgentProcessProbeMain {
       System.out.println("thread=rejected");
     } catch (final InterruptedException e) {
       Thread.currentThread().interrupt();
+    }
+  }
+
+  /**
+   * The application's first reflective call under a startup plan whose {@code REFLECTION_INVOKE}
+   * reject applies once: prints {@code before.matched.<id>} for each scenario before the
+   * application reflects, initialises {@code java.util.logging} and prints whether the agent's
+   * deferred MBean registration followed within 10 s, then prints whether the call was rejected.
+   */
+  private static void reflectionFirst() throws Exception {
+    final com.macstab.chaos.jvm.core.ChaosRuntime runtime = ChaosAgentBootstrap.installedRuntime();
+    if (runtime != null) {
+      for (final com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioReport report :
+          runtime.diagnostics().snapshot().scenarios()) {
+        System.out.println("before.matched." + report.id() + "=" + report.matchedCount());
+      }
+    }
+    java.util.logging.Logger.getLogger("chaos-probe");
+    final ObjectName name = new ObjectName("com.macstab.chaos.jvm:type=ChaosDiagnostics");
+    final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+    boolean registered = false;
+    while (!registered && System.nanoTime() - deadline < 0) {
+      registered = ManagementFactory.getPlatformMBeanServer().isRegistered(name);
+      if (!registered) {
+        Thread.sleep(20);
+      }
+    }
+    System.out.println("mbeanRegistered=" + registered);
+    try {
+      String.class.getMethod("length").invoke("hello");
+      System.out.println("reflection=invoked");
+    } catch (final java.lang.reflect.InvocationTargetException rejected) {
+      System.out.println("reflection=rejected");
     }
   }
 
