@@ -3165,6 +3165,10 @@ public final class DefectProbeMain {
                     .activationPolicy(ActivationPolicy.always())
                     .build())) {
       System.out.println("finalizable=" + backlog.state());
+      // The histogram's collection finds the objects the stressor just made; none is finalized
+      // before it: a class the suffix no longer names reads 0 here.
+      System.out.println(
+          "finalizableMade=" + instances("FinalizerBacklogStressor$FinalizableObject"));
       // The objects are garbage at once: a few collections queue them for the Finalizer thread,
       // whose finalize() sleeps 2 ms each.
       for (int i = 0; i < 10; i++) {
@@ -3178,7 +3182,9 @@ public final class DefectProbeMain {
   }
 
   /**
-   * The live instances of the class whose name ends with {@code suffix}, from a class histogram.
+   * The live instances of the class whose name ends with {@code suffix}, from a class histogram; 0
+   * when it has no row. Fails when the histogram has no {@code java.lang.String} row, which every
+   * JVM has: its rows are then not read, and 0 would pass for every class.
    */
   private static long instances(final String suffix) throws Exception {
     final String histogram =
@@ -3194,12 +3200,19 @@ public final class DefectProbeMain {
         java.util.regex.Pattern.compile(
                 "^\\s*\\d+:\\s+(\\d+)\\s+\\d+\\s+(\\S+)", java.util.regex.Pattern.MULTILINE)
             .matcher(histogram);
+    boolean strings = false;
+    long found = 0L;
     while (row.find()) {
+      strings |= "java.lang.String".equals(row.group(2));
       if (row.group(2).endsWith(suffix)) {
-        return Long.parseLong(row.group(1));
+        found = Long.parseLong(row.group(1));
       }
     }
-    return 0L;
+    if (!strings) {
+      throw new IllegalStateException(
+          "no java.lang.String row in the class histogram:\n" + histogram);
+    }
+    return found;
   }
 
   private static String state(final String scenarioId) {
