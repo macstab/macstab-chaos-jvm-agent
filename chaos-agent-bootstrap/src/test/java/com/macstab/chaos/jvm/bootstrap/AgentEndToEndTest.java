@@ -3163,6 +3163,34 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName(
+        "reflection-reject-boot-class-path: a Method.invoke of a class appended to the boot class"
+            + " path is a target")
+    void reflectionRejectReachesBootClassPathCallers() throws Exception {
+      final String classFile =
+          JdkOwnUseProbeMain.BootReflector.class.getName().replace('.', '/') + ".class";
+      final Path bootDir = tempDir.resolve("boot-class-path");
+      final Path target = bootDir.resolve(classFile);
+      Files.createDirectories(target.getParent());
+      try (java.io.InputStream in =
+          JdkOwnUseProbeMain.class.getClassLoader().getResourceAsStream(classFile)) {
+        Files.copy(java.util.Objects.requireNonNull(in, classFile), target);
+      }
+
+      final ChildJvmProbe.ProbeResult result =
+          run("reflection-reject-boot-class-path", "-Xbootclasspath/a:" + bootDir);
+
+      assertSoftly(
+          softly -> {
+            softly.assertThat(result.value("bootLoaded")).isEqualTo("true");
+            softly
+                .assertThat(result.value("bootInvoke"))
+                .isEqualTo("java.lang.reflect.InvocationTargetException");
+            softly.assertThat(result.longValue("matched")).isEqualTo(1L);
+          });
+    }
+
+    @Test
     @EnabledOnJre(JRE.JAVA_21)
     @DisplayName("direct-buffer-reject-socket-read: a socket read still gets its temporary buffer")
     void directBufferRejectSparesSocketReads() throws Exception {

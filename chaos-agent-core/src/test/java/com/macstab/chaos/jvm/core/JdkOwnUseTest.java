@@ -150,7 +150,7 @@ class JdkOwnUseTest {
   }
 
   @Test
-  @DisplayName("a JDK class is one of the bootstrap or platform class loader")
+  @DisplayName("a JDK class is one of a named module of the bootstrap or platform class loader")
   void jdkClasses() {
     assertThat(JdkOwnUse.isJdkClass(String.class)).as("bootstrap").isTrue();
     assertThat(JdkOwnUse.isJdkClass(java.sql.Connection.class)).as("platform").isTrue();

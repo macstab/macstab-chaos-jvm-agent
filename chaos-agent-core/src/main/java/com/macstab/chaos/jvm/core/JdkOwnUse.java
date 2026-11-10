@@ -184,9 +184,9 @@ final class JdkOwnUse {
 
   /**
    * Whether the innermost {@code Method.invoke} on the current thread's stack was called by a JDK
-   * class, one of the bootstrap or platform class loader: {@code EnumSet} reading an enum's
-   * constants, the TLS provider's set-up behind {@code SSLContext}. Walks the stack, so it runs
-   * only after the idle check.
+   * class, one of a named module of the bootstrap or platform class loader: {@code EnumSet} reading
+   * an enum's constants, the TLS provider's set-up behind {@code SSLContext}. Walks the stack, so
+   * it runs only after the idle check.
    *
    * @return {@code true} when that caller is a JDK class; {@code false} when it is not, or when no
    *     {@code Method.invoke} is on the stack
@@ -206,15 +206,19 @@ final class JdkOwnUse {
   }
 
   /**
-   * Whether {@code type} is a JDK class: one of the bootstrap or platform class loader.
+   * Whether {@code type} is a JDK class: one of a named module of the bootstrap or platform class
+   * loader. A class appended to the boot class path ({@code -Xbootclasspath/a}, {@code
+   * appendToBootstrapClassLoaderSearch}) is in the boot loader's unnamed module: an application's
+   * or the agent's, not the JDK's (the agent's own calls are excluded by the dispatch depth).
    *
    * @param type the class
-   * @return {@code true} for a class of the bootstrap or platform class loader
+   * @return {@code true} for a class of a named module of the bootstrap or platform class loader
    */
   @SuppressWarnings("ReferenceEquality") // a class loader's identity
   static boolean isJdkClass(final Class<?> type) {
     final ClassLoader loader = type.getClassLoader();
-    return loader == null || loader == ClassLoader.getPlatformClassLoader();
+    return (loader == null || loader == ClassLoader.getPlatformClassLoader())
+        && type.getModule().isNamed();
   }
 
   /**

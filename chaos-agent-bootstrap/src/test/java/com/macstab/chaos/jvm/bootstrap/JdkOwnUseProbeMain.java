@@ -95,6 +95,7 @@ public final class JdkOwnUseProbeMain {
       case "thread-local-suppress" -> threadLocalSuppress();
       case "reflection-reject-serialization" -> reflectionRejectSerialization();
       case "reflection-reject-jdk-callers" -> reflectionRejectJdkCallers();
+      case "reflection-reject-boot-class-path" -> reflectionRejectBootClassPath();
       case "weave-under-reflection-reject" -> weaveUnderReflectionReject();
       case "direct-buffer-reject-socket-read" -> directBufferRejectSocketRead();
       case "gc-suppress-bits" -> gcSuppressBits();
@@ -449,6 +450,41 @@ public final class JdkOwnUseProbeMain {
   private enum Colour {
     RED,
     GREEN
+  }
+
+  /**
+   * An application class the test appends to the boot class path ({@code -Xbootclasspath/a}): it
+   * references only {@code java.base}, so the boot loader can define it, in its unnamed module.
+   */
+  public static final class BootReflector {
+    private BootReflector() {}
+
+    /**
+     * Calls {@code Object.hashCode} through {@code Method.invoke}.
+     *
+     * @return the hash code
+     * @throws ReflectiveOperationException when the call fails
+     */
+    public static Object invokeHashCode() throws ReflectiveOperationException {
+      return Object.class.getMethod("hashCode").invoke(new Object());
+    }
+  }
+
+  /**
+   * A REFLECTION_INVOKE reject: a {@code Method.invoke} of a class on the boot class path, outside
+   * the JDK's named modules, is the application's and stays a target.
+   */
+  private static void reflectionRejectBootClassPath() throws Exception {
+    // Linked through the application loader, which finds the boot class path's copy first.
+    print("bootLoaded", BootReflector.class.getClassLoader() == null);
+    try (ChaosActivationHandle handle =
+        activate(
+            "reflect",
+            ChaosSelector.jvmRuntime(Set.of(OperationType.REFLECTION_INVOKE)),
+            ChaosEffect.reject("reflect"))) {
+      print("bootInvoke", outcome(() -> BootReflector.invokeHashCode() != null));
+      print("matched", handle.matchedCount());
+    }
   }
 
   /**

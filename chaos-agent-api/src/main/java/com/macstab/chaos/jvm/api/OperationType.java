@@ -422,11 +422,11 @@ public enum OperationType {
 
   /**
    * Fires on every call to {@link java.lang.reflect.Method#invoke} made by a class outside the JDK:
-   * a call whose caller is a class of the bootstrap or platform class loader ({@code EnumSet}
-   * reading an enum's constants, the TLS set-up) is the JDK's own use (L3a in {@code
-   * docs/semantics.md}), and so are the object streams' calls of a class's serialization methods.
-   * Chaos here can inject latency into reflection-heavy frameworks (Spring, Hibernate, Jackson) or
-   * simulate {@link java.lang.reflect.InvocationTargetException} wrapping.
+   * a call whose caller is a class of a named module of the bootstrap or platform class loader
+   * ({@code EnumSet} reading an enum's constants, the TLS set-up) is the JDK's own use (L3a in
+   * {@code docs/semantics.md}), and so are the object streams' calls of a class's serialization
+   * methods. Chaos here can inject latency into reflection-heavy frameworks (Spring, Hibernate,
+   * Jackson) or simulate {@link java.lang.reflect.InvocationTargetException} wrapping.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
