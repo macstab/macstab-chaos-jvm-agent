@@ -980,7 +980,7 @@ final class ScenarioController {
    * Returns {@code task} for the expiry thread, tracing its failure: the executor would keep a
    * {@link Throwable} in a future nobody reads. A failed task (a clock that throws, for example) is
    * logged once at WARNING and ends the scenario with reason {@value #EXPIRY_FAILED}, so it neither
-   * stays {@code ACTIVE} nor ends without a trace.
+   * stays {@code ACTIVE} nor ends without a trace; a failure of that end is logged at WARNING too.
    */
   private Runnable onExpiryThread(final Runnable task) {
     return () -> {
@@ -992,7 +992,16 @@ final class ScenarioController {
                 Level.WARNING,
                 failure,
                 () -> "[chaos-agent] the end of scenario " + scenario.id() + " failed");
-        endOnItsOwn(EXPIRY_FAILED);
+        try {
+          endOnItsOwn(EXPIRY_FAILED);
+        } catch (final Throwable endFailure) {
+          // Thrown into the executor's future, it would be lost as the first failure was.
+          AgentLog.named(AgentLog.AGENT)
+              .log(
+                  Level.WARNING,
+                  endFailure,
+                  () -> "[chaos-agent] could not end scenario " + scenario.id() + " after it");
+        }
       }
     };
   }

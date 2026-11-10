@@ -1121,6 +1121,89 @@ class ControlPlaneLifecycleTest {
 
     @Test
     @DisplayName(
+        "a failure while ending a scenario after a failed expiry check is logged too, not lost in"
+            + " the expiry thread's future")
+    void failingEndAfterAFailedExpiryCheckIsLogged() throws InterruptedException {
+      // Arrange: the expiry check fails (the clock throws), and so does the end that follows it
+      // (a log handler that throws on the stressor's close failure)
+      final AtomicReference<Boolean> broken = new AtomicReference<>(false);
+      final Clock clock =
+          new Clock() {
+            @Override
+            public java.time.ZoneId getZone() {
+              return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(final java.time.ZoneId zone) {
+              return this;
+            }
+
+            @Override
+            public Instant instant() {
+              if (broken.get()) {
+                throw new IllegalStateException("clock broken");
+              }
+              return Instant.now();
+            }
+          };
+      final List<RuntimeException> closeFailures = new CopyOnWriteArrayList<>();
+      final ChaosControlPlaneImpl plane = planeWithFailingCloses(clock, closeFailures);
+      final IllegalStateException endFailure = new IllegalStateException("handler broken");
+      final java.util.logging.Handler throwing =
+          new java.util.logging.Handler() {
+            @Override
+            public void publish(final java.util.logging.LogRecord record) {
+              if (record.getMessage() != null
+                  && record.getMessage().contains("could not close the stressor")) {
+                throw endFailure;
+              }
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+          };
+      final java.util.logging.Logger agentLogger =
+          java.util.logging.Logger.getLogger("com.macstab.chaos.jvm");
+      try (LogCapture log = LogCapture.agent()) {
+        agentLogger.addHandler(throwing);
+        try {
+          plane.activate(
+              submitScenario(
+                  "expiring",
+                  ActivationPolicy.builder().activeFor(Duration.ofMillis(500)).build()));
+
+          // Act
+          broken.set(true);
+
+          // Assert
+          final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+          while (log.records().stream().noneMatch(record -> record.getThrown() == endFailure)
+              && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+          }
+          assertThat(log.records())
+              .filteredOn(record -> record.getLevel() == java.util.logging.Level.WARNING)
+              .extracting(java.util.logging.LogRecord::getThrown)
+              .contains(endFailure);
+        } finally {
+          agentLogger.removeHandler(throwing);
+        }
+      } finally {
+        broken.set(false);
+        try {
+          plane.close();
+        } catch (final IllegalStateException closeFailure) {
+          // the stressor's close fails again if the scenario still holds it
+        }
+      }
+    }
+
+    @Test
+    @DisplayName(
         "close() stops every scenario and closes the listeners although a stop fails; the failure"
             + " is rethrown with the later ones suppressed")
     void closeContinuesAfterAFailingStop() {
