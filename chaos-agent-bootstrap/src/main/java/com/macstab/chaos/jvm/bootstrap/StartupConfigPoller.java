@@ -62,19 +62,19 @@ import org.jspecify.annotations.Nullable;
  * MACSTAB_CHAOS_WATCH_INTERVAL=500
  * }</pre>
  */
-public final class StartupConfigPoller implements AutoCloseable {
+final class StartupConfigPoller implements AutoCloseable {
 
   /** Environment variable that sets the poll interval in milliseconds. */
-  public static final String ENV_CONFIG_WATCH_INTERVAL = "MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL";
+  static final String ENV_CONFIG_WATCH_INTERVAL = "MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL";
 
   /** Alias of {@link #ENV_CONFIG_WATCH_INTERVAL}, read after it. */
-  public static final String ENV_WATCH_INTERVAL = "MACSTAB_CHAOS_WATCH_INTERVAL";
+  static final String ENV_WATCH_INTERVAL = "MACSTAB_CHAOS_WATCH_INTERVAL";
 
   /** System property that sets the poll interval in milliseconds, read after the agent arg. */
-  public static final String PROPERTY_WATCH_INTERVAL = "macstab.chaos.configWatchInterval";
+  static final String PROPERTY_WATCH_INTERVAL = "macstab.chaos.configWatchInterval";
 
   /** Agent arg key that sets the poll interval in milliseconds, overrides the env var. */
-  public static final String ARG_WATCH_INTERVAL = "configWatchInterval";
+  static final String ARG_WATCH_INTERVAL = "configWatchInterval";
 
   private final Path configPath;
   private final ChaosRuntime runtime;
@@ -182,7 +182,7 @@ public final class StartupConfigPoller implements AutoCloseable {
    * @param runtime the live runtime to apply diffs against
    * @return an unstarted poller, or empty if watching is not configured
    */
-  public static Optional<StartupConfigPoller> createIfEnabled(
+  static Optional<StartupConfigPoller> createIfEnabled(
       final AgentSettings settings, final Path configPath, final ChaosRuntime runtime) {
     final long intervalMs = resolveInterval(settings);
     if (intervalMs <= 0) {
@@ -198,7 +198,7 @@ public final class StartupConfigPoller implements AutoCloseable {
    * @param initialPlan the plan from the first file read
    * @param baseline that read; {@code null} to let the first tick reconcile with the file
    */
-  public void startWithInitialPlan(
+  void startWithInitialPlan(
       final com.macstab.chaos.jvm.api.ChaosPlan initialPlan,
       final StartupConfigLoader.@Nullable PlanFile baseline) {
     if (baseline != null) {

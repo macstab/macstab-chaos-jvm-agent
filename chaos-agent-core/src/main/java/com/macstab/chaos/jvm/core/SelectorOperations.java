@@ -5,7 +5,7 @@ import com.macstab.chaos.jvm.api.OperationType;
 import java.util.Set;
 
 /** The operations a selector matches. */
-public final class SelectorOperations {
+final class SelectorOperations {
 
   private SelectorOperations() {}
 
@@ -15,7 +15,7 @@ public final class SelectorOperations {
    * @param selector the selector; never {@code null}
    * @return the operations; never {@code null}
    */
-  public static Set<OperationType> of(final ChaosSelector selector) {
+  static Set<OperationType> of(final ChaosSelector selector) {
     return switch (selector) {
       case ChaosSelector.ThreadSelector threadSel -> threadSel.operations();
       case ChaosSelector.ExecutorSelector executorSel -> executorSel.operations();

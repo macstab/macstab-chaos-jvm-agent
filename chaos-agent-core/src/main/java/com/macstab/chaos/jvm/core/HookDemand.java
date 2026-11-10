@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.util.Set;
 
@@ -13,6 +14,7 @@ import java.util.Set;
  * called synchronously during activation, so a scenario takes effect as soon as {@code activate()}
  * returns; implementations must be idempotent and thread-safe.
  */
+@Internal
 @FunctionalInterface
 public interface HookDemand {
 

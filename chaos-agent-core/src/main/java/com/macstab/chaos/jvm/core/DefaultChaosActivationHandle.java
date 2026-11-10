@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
+import com.macstab.chaos.jvm.api.Internal;
 
 /**
  * Default implementation of {@link com.macstab.chaos.jvm.api.ChaosActivationHandle}.
@@ -27,6 +28,7 @@ import com.macstab.chaos.jvm.api.ChaosDiagnostics;
  *
  * <p>All methods delegate to thread-safe internals. Instances may be used from multiple threads.
  */
+@Internal
 public final class DefaultChaosActivationHandle implements ChaosActivationHandle {
   private final ScenarioController controller;
   private final ScenarioRegistry registry;

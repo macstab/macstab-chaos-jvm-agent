@@ -4,6 +4,7 @@ import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosPlan;
+import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.core.AgentLog;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
@@ -33,7 +34,11 @@ import org.jspecify.annotations.Nullable;
  * <p>Only plans activated through this instance can be stopped through it; scenarios activated by
  * the application, a test or a startup plan are listed but left alone. Anyone who can reach an
  * endpoint can inject faults: the endpoints are off by default and must be secured.
+ *
+ * <p>Agent-internal: public for the Spring Boot, Micronaut and Quarkus endpoints, which share it;
+ * not an API (configuration-reference §14.2: applications depend on {@link ChaosPlatform} only).
  */
+@Internal
 public final class ChaosManagement implements AutoCloseable {
 
   private static final AgentLog LOGGER = AgentLog.named(ChaosManagement.class.getName());
