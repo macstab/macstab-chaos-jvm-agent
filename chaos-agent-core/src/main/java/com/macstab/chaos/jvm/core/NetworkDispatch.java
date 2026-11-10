@@ -109,7 +109,7 @@ public final class NetworkDispatch {
    */
   public void beforeNioChannelOp(final String operation, final Object channel) throws Throwable {
     final OperationType indexedOp = OperationType.valueOf(operation);
-    engine.applyPreDecision(
+    final RuntimeDecision decision =
         (engine.idle(indexedOp)
             ? RuntimeDecision.none()
             : engine.evaluate(
@@ -121,7 +121,12 @@ public final class NetworkDispatch {
                     false,
                     null,
                     null,
-                    engine.scopeContext.currentSessionId()))));
+                    engine.scopeContext.currentSessionId())));
+    if (indexedOp == OperationType.NIO_CHANNEL_CONNECT) {
+      applyClosingOnFailure(decision, channel);
+    } else {
+      engine.applyPreDecision(decision);
+    }
   }
 
   /**
@@ -175,9 +180,10 @@ public final class NetworkDispatch {
       // A peer that never answers the SYN: the connect waits out its own timeout, then fails.
       engine.applyDelayAndGate(decision);
       engine.sleepNanos(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeout.waitMillis()));
+      release(socket);
       throw timeout.failure();
     }
-    engine.applyPreDecision(decision);
+    applyClosingOnFailure(decision, socket);
     return null;
   }
 
@@ -508,7 +514,40 @@ public final class NetworkDispatch {
       lingerZero(socket);
       return;
     }
+    // A failing close still closes: the JDK marks the socket or channel closed and releases it
+    // before it can report a close error.
+    applyClosingOnFailure(decision, socket);
+  }
+
+  /**
+   * Applies a decision whose injected failure ends the endpoint, as the real failure does: the JDK
+   * closes a socket or channel whose connect fails, releases it before it reports a failed close,
+   * and closes the connection of a failed TLS handshake. So the endpoint is closed first and the
+   * failure thrown after. The nested close runs inside the dispatch, where no scenario evaluates it
+   * again.
+   */
+  private void applyClosingOnFailure(
+      final RuntimeDecision decision, final @Nullable Object endpoint) throws Throwable {
+    if (decision.terminalAction() instanceof TerminalAction.Throw thrown) {
+      engine.applyDelayAndGate(decision);
+      release(endpoint);
+      throw thrown.failure();
+    }
     engine.applyPreDecision(decision);
+  }
+
+  /** Closes a socket, channel or TLS engine; one already broken is left as it is. */
+  private static void release(final @Nullable Object endpoint) {
+    try {
+      if (endpoint instanceof javax.net.ssl.SSLEngine tls) {
+        tls.closeOutbound();
+        tls.closeInbound();
+      } else if (endpoint instanceof java.io.Closeable closeable) {
+        closeable.close();
+      }
+    } catch (final java.io.IOException | RuntimeException alreadyBroken) {
+      // released as far as the endpoint allows; the injected failure is what the caller sees
+    }
   }
 
   /**
@@ -555,7 +594,7 @@ public final class NetworkDispatch {
    * @throws Throwable if an active scenario throws to simulate a TLS handshake failure
    */
   public void beforeSslHandshake(final @Nullable Object socket) throws Throwable {
-    engine.applyPreDecision(
+    applyClosingOnFailure(
         (engine.idle(OperationType.SSL_HANDSHAKE)
             ? RuntimeDecision.none()
             : engine.evaluate(
@@ -567,7 +606,8 @@ public final class NetworkDispatch {
                     false,
                     null,
                     null,
-                    engine.scopeContext.currentSessionId()))));
+                    engine.scopeContext.currentSessionId()))),
+        socket);
   }
 
   private static @Nullable String extractRemoteHost(final Object socketAddress) {

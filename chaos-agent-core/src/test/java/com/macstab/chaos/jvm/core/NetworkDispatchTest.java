@@ -384,6 +384,35 @@ class NetworkDispatchTest {
     }
 
     @Test
+    @DisplayName("a failed connect, handshake or close leaves the endpoint closed, as the JDK does")
+    void failureClosesTheEndpoint() throws Exception {
+      activate(
+          "connect",
+          ChaosSelector.network(Set.of(OperationType.SOCKET_CONNECT, OperationType.SOCKET_CLOSE)),
+          ChaosEffect.reject("refused"));
+      activate(
+          "tls", ChaosSelector.ssl(Set.of(OperationType.SSL_HANDSHAKE)), ChaosEffect.reject("tls"));
+      final Socket connecting = new Socket();
+      final Socket closing = new Socket();
+      final javax.net.ssl.SSLEngine engine =
+          javax.net.ssl.SSLContext.getDefault().createSSLEngine();
+
+      assertThatThrownBy(
+              () ->
+                  runtime.beforeSocketConnect(
+                      connecting, new InetSocketAddress(InetAddress.getLoopbackAddress(), 9), 0))
+          .isInstanceOf(java.net.ConnectException.class);
+      assertThatThrownBy(() -> runtime.beforeSocketClose(closing)).isInstanceOf(IOException.class);
+      assertThatThrownBy(() -> runtime.beforeSslHandshake(engine))
+          .isInstanceOf(javax.net.ssl.SSLHandshakeException.class);
+
+      assertThat(connecting.isClosed()).isTrue();
+      assertThat(closing.isClosed()).isTrue();
+      assertThat(engine.isOutboundDone()).isTrue();
+      assertThat(engine.isInboundDone()).isTrue();
+    }
+
+    @Test
     @DisplayName("a reset on a connection that refuses SO_LINGER closes it normally")
     void resetOnABrokenConnectionClosesNormally() {
       activate(
