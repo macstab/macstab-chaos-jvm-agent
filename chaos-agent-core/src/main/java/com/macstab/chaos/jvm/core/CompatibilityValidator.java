@@ -1041,7 +1041,8 @@ final class CompatibilityValidator {
 
   /**
    * The {@code FailingClientStream} constructors the gRPC reject can build; {@code
-   * ClientCallExtractor} in the instrumentation builds the stream against the same list.
+   * ClientCallExtractor} in the instrumentation builds the stream against the same list, a copy the
+   * core cannot share ({@code GrpcFailingStreamShapesTest} keeps the two equal).
    */
   private static final List<List<String>> GRPC_FAILING_STREAM_SHAPES =
       List.of(

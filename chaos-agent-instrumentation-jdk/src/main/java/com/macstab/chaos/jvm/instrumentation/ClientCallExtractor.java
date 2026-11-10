@@ -89,7 +89,8 @@ public final class ClientCallExtractor {
 
   /**
    * The {@code FailingClientStream} constructors gRPC versions have had, newest last; {@code
-   * CompatibilityValidator} refuses a gRPC reject at activation against the same list.
+   * CompatibilityValidator} refuses a gRPC reject at activation against the same list, a copy the
+   * core cannot share ({@code GrpcFailingStreamShapesTest} keeps the two equal).
    */
   private static final List<List<String>> GRPC_FAILING_STREAM_SHAPES =
       List.of(
