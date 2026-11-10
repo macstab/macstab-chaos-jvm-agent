@@ -112,10 +112,10 @@ public final class AgentProcessProbeMain {
       case "reflection-invoke-delay" -> reflectionInvokeDelay();
       case "zip-deflate-delay" -> zipDeflateDelay();
       case "zip-inflate-delay" -> zipInflateDelay();
-      case "instant-now-delay" -> instantNowDelay();
-      case "local-datetime-now-delay" -> localDateTimeNowDelay();
-      case "zoned-datetime-now-delay" -> zonedDateTimeNowDelay();
-      case "date-new-delay" -> dateNewDelay();
+      case "instant-now-skew" -> instantNowSkew();
+      case "local-datetime-now-skew" -> localDateTimeNowSkew();
+      case "zoned-datetime-now-skew" -> zonedDateTimeNowSkew();
+      case "date-new-skew" -> dateNewSkew();
       case "system-gc-delay" -> systemGcDelay();
       case "system-exit-suppress" -> systemExitSuppress();
       case "direct-buffer-delay" -> directBufferDelay();
@@ -525,14 +525,14 @@ public final class AgentProcessProbeMain {
     inflater.end();
   }
 
-  private static void instantNowDelay() {
+  private static void instantNowSkew() {
     // Clock skew is applied to the returned Instant value, not wall-clock time.
     final long realMillis = System.currentTimeMillis();
     final long returnedMillis = Instant.now().toEpochMilli();
     System.out.println("skewSeconds=" + ((returnedMillis - realMillis) / 1000));
   }
 
-  private static void localDateTimeNowDelay() {
+  private static void localDateTimeNowSkew() {
     // LocalDateTime has no zone; compare against the same zone as System.currentTimeMillis.
     final java.time.Instant realInstant =
         java.time.Instant.ofEpochMilli(System.currentTimeMillis());
@@ -543,13 +543,13 @@ public final class AgentProcessProbeMain {
         "skewSeconds=" + java.time.temporal.ChronoUnit.SECONDS.between(real, returned));
   }
 
-  private static void zonedDateTimeNowDelay() {
+  private static void zonedDateTimeNowSkew() {
     final long realMillis = System.currentTimeMillis();
     final long returnedMillis = ZonedDateTime.now().toInstant().toEpochMilli();
     System.out.println("skewSeconds=" + ((returnedMillis - realMillis) / 1000));
   }
 
-  private static void dateNewDelay() {
+  private static void dateNewSkew() {
     final long realMillis = System.currentTimeMillis();
     final long returnedMillis = new Date().getTime();
     System.out.println("skewSeconds=" + ((returnedMillis - realMillis) / 1000));

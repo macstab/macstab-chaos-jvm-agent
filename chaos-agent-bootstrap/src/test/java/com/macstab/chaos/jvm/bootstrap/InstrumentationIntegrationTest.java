@@ -513,15 +513,15 @@ class InstrumentationIntegrationTest {
 
     @Test
     @DisplayName("agent skews Instant.now() forward (INSTANT_NOW)")
-    void agentDelaysInstantNow() throws Exception {
+    void agentSkewsInstantNow() throws Exception {
       final ChaosPlan plan =
           singleScenarioPlan(
-              "instant-now-delay",
+              "instant-now-skew",
               ChaosSelector.jvmRuntime(Set.of(OperationType.INSTANT_NOW)),
               ChaosEffect.skewClock(
                   java.time.Duration.ofSeconds(CLOCK_SKEW_SECONDS),
                   ChaosEffect.ClockSkewMode.FIXED));
-      final long skewSeconds = runProbe(plan, "instant-now-delay").longValue("skewSeconds");
+      final long skewSeconds = runProbe(plan, "instant-now-skew").longValue("skewSeconds");
       assertThat(skewSeconds)
           .as(
               "INSTANT_NOW skew must shift returned value by ≥%d s (got %d s)",
@@ -531,15 +531,15 @@ class InstrumentationIntegrationTest {
 
     @Test
     @DisplayName("agent skews LocalDateTime.now() forward (LOCAL_DATE_TIME_NOW)")
-    void agentDelaysLocalDateTimeNow() throws Exception {
+    void agentSkewsLocalDateTimeNow() throws Exception {
       final ChaosPlan plan =
           singleScenarioPlan(
-              "local-datetime-now-delay",
+              "local-datetime-now-skew",
               ChaosSelector.jvmRuntime(Set.of(OperationType.LOCAL_DATE_TIME_NOW)),
               ChaosEffect.skewClock(
                   java.time.Duration.ofSeconds(CLOCK_SKEW_SECONDS),
                   ChaosEffect.ClockSkewMode.FIXED));
-      final long skewSeconds = runProbe(plan, "local-datetime-now-delay").longValue("skewSeconds");
+      final long skewSeconds = runProbe(plan, "local-datetime-now-skew").longValue("skewSeconds");
       assertThat(skewSeconds)
           .as(
               "LOCAL_DATE_TIME_NOW skew must shift returned value by ≥%d s (got %d s)",
@@ -549,15 +549,15 @@ class InstrumentationIntegrationTest {
 
     @Test
     @DisplayName("agent skews ZonedDateTime.now() forward (ZONED_DATE_TIME_NOW)")
-    void agentDelaysZonedDateTimeNow() throws Exception {
+    void agentSkewsZonedDateTimeNow() throws Exception {
       final ChaosPlan plan =
           singleScenarioPlan(
-              "zoned-datetime-now-delay",
+              "zoned-datetime-now-skew",
               ChaosSelector.jvmRuntime(Set.of(OperationType.ZONED_DATE_TIME_NOW)),
               ChaosEffect.skewClock(
                   java.time.Duration.ofSeconds(CLOCK_SKEW_SECONDS),
                   ChaosEffect.ClockSkewMode.FIXED));
-      final long skewSeconds = runProbe(plan, "zoned-datetime-now-delay").longValue("skewSeconds");
+      final long skewSeconds = runProbe(plan, "zoned-datetime-now-skew").longValue("skewSeconds");
       assertThat(skewSeconds)
           .as(
               "ZONED_DATE_TIME_NOW skew must shift returned value by ≥%d s (got %d s)",
@@ -567,15 +567,15 @@ class InstrumentationIntegrationTest {
 
     @Test
     @DisplayName("agent skews new Date() forward (DATE_NEW)")
-    void agentDelaysDateNew() throws Exception {
+    void agentSkewsDateNew() throws Exception {
       final ChaosPlan plan =
           singleScenarioPlan(
-              "date-new-delay",
+              "date-new-skew",
               ChaosSelector.jvmRuntime(Set.of(OperationType.DATE_NEW)),
               ChaosEffect.skewClock(
                   java.time.Duration.ofSeconds(CLOCK_SKEW_SECONDS),
                   ChaosEffect.ClockSkewMode.FIXED));
-      final long skewSeconds = runProbe(plan, "date-new-delay").longValue("skewSeconds");
+      final long skewSeconds = runProbe(plan, "date-new-skew").longValue("skewSeconds");
       assertThat(skewSeconds)
           .as(
               "DATE_NEW skew must shift returned value by ≥%d s (got %d s)",
