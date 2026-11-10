@@ -1175,7 +1175,7 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **JSON type:** `"jdbc"`  
 **Operations:** `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`, `JDBC_PREPARED_STATEMENT`, `JDBC_TRANSACTION_COMMIT`, `JDBC_TRANSACTION_ROLLBACK`, `R2DBC_STATEMENT_EXECUTE` (see the client-library selectors)  
-**Purpose:** Intercept JDBC operations across HikariCP, c3p0, and standard `java.sql.Connection`/`Statement` implementations.
+**Purpose:** Intercept JDBC operations across HikariCP, c3p0, and standard `java.sql.Connection`/`Statement` implementations. A driver's `Connection.isValid` and HikariCP's own validation, set-up, reset and dirty-connection rollback are not targets (semantics L3a).
 
 **Fields:**
 

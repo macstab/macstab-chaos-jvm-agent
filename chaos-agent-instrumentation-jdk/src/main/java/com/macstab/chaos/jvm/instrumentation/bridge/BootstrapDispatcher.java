@@ -237,8 +237,18 @@ public final class BootstrapDispatcher {
    */
   public static final int SCOPE_EXECUTOR_SUBMIT = 31;
 
+  /**
+   * Scope of a JDBC driver's or connection pool's own work (scope-only): {@code
+   * Connection.isValid(int)} of every driver, and HikariCP's validation, connection set-up and
+   * reset and its rollback of a connection taken back dirty ({@code PoolBase.isConnectionDead},
+   * {@code newPoolEntry}, {@code resetConnectionState}, {@code ProxyConnection.close}). The
+   * statements, prepares, commits and rollbacks inside it are not the application's: the JDBC
+   * advice skips them.
+   */
+  public static final int SCOPE_JDBC_INTERNAL = 32;
+
   /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
-  static final int SCOPE_COUNT = 32;
+  static final int SCOPE_COUNT = 33;
 
   /**
    * Enters a call-depth scope on the current thread.

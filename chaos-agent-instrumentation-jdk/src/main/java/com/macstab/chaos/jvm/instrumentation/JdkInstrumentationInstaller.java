@@ -1202,6 +1202,24 @@ public final class JdkInstrumentationInstaller {
                             .and(ElementMatchers.takesArguments(0)))),
             "com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool");
 
+    // HikariCP's own JDBC work: validation, connection set-up and reset, and the rollback of a
+    // connection taken back dirty (SCOPE_JDBC_INTERNAL). None of these names exists on both types.
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            typeBuilder ->
+                typeBuilder.visit(
+                    advise(
+                        JdbcAdvice.JdbcInternal.class,
+                        ElementMatchers.namedOneOf(
+                                "isConnectionDead", "newPoolEntry", "resetConnectionState")
+                            .or(
+                                ElementMatchers.named("close")
+                                    .and(ElementMatchers.takesArguments(0)))
+                            .and(ElementMatchers.not(ElementMatchers.isAbstract())))),
+            "com.zaxxer.hikari.pool.PoolBase",
+            "com.zaxxer.hikari.pool.ProxyConnection");
+
     // Match every Statement.execute*/Connection.prepareStatement overload whose first
     // argument is the SQL String. The JDBC API defines generated-keys variants
     // (execute(String, int), execute(String, int[]), execute(String, String[]),
@@ -1277,6 +1295,13 @@ public final class JdkInstrumentationInstaller {
                             JdbcAdvice.PrepareStatementAdvice.class,
                             ElementMatchers.named("prepareCall")
                                 .and(ElementMatchers.takesArgument(0, String.class))))
+                    // A driver's validation (pgjdbc runs a statement in isValid).
+                    .visit(
+                        advise(
+                            JdbcAdvice.JdbcInternal.class,
+                            ElementMatchers.named("isValid")
+                                .and(ElementMatchers.takesArguments(int.class))
+                                .and(ElementMatchers.not(ElementMatchers.isAbstract()))))
                     .visit(
                         advise(
                             JdbcAdvice.CommitAdvice.class,

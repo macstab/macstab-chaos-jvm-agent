@@ -70,7 +70,9 @@ final class JdbcAdvice {
   static final class StatementExecuteAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(0) final String sql) throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE)) {
+      // Entered also inside the driver's or pool's own work, so the exit advice stays balanced.
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE)
+          || BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_JDBC_INTERNAL)) {
         return;
       }
       try {
@@ -99,7 +101,9 @@ final class JdbcAdvice {
   static final class PreparedStatementExecuteAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE)) {
+      // Entered also inside the driver's or pool's own work, so the exit advice stays balanced.
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE)
+          || BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_JDBC_INTERNAL)) {
         return;
       }
       try {
@@ -126,7 +130,9 @@ final class JdbcAdvice {
   static final class PrepareStatementAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(0) final String sql) throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_PREPARE)) {
+      // Entered also inside the driver's or pool's own work, so the exit advice stays balanced.
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_PREPARE)
+          || BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_JDBC_INTERNAL)) {
         return;
       }
       try {
@@ -143,11 +149,33 @@ final class JdbcAdvice {
     }
   }
 
+  /**
+   * The JDBC work of a driver or a pool itself, scope-only ({@link
+   * BootstrapDispatcher#SCOPE_JDBC_INTERNAL}): {@code Connection.isValid(int)} (pgjdbc runs a
+   * statement there), and HikariCP's {@code PoolBase.isConnectionDead}, {@code newPoolEntry} (its
+   * {@code connectionInitSql} and driver checks), {@code resetConnectionState} and {@code
+   * ProxyConnection.close} (the rollback of a connection taken back dirty). The statements,
+   * prepares, commits and rollbacks inside it are not the application's JDBC calls.
+   */
+  static final class JdbcInternal {
+    @Advice.OnMethodEnter
+    static void enter() {
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_INTERNAL);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_INTERNAL);
+    }
+  }
+
   /** Intercepts {@code java.sql.Connection.commit()}. */
   static final class CommitAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_COMMIT)) {
+      // Entered also inside the driver's or pool's own work, so the exit advice stays balanced.
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_COMMIT)
+          || BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_JDBC_INTERNAL)) {
         return;
       }
       try {
@@ -168,7 +196,9 @@ final class JdbcAdvice {
   static final class RollbackAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_ROLLBACK)) {
+      // Entered also inside the driver's or pool's own work, so the exit advice stays balanced.
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_ROLLBACK)
+          || BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_JDBC_INTERNAL)) {
         return;
       }
       try {
