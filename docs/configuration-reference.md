@@ -1861,6 +1861,8 @@ When `lifespan` elapses the threads end and the scenario ends `INACTIVE` with re
 | `entriesPerThread` | int  | > 0        | ThreadLocal entries per unit of the common pool's parallelism; the pool spreads them over its workers |
 | `valueSizeBytes`   | int  | > 0        | Size of each entry's byte-array value         |
 
+The common pool's parallelism × `entriesPerThread` must fit an `int` (`ChaosValidationException` otherwise), and the planted values, parallelism × `entriesPerThread` × `valueSizeBytes`, the free heap (the maximum heap, `-Xmx`, less what is in use at activation): above it the scenario is refused with `ChaosUnsupportedFeatureException` (`UNSUPPORTED_RUNTIME`) before anything is allocated, as for `heapPressure`.
+
 **Cleanup:** closing the handle releases the planted values, whichever worker holds them.
 
 ---
@@ -1946,6 +1948,8 @@ String `i` is `i` written in base 256, so the strings are distinct; a count, len
 |------------------|----------|------------|----------------------------------------|
 | `referenceCount` | int      | > 0        | WeakReferences created per flood cycle |
 | `floodInterval`  | Duration | ≥ 1 ms     | Interval between flood cycles          |
+
+A cycle keeps about 64 bytes per reference reachable (the `WeakReference` and its anchor; the 1 KiB referent is only weakly reachable): `referenceCount` × 64 bytes above the free heap is refused with `ChaosUnsupportedFeatureException` (`UNSUPPORTED_RUNTIME`).
 
 Under `-XX:+DisableExplicitGC` the stressor's `System.gc()` does nothing: only the collections the application causes enqueue its references, so far fewer are processed (in a probe, 75,613 instead of 2,000,000 over 200 cycles). It is accepted, because the load it produces is real.
 

@@ -5,6 +5,8 @@
 
 Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
+* **core:** a `threadLocalLeak` whose planted values (the common pool's parallelism × `entriesPerThread` × `valueSizeBytes`) or a `referenceQueueFlood` whose cycle (`referenceCount` × 64 bytes) exceeds the free heap is refused at activation with `ChaosUnsupportedFeatureException` (`UNSUPPORTED_RUNTIME`), before anything is allocated; both used to allocate until an `OutOfMemoryError` that application threads could receive too. A `threadLocalLeak` whose entries overflow an `int` is a `ChaosValidationException`, also from `ChaosRuntime.validate`, instead of an `IllegalArgumentException` when it started ([migration §21](docs/migration-2.0.md#21-stressor-parameters-are-refused-instead-of-reduced)).
+
 * **core:** a `spuriousWakeup` effect is refused unless its `NioSelector` lists `NIO_SELECTOR_SELECT` as its only operation; another NIO operation beside it was accepted, and the effect then skipped that channel call ([migration §42](docs/migration-2.0.md#42-spuriouswakeup-selects-nio_selector_select-alone)).
 
 * **testkit, spring, micronaut, quarkus:** the `ChaosControlPlane` a test extension injects (`TrackingChaosControlPlane`) ends everything the test created through it: `stopTracked()` also closes the sessions it opened and removes the listeners it added, after each test (testkit) or test class (Spring Boot, Micronaut, Quarkus). A listener or session that a later test relied on is gone ([migration §41](docs/migration-2.0.md#41-a-tests-sessions-and-listeners-end-with-it)).

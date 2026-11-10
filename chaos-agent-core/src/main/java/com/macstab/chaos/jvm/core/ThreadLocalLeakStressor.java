@@ -66,11 +66,9 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
   ThreadLocalLeakStressor(final ChaosEffect.ThreadLocalLeakEffect effect, final int parallelism) {
     final int totalLocals;
     try {
-      // Math.multiplyExact rejects overflow. Without this guard, `parallelism *
-      // effect.entriesPerThread()` wraps to a negative int for pathological entriesPerThread
-      // values and `new ArrayList<>(totalLocals)` throws NegativeArraySizeException inside the
-      // stressor factory — the controller then logs a cryptic construction failure instead of
-      // surfacing the real misconfiguration.
+      // CompatibilityValidator refuses an entry count that overflows an int at activation; this
+      // only asserts that invariant for a stressor built directly (a test, a parallelism changed
+      // since the validation).
       totalLocals = Math.multiplyExact(parallelism, effect.entriesPerThread());
     } catch (final ArithmeticException overflow) {
       throw new IllegalArgumentException(

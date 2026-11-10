@@ -222,17 +222,28 @@ final class CompatibilityValidator {
   }
 
   /**
-   * Refuses stressor parameters a stressor cannot honour, instead of clamping them: heap pressure
-   * above the free heap (it depends on the runtime's state, {@link
-   * ChaosUnsupportedFeatureException}), more interned strings than their length can make distinct
-   * or than the caps allow, and an interval below the millisecond a stressor sleeps in.
+   * Refuses stressor parameters a stressor cannot honour, instead of clamping them: heap pressure,
+   * a thread-local leak or a reference-queue flood cycle above the free heap (it depends on the
+   * runtime's state, {@link ChaosUnsupportedFeatureException}), a thread-local leak whose entries
+   * overflow an {@code int}, more interned strings than their length can make distinct or than the
+   * caps allow, and an interval below the millisecond a stressor sleeps in.
    */
   private static void validateStressorLimits(final ChaosEffect effect) {
     switch (effect) {
-      case ChaosEffect.HeapPressureEffect heap -> validateHeapLimit(heap.bytes());
+      case ChaosEffect.HeapPressureEffect heap ->
+          validateHeapLimit("heap pressure of " + heap.bytes() + " bytes exceeds", heap.bytes());
       case ChaosEffect.StringInternPressureEffect intern -> validateStringIntern(intern);
-      case ChaosEffect.ReferenceQueueFloodEffect flood ->
-          requireMillisecond("floodInterval", flood.floodInterval());
+      case ChaosEffect.ReferenceQueueFloodEffect flood -> {
+        requireMillisecond("floodInterval", flood.floodInterval());
+        validateHeapLimit(
+            "referenceQueueFlood of "
+                + flood.referenceCount()
+                + " references per cycle needs about "
+                + saturatedProduct(flood.referenceCount(), REFERENCE_BYTES)
+                + " bytes, which exceeds",
+            saturatedProduct(flood.referenceCount(), REFERENCE_BYTES));
+      }
+      case ChaosEffect.ThreadLocalLeakEffect leak -> validateThreadLocalLeak(leak);
       case ChaosEffect.SafepointStormEffect storm ->
           requireMillisecond("gcInterval", storm.gcInterval());
       case ChaosEffect.KeepAliveEffect keepAlive ->
@@ -244,11 +255,55 @@ final class CompatibilityValidator {
   }
 
   /**
-   * Refuses heap pressure above the heap left free: the maximum heap less what is in use now. A
-   * snapshot: the application allocating meanwhile can still make the stressor run out, which fails
-   * its start.
+   * What one reference of a flood cycle keeps reachable: the {@code WeakReference} and its slot in
+   * the cycle's anchor list, rounded up. Its 1 KiB referent is only weakly reachable, so a
+   * collection reclaims it during the cycle.
    */
-  private static void validateHeapLimit(final long bytes) {
+  static final long REFERENCE_BYTES = 64L;
+
+  /**
+   * Refuses a thread-local leak whose entries overflow an {@code int} (an invalid scenario) or
+   * whose planted values exceed the free heap (the runtime cannot hold them): the common pool's
+   * parallelism × {@code entriesPerThread} values of {@code valueSizeBytes} each.
+   */
+  private static void validateThreadLocalLeak(final ChaosEffect.ThreadLocalLeakEffect leak) {
+    final long parallelism = java.util.concurrent.ForkJoinPool.commonPool().getParallelism();
+    final long entries = parallelism * leak.entriesPerThread();
+    if (entries > Integer.MAX_VALUE) {
+      throw new ChaosValidationException(
+          "threadLocalLeak entriesPerThread "
+              + leak.entriesPerThread()
+              + " times the common pool's parallelism of "
+              + parallelism
+              + " is "
+              + entries
+              + " entries, more than "
+              + Integer.MAX_VALUE);
+    }
+    final long bytes = saturatedProduct(entries, leak.valueSizeBytes());
+    validateHeapLimit(
+        "threadLocalLeak of " + entries + " values of " + leak.valueSizeBytes() + " bytes exceeds",
+        bytes);
+  }
+
+  /** {@code a × b}, saturated at {@link Long#MAX_VALUE}, for non-negative factors. */
+  private static long saturatedProduct(final long a, final long b) {
+    try {
+      return Math.multiplyExact(a, b);
+    } catch (final ArithmeticException overflow) {
+      return Long.MAX_VALUE;
+    }
+  }
+
+  /**
+   * Refuses a stressor that retains more than the heap left free: the maximum heap less what is in
+   * use now. A snapshot: the application allocating meanwhile can still make the stressor run out,
+   * which fails its start.
+   *
+   * @param what the refusal's start, naming the stressor and its size, ending in "exceeds"
+   * @param bytes what the stressor retains
+   */
+  private static void validateHeapLimit(final String what, final long bytes) {
     final Runtime jvm = Runtime.getRuntime();
     final long max = jvm.maxMemory();
     if (max == Long.MAX_VALUE) {
@@ -257,9 +312,8 @@ final class CompatibilityValidator {
     final long free = max - (jvm.totalMemory() - jvm.freeMemory());
     if (bytes > free) {
       throw new ChaosUnsupportedFeatureException(
-          "heap pressure of "
-              + bytes
-              + " bytes exceeds the free heap of "
+          what
+              + " the free heap of "
               + free
               + " bytes (the maximum heap, -Xmx, less what is in use)");
     }
