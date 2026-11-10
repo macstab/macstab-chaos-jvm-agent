@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.bootstrap.jfr;
 
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
+import com.macstab.chaos.jvm.api.Internal;
 import jdk.jfr.Category;
 import jdk.jfr.Description;
 import jdk.jfr.Event;
@@ -26,6 +27,7 @@ import org.jspecify.annotations.Nullable;
  * {@link JfrChaosEventSink}. The hook queries {@link ChaosDiagnostics} at each tick and emits one
  * event per invocation.
  */
+@Internal
 @Name("com.macstab.chaos.jvm.StressorSnapshot")
 @Category({"Chaos", "Stressor"})
 @Label("Chaos Stressor Snapshot")

@@ -620,12 +620,14 @@ tasks.register("childJvmCoverage") {
 // when the compiled API differs from the file and lists the difference per type; `./gradlew apiDump`
 // records an intended change, which then shows in review. Types and members annotated @Internal are
 // left out. The tasks live in buildSrc (com.macstab.chaos.gradle). Not API: the internal
-// implementation modules (core, instrumentation, the agent jar; docs/configuration-reference.md
-// §14.2) and the Quarkus deployment modules, whose build steps only Quarkus calls.
+// implementation modules (core, instrumentation; docs/configuration-reference.md §14.2) and the
+// Quarkus deployment modules, whose build steps only Quarkus calls. Of the agent jar's module
+// (chaos-agent-bootstrap) only ChaosPlatform is API: its other public types are @Internal, so
+// api/chaos-agent-bootstrap.api records ChaosPlatform alone, and japicmp compares that class only
+// (the published artifact is the shaded jar, whose relocated libraries are no API).
 val nonApiModules = setOf(
     "chaos-agent-core",
     "chaos-agent-instrumentation-jdk",
-    "chaos-agent-bootstrap",
     "chaos-agent-quarkus-extension-deployment",
     "chaos-agent-quarkus-management-deployment",
 )
@@ -684,6 +686,9 @@ subprojects {
             failOnModification.set(!breaksAccepted)
             ignoreMissingClasses.set(true)
             annotationExcludes.add("@com.macstab.chaos.jvm.api.Internal")
+            if (module == "chaos-agent-bootstrap") {
+                classIncludes.add("com.macstab.chaos.jvm.bootstrap.ChaosPlatform")
+            }
             txtOutputFile.set(layout.buildDirectory.file("reports/japicmp/$module.txt"))
             htmlOutputFile.set(layout.buildDirectory.file("reports/japicmp/$module.html"))
             onlyIf("release $baselineVersion contains $module (apiBaselineAbsentModules)") { !absent }

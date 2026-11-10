@@ -1,0 +1,4 @@
+public final class com/macstab/chaos/jvm/bootstrap/ChaosPlatform
+  public static method current()Lcom/macstab/chaos/jvm/api/ChaosControlPlane;
+  public static method installLocally()Lcom/macstab/chaos/jvm/api/ChaosControlPlane;
+  public static method installed()Ljava/util/Optional;

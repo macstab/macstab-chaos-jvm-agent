@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.bootstrap.jfr;
 
+import com.macstab.chaos.jvm.api.Internal;
 import jdk.jfr.Category;
 import jdk.jfr.Description;
 import jdk.jfr.Enabled;
@@ -25,6 +26,7 @@ import org.jspecify.annotations.Nullable;
  * WHERE effectType = 'DelayEffect'
  * }</pre>
  */
+@Internal
 @Name("com.macstab.chaos.jvm.EffectApplied")
 @Category({"Chaos", "Application"})
 @Label("Chaos Effect Applied")

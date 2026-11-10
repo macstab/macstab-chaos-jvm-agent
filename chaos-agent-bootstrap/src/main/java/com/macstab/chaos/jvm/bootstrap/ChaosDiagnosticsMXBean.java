@@ -1,5 +1,7 @@
 package com.macstab.chaos.jvm.bootstrap;
 
+import com.macstab.chaos.jvm.api.Internal;
+
 /**
  * MXBean interface for the chaos agent diagnostics, registered with the platform MBean server under
  * the object name {@code com.macstab.chaos.jvm:type=ChaosDiagnostics}.
@@ -34,6 +36,7 @@ package com.macstab.chaos.jvm.bootstrap;
  *       <td>Stops every plan activated through {@code activatePlan}; control operation.</td></tr>
  * </table>
  */
+@Internal
 public interface ChaosDiagnosticsMXBean {
 
   /**

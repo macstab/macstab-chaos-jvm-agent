@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.bootstrap.jfr;
 
+import com.macstab.chaos.jvm.api.Internal;
 import jdk.jfr.Category;
 import jdk.jfr.Description;
 import jdk.jfr.Enabled;
@@ -17,6 +18,7 @@ import org.jspecify.annotations.Nullable;
  * overhead is negligible. Correlate with {@link ChaosEffectAppliedEvent} via {@code scenarioId} to
  * reconstruct the full chaos timeline in a JFR recording.
  */
+@Internal
 @Name("com.macstab.chaos.jvm.ScenarioLifecycle")
 @Category({"Chaos", "Lifecycle"})
 @Label("Chaos Scenario Lifecycle")

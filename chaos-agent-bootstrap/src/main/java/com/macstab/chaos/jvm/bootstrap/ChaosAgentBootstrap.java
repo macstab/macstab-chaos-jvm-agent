@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.bootstrap;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
+import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.bootstrap.jfr.JfrIntegration;
 import com.macstab.chaos.jvm.core.AgentHookThread;
 import com.macstab.chaos.jvm.core.AgentLog;
@@ -74,6 +75,7 @@ import org.jspecify.annotations.Nullable;
  * at most one runtime is installed at a time, and {@link #current()} only ever returns a runtime
  * whose installation completed.
  */
+@Internal
 public final class ChaosAgentBootstrap {
   /**
    * Initialization of the single {@link ChaosRuntime} for this JVM. {@code null} until an

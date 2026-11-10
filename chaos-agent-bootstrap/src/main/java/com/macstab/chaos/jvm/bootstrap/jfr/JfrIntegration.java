@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.bootstrap.jfr;
 
 import com.macstab.chaos.jvm.api.ChaosEventListener;
+import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 
 /**
@@ -17,6 +18,7 @@ import com.macstab.chaos.jvm.core.ChaosRuntime;
  * <p>This class deliberately avoids loading {@code jdk.jfr.*} classes at its own load time — those
  * are only referenced inside {@code installJfr}, which is only called after the probe succeeds.
  */
+@Internal
 public final class JfrIntegration {
   private JfrIntegration() {}
 
