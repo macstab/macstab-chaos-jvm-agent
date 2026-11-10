@@ -26,6 +26,7 @@ include(
     "chaos-agent-examples:sb3-retry-resilience-test",
     "chaos-agent-examples:sb4-sla-validation-test",
     "chaos-agent-examples:sb3-fat-jar-probe",
+    "chaos-agent-examples:quarkus-chaos-app",
     "chaos-agent-instrumentation-jdk",
     "chaos-agent-micrometer",
     "chaos-agent-opentelemetry",

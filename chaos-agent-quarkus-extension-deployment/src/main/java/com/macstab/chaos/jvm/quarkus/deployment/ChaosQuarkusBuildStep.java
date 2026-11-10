@@ -3,10 +3,16 @@ package com.macstab.chaos.jvm.quarkus.deployment;
 import com.macstab.chaos.jvm.quarkus.ChaosArcProducer;
 import com.macstab.chaos.jvm.quarkus.ChaosQuarkusRecorder;
 import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
+import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
+import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
+import io.quarkus.deployment.builditem.TestClassBeanBuildItem;
+import org.jboss.jandex.AnnotationInstance;
+import org.jboss.jandex.AnnotationTarget;
+import org.jboss.jandex.DotName;
 
 /**
  * Build-time processor that registers the chaos-agent extension with the Quarkus build graph.
@@ -37,6 +43,10 @@ public final class ChaosQuarkusBuildStep {
   /** Feature name reported in the Quarkus startup banner. */
   private static final String FEATURE_NAME = "macstab-chaos-agent";
 
+  /** {@code com.macstab.chaos.jvm.quarkus.QuarkusChaosTest}, by name: it is test support only. */
+  private static final DotName QUARKUS_CHAOS_TEST =
+      DotName.createSimple("com.macstab.chaos.jvm.quarkus.QuarkusChaosTest");
+
   /** Default constructor; Quarkus instantiates build-step classes reflectively. */
   public ChaosQuarkusBuildStep() {}
 
@@ -60,6 +70,31 @@ public final class ChaosQuarkusBuildStep {
   @BuildStep
   public AdditionalBeanBuildItem producerBean() {
     return AdditionalBeanBuildItem.unremovableOf(ChaosArcProducer.class);
+  }
+
+  /**
+   * Makes every test class annotated with {@code @QuarkusChaosTest} a bean, as Quarkus does for a
+   * {@code @QuarkusTest} class, so its {@code @Inject} fields are injected. Quarkus finds a test
+   * class only by an {@code @ExtendWith(QuarkusTestExtension.class)} it sees in the indexed test
+   * classes; the one on {@code @QuarkusChaosTest} is in this extension's jar, which it does not
+   * index, so without this step a {@code @QuarkusChaosTest} class with an injected field cannot be
+   * instantiated.
+   *
+   * @param index the application's combined index, which holds the test classes in test mode
+   * @param testClassBeans where the test classes are registered
+   */
+  @BuildStep
+  public void chaosTestClassBeans(
+      final CombinedIndexBuildItem index,
+      final BuildProducer<TestClassBeanBuildItem> testClassBeans) {
+    for (final AnnotationInstance annotation :
+        index.getIndex().getAnnotations(QUARKUS_CHAOS_TEST)) {
+      if (annotation.target().kind() == AnnotationTarget.Kind.CLASS
+          && !annotation.target().asClass().isAnnotation()) {
+        testClassBeans.produce(
+            new TestClassBeanBuildItem(annotation.target().asClass().name().toString()));
+      }
+    }
   }
 
   /**

@@ -20,8 +20,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
  * Extension-level tests that exercise {@link ChaosQuarkusExtension} without spinning up a Quarkus
- * application; no {@code @QuarkusTest} runs in this build. The class-loader split of a Quarkus test
- * (the producer in Quarkus's loader, this extension in the system loader) is covered by {@link
+ * application; {@code chaos-agent-examples/quarkus-chaos-app} boots one with {@code @QuarkusTest}
+ * and {@code @QuarkusChaosTest}. The class-loader split of a Quarkus test (the producer in
+ * Quarkus's loader, this extension in the system loader) is covered by {@link
  * ChaosArcProducerTestModeTest}.
  */
 @ExtendWith(ChaosQuarkusExtension.class)

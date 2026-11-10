@@ -16,6 +16,8 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation("io.quarkus:quarkus-core-deployment")
     testImplementation("io.quarkus:quarkus-arc-deployment")
+    // ChaosQuarkusBuildStepTest annotates a fixture with @QuarkusChaosTest, meta-annotated @QuarkusTest.
+    testCompileOnly("io.quarkus:quarkus-junit5")
 }
 
 tasks.jar {

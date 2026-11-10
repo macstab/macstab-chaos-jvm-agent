@@ -20,6 +20,28 @@ class ChaosQuarkusBuildStepTest {
   }
 
   @Test
+  @DisplayName("makes a @QuarkusChaosTest class a test-class bean, and nothing else")
+  void chaosTestClassesAreBeans() throws Exception {
+    final org.jboss.jandex.Index index =
+        org.jboss.jandex.Index.of(
+            ChaosTestFixture.class,
+            PlainFixture.class,
+            com.macstab.chaos.jvm.quarkus.QuarkusChaosTest.class);
+    final java.util.List<String> beans = new java.util.ArrayList<>();
+
+    step.chaosTestClassBeans(
+        new io.quarkus.deployment.builditem.CombinedIndexBuildItem(index, index),
+        item -> beans.add(item.getTestClassName()));
+
+    assertThat(beans).containsExactly(ChaosTestFixture.class.getName());
+  }
+
+  @com.macstab.chaos.jvm.quarkus.QuarkusChaosTest
+  static final class ChaosTestFixture {}
+
+  static final class PlainFixture {}
+
+  @Test
   @DisplayName("records the agent install for runtime init")
   void installsAtRuntimeInit() {
     final AtomicInteger installs = new AtomicInteger();

@@ -51,6 +51,7 @@ val nonPublishableModules = setOf(
     "sb3-retry-resilience-test",
     "sb4-sla-validation-test",
     "sb4-virtual-thread-pinning",
+    "quarkus-chaos-app",
 )
 
 // The description each published module's POM carries; a published module without one fails the
