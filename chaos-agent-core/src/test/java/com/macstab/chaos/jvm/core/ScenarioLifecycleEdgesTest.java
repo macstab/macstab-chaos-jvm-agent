@@ -241,4 +241,35 @@ class ScenarioLifecycleEdgesTest {
       }
     }
   }
+
+  @Nested
+  @DisplayName("Closing the control plane")
+  class ClosingThePlane {
+
+    @Test
+    @DisplayName("stops the scenarios of an open session, which then activates nothing more")
+    void openSessionAfterClose() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      final ChaosSession session = runtime.openSession("outlived");
+      final ChaosScenario scenario =
+          ChaosScenario.builder("in-session")
+              .scope(ChaosScenario.ScenarioScope.SESSION)
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(ChaosEffect.reject("in session"))
+              .activationPolicy(ActivationPolicy.always())
+              .build();
+      final ChaosActivationHandle handle = session.activate(scenario);
+
+      runtime.close();
+
+      assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.STOPPED);
+      assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();
+      assertThatThrownBy(() -> session.activate(scenario))
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessage("chaos control plane is closed");
+      assertThatCode(session::close)
+          .as("the session's own close still ends its binding")
+          .doesNotThrowAnyException();
+    }
+  }
 }

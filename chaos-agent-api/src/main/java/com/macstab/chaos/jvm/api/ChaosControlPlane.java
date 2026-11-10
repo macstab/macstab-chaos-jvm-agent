@@ -135,10 +135,13 @@ public interface ChaosControlPlane extends AutoCloseable {
   boolean removeEventListener(ChaosEventListener listener);
 
   /**
-   * Stops all active scenarios, closes all open sessions, and cleans up stressor resources.
+   * Stops and removes every scenario, those of open sessions included, cleans up stressor resources
+   * and closes the listeners that are {@link AutoCloseable}.
    *
-   * <p>After this call the control plane is inert; all selector evaluations return no-match.
-   * Calling {@code close()} more than once is safe.
+   * <p>After this call the control plane is inert; all selector evaluations return no-match. An
+   * open session stays open but activates nothing more (its {@code activate} fails with {@link
+   * IllegalStateException}); its own {@link ChaosSession#close()} still ends its binding of the
+   * thread that opened it. Calling {@code close()} more than once is safe.
    */
   @Override
   void close();
