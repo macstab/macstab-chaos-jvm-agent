@@ -943,6 +943,67 @@ class StressorEdgeBehaviourTest {
       }
     }
 
+    @Test
+    @DisplayName(
+        "the event delivery thread of an asynchronous listener keeps no loader through the context"
+            + " class loader or the inheritable thread-locals of the thread that registered it")
+    @SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
+    void eventDeliveryThreadKeepsNoRegisteringThreadsLoader() throws Exception {
+      // Arrange
+      final ObservabilityBus bus =
+          new ObservabilityBus(com.macstab.chaos.jvm.api.ChaosMetricsSink.NOOP);
+      ClassLoader application = new ThrowawayLoader();
+      final java.lang.ref.WeakReference<ClassLoader> loader =
+          new java.lang.ref.WeakReference<>(application);
+      final Thread self = Thread.currentThread();
+      final ClassLoader original = self.getContextClassLoader();
+      self.setContextClassLoader(application);
+      REQUEST_CONTEXT.set(LoaderFrame.in(application));
+      application = null;
+      try {
+        // Act
+        bus.addListener(com.macstab.chaos.jvm.api.ChaosEventListener.async(event -> {}));
+      } finally {
+        REQUEST_CONTEXT.remove();
+        self.setContextClassLoader(original);
+      }
+      try {
+        // Assert
+        assertThat(collected(loader))
+            .as("the loader is collected while the delivery thread runs")
+            .isTrue();
+      } finally {
+        bus.close();
+      }
+    }
+
+    @Test
+    @DisplayName(
+        "the event delivery thread of an asynchronous listener keeps no loader through the"
+            + " access-control context of the frames that registered it (JDK 21)")
+    @SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
+    void eventDeliveryThreadKeepsNoCallerFrames() throws Exception {
+      // Arrange
+      final ObservabilityBus bus =
+          new ObservabilityBus(com.macstab.chaos.jvm.api.ChaosMetricsSink.NOOP);
+      ClassLoader application = new ThrowawayLoader();
+      final java.lang.ref.WeakReference<ClassLoader> loader =
+          new java.lang.ref.WeakReference<>(application);
+      // Act: the listener is registered from a frame of a class the throwaway loader defined
+      LoaderFrame.in(application)
+          .accept(
+              () -> bus.addListener(com.macstab.chaos.jvm.api.ChaosEventListener.async(e -> {})));
+      application = null;
+      try {
+        // Assert
+        assertThat(collected(loader))
+            .as("the loader is collected while the delivery thread runs")
+            .isTrue();
+      } finally {
+        bus.close();
+      }
+    }
+
     private static void awaitQuietly(final java.util.concurrent.CountDownLatch release) {
       try {
         release.await();

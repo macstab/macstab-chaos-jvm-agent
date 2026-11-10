@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.bootstrap;
 
 import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.core.AgentThreads;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.core.DefaultChaosActivationHandle;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
@@ -162,11 +163,9 @@ public final class StartupConfigPoller implements AutoCloseable {
     this.afterRead = afterRead;
     this.scheduler =
         Executors.newSingleThreadScheduledExecutor(
-            runnable -> {
-              final Thread thread = new Thread(() -> internally(runnable), "chaos-config-poller");
-              thread.setDaemon(true);
-              return thread;
-            });
+            // Keeps no loader of the thread that starts the poller (a framework starter's).
+            runnable ->
+                AgentThreads.unstarted("chaos-config-poller", true, () -> internally(runnable)));
   }
 
   /**

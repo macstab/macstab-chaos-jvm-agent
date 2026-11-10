@@ -201,8 +201,8 @@ final class ObservabilityBus {
         final ChaosEventListener delegate, final java.util.concurrent.atomic.AtomicLong dropped) {
       this.delegate = delegate;
       this.dropped = dropped;
-      this.thread = new Thread(this::deliver, "macstab-chaos-events");
-      this.thread.setDaemon(true);
+      // Keeps no loader of the registering thread: the thread lives as long as the listener.
+      this.thread = AgentThreads.unstarted("macstab-chaos-events", true, this::deliver);
       ChaosDispatcher.incrementDispatchDepth();
       try {
         this.thread.start();

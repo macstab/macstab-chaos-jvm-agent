@@ -573,4 +573,51 @@ class ChaosReportsTest {
     return Files.readAllLines(
         tempDir.resolve(ChaosReports.HITS_FILE_PREFIX + ProcessHandle.current().pid()));
   }
+
+  @Test
+  @DisplayName(
+      "the hits writer and the final-hits hook keep no loader of the thread that started the"
+          + " reports")
+  void reportThreadsKeepNoStartingLoader() throws Exception {
+    final java.lang.ref.WeakReference<ClassLoader> loader =
+        startedUnderApplicationLoader(() -> create("reports=on;reportsDir=" + tempDir, Map.of()));
+
+    assertThat(collected(loader)).as("the loader is collected while the reports run").isTrue();
+  }
+
+  /** An application's inheritable request context (Spring's, an MDC adapter's). */
+  private static final InheritableThreadLocal<Object> REQUEST_CONTEXT =
+      new InheritableThreadLocal<>();
+
+  /**
+   * Runs {@code start} on a thread whose context class loader and inheritable request context are a
+   * throwaway application loader, as a framework starter's self-attach does, and returns that
+   * loader weakly.
+   */
+  private static java.lang.ref.WeakReference<ClassLoader> startedUnderApplicationLoader(
+      final Runnable start) {
+    final Thread self = Thread.currentThread();
+    final ClassLoader original = self.getContextClassLoader();
+    final ClassLoader application = new java.net.URLClassLoader(new java.net.URL[0], null);
+    self.setContextClassLoader(application);
+    REQUEST_CONTEXT.set(application);
+    try {
+      start.run();
+    } finally {
+      REQUEST_CONTEXT.remove();
+      self.setContextClassLoader(original);
+    }
+    return new java.lang.ref.WeakReference<>(application);
+  }
+
+  /** Whether a full GC clears {@code loader} within 10 s. */
+  private static boolean collected(final java.lang.ref.WeakReference<ClassLoader> loader)
+      throws InterruptedException {
+    final long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+    while (loader.get() != null && System.nanoTime() < deadline) {
+      System.gc();
+      Thread.sleep(20);
+    }
+    return loader.get() == null;
+  }
 }

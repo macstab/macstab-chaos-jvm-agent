@@ -43,7 +43,8 @@ public interface ChaosEventListener {
    * thread that triggered them: the control plane queues each event (a bounded queue; events beyond
    * its capacity are dropped and counted in the diagnostics' {@code droppedEvents}) and returns
    * immediately. Use it for listeners that log, export or block, so their latency never reaches an
-   * intercepted application call. Events are delivered in order.
+   * intercepted application call. Events are delivered in order. The thread has no context class
+   * loader, so it keeps no class loader of the thread that registered the listener reachable.
    *
    * @param delegate the listener to call off the triggering thread
    * @return a listener to register with {@link ChaosControlPlane#addEventListener}

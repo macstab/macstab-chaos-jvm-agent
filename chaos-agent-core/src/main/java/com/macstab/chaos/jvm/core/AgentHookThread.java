@@ -14,12 +14,13 @@ import com.macstab.chaos.jvm.api.Internal;
 public final class AgentHookThread extends Thread implements AgentOwned {
 
   /**
-   * Creates the unstarted hook thread.
+   * Creates the unstarted hook thread, without the inheritable thread-locals of the thread that
+   * makes it (an application's request context would stay reachable until the JVM exits).
    *
    * @param body the hook's work
    * @param name the thread name
    */
   public AgentHookThread(final Runnable body, final String name) {
-    super(body, name);
+    super(null, body, name, 0L, false);
   }
 }

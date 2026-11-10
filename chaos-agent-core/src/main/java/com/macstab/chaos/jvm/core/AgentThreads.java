@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
+import com.macstab.chaos.jvm.api.Internal;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -17,9 +18,12 @@ import java.util.stream.Collectors;
  * ACTIVE} without load (L17). A platform thread made here keeps no application's loader reachable
  * from the thread that made it: it has no context class loader, does not inherit that thread's
  * inheritable thread-locals, and (JDK 21 to 23) is made under {@code doPrivileged}, so the
- * access-control context it keeps holds only the agent's frames, not the caller's.
+ * access-control context it keeps holds only the agent's frames, not the caller's. Public only for
+ * {@link #unstarted} and {@link #shutdownHook}, the threads of the bootstrap and of the event bus;
+ * agent-internal, not an API.
  */
-final class AgentThreads {
+@Internal
+public final class AgentThreads {
 
   private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
@@ -134,6 +138,32 @@ final class AgentThreads {
       final Runnable body,
       final Runnable onFailure) {
     return named(created(threads, owned(body, onFailure)), name, daemon);
+  }
+
+  /**
+   * Returns an unstarted platform thread of the agent that keeps no loader of the thread that made
+   * it, running {@code body} as it is: the body raises the dispatch depth itself, and the caller
+   * starts the thread with the depth raised.
+   *
+   * @param name the thread name
+   * @param daemon whether the thread is a daemon
+   * @param body the thread's work
+   * @return the unstarted thread
+   */
+  public static Thread unstarted(final String name, final boolean daemon, final Runnable body) {
+    return named(created(PLATFORM, body), name, daemon);
+  }
+
+  /**
+   * Returns an unstarted {@link AgentHookThread} that keeps no loader of the thread that made it,
+   * for {@link Runtime#addShutdownHook}; the body raises the dispatch depth itself.
+   *
+   * @param name the thread name
+   * @param body the hook's work
+   * @return the unstarted hook thread
+   */
+  public static Thread shutdownHook(final String name, final Runnable body) {
+    return named(created(task -> new AgentHookThread(task, name), body), name, false);
   }
 
   /**

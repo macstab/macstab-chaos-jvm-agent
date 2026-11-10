@@ -492,4 +492,52 @@ class StartupConfigPollerEdgeCaseTest {
     assertThat(log).doesNotContain("config reloaded");
     org.mockito.Mockito.verifyNoInteractions(runtime);
   }
+
+  @Test
+  @DisplayName("the poll thread keeps no loader of the thread that started the poller")
+  void pollThreadKeepsNoStartingLoader() throws Exception {
+    when(runtime.activate(any(ChaosScenario.class))).thenReturn(handle);
+    final StartupConfigPoller started = poller("60000");
+
+    final java.lang.ref.WeakReference<ClassLoader> loader =
+        startedUnderApplicationLoader(() -> startFromBaseline(started));
+
+    assertThat(collected(loader)).as("the loader is collected while the poller runs").isTrue();
+  }
+
+  /** An application's inheritable request context (Spring's, an MDC adapter's). */
+  private static final InheritableThreadLocal<Object> REQUEST_CONTEXT =
+      new InheritableThreadLocal<>();
+
+  /**
+   * Runs {@code start} on a thread whose context class loader and inheritable request context are a
+   * throwaway application loader, as a framework starter's self-attach does, and returns that
+   * loader weakly.
+   */
+  private static java.lang.ref.WeakReference<ClassLoader> startedUnderApplicationLoader(
+      final Runnable start) {
+    final Thread self = Thread.currentThread();
+    final ClassLoader original = self.getContextClassLoader();
+    final ClassLoader application = new java.net.URLClassLoader(new java.net.URL[0], null);
+    self.setContextClassLoader(application);
+    REQUEST_CONTEXT.set(application);
+    try {
+      start.run();
+    } finally {
+      REQUEST_CONTEXT.remove();
+      self.setContextClassLoader(original);
+    }
+    return new java.lang.ref.WeakReference<>(application);
+  }
+
+  /** Whether a full GC clears {@code loader} within 10 s. */
+  private static boolean collected(final java.lang.ref.WeakReference<ClassLoader> loader)
+      throws InterruptedException {
+    final long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+    while (loader.get() != null && System.nanoTime() < deadline) {
+      System.gc();
+      Thread.sleep(20);
+    }
+    return loader.get() == null;
+  }
 }
