@@ -91,18 +91,23 @@ class ChaosManagementTest {
     final String planA = PLAN.replace("mgmt-delay", "a-delay");
     final String planB = PLAN.replace("mgmt-delay", "b-delay");
 
-    final java.util.concurrent.CompletableFuture<ChaosManagement.ActivationResponse> a =
-        java.util.concurrent.CompletableFuture.supplyAsync(() -> management.activate(planA));
-    assertThat(inActivation.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-    final ChaosManagement.ActivationResponse b = management.activate(planB);
-    release.countDown();
-    final ChaosManagement.ActivationResponse answeredA =
-        a.get(5, java.util.concurrent.TimeUnit.SECONDS);
+    // Released in the finally too: a failure must not leave a common-pool thread parked.
+    try {
+      final java.util.concurrent.CompletableFuture<ChaosManagement.ActivationResponse> a =
+          java.util.concurrent.CompletableFuture.supplyAsync(() -> management.activate(planA));
+      assertThat(inActivation.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+      final ChaosManagement.ActivationResponse b = management.activate(planB);
+      release.countDown();
+      final ChaosManagement.ActivationResponse answeredA =
+          a.get(5, java.util.concurrent.TimeUnit.SECONDS);
 
-    assertThat(answeredA.status()).isEqualTo("activated");
-    assertThat(b.status()).isEqualTo("conflict");
-    assertThat(started).as("the refused plan injected nothing").doesNotContainKey("b-delay");
-    assertThat(state("a-delay")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+      assertThat(answeredA.status()).isEqualTo("activated");
+      assertThat(b.status()).isEqualTo("conflict");
+      assertThat(started).as("the refused plan injected nothing").doesNotContainKey("b-delay");
+      assertThat(state("a-delay")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+    } finally {
+      release.countDown();
+    }
   }
 
   @Test
@@ -125,20 +130,25 @@ class ChaosManagementTest {
           }
         });
 
-    final java.util.concurrent.CompletableFuture<ChaosManagement.ActivationResponse> activation =
-        java.util.concurrent.CompletableFuture.supplyAsync(() -> management.activate(PLAN));
-    assertThat(inActivation.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-    final ChaosManagement.ActivationResponse second = management.activate(PLAN);
-    final ChaosManagement.StopResponse stop = management.stop("mgmt");
-    release.countDown();
+    // Released in the finally too: a failure must not leave a common-pool thread parked.
+    try {
+      final java.util.concurrent.CompletableFuture<ChaosManagement.ActivationResponse> activation =
+          java.util.concurrent.CompletableFuture.supplyAsync(() -> management.activate(PLAN));
+      assertThat(inActivation.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+      final ChaosManagement.ActivationResponse second = management.activate(PLAN);
+      final ChaosManagement.StopResponse stop = management.stop("mgmt");
+      release.countDown();
 
-    assertThat(second.status()).isEqualTo("conflict");
-    assertThat(second.message()).startsWith("plan conflict: ").contains("in progress");
-    assertThat(stop.status()).isEqualTo("conflict");
-    assertThat(stop.message()).startsWith("plan conflict: ").contains("in progress");
-    assertThat(activation.get(5, java.util.concurrent.TimeUnit.SECONDS).status())
-        .isEqualTo("activated");
-    assertThat(management.stop("mgmt").status()).isEqualTo("stopped");
+      assertThat(second.status()).isEqualTo("conflict");
+      assertThat(second.message()).startsWith("plan conflict: ").contains("in progress");
+      assertThat(stop.status()).isEqualTo("conflict");
+      assertThat(stop.message()).startsWith("plan conflict: ").contains("in progress");
+      assertThat(activation.get(5, java.util.concurrent.TimeUnit.SECONDS).status())
+          .isEqualTo("activated");
+      assertThat(management.stop("mgmt").status()).isEqualTo("stopped");
+    } finally {
+      release.countDown();
+    }
   }
 
   @Test

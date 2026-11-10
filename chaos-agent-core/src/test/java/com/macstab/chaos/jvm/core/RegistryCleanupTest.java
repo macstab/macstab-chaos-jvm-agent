@@ -57,7 +57,6 @@ class RegistryCleanupTest {
   @Test
   @DisplayName("the sessions with scenarios follow register, replace and unregister")
   void sessionsWithScenariosFollowTheRegistry() {
-    final ChaosRuntime runtime = new ChaosRuntime();
     final ChaosScenario scenario =
         ChaosScenario.builder("session-scenario")
             .scope(ChaosScenario.ScenarioScope.SESSION)
@@ -65,26 +64,27 @@ class RegistryCleanupTest {
             .effect(ChaosEffect.delay(Duration.ofMillis(1)))
             .activationPolicy(ActivationPolicy.always())
             .build();
-    final String sessionId;
-    final String otherId;
+    try (ChaosRuntime runtime = new ChaosRuntime()) {
+      final String sessionId;
+      final String otherId;
 
-    try (final var session = runtime.openSession("with-scenario");
-        final var other = runtime.openSession("without-scenario")) {
-      sessionId = session.id();
-      otherId = other.id();
-      assertThat(runtime.registry().hasScenarios(sessionId)).as("before activate").isFalse();
+      try (final var session = runtime.openSession("with-scenario");
+          final var other = runtime.openSession("without-scenario")) {
+        sessionId = session.id();
+        otherId = other.id();
+        assertThat(runtime.registry().hasScenarios(sessionId)).as("before activate").isFalse();
 
-      session.activate(scenario).stop();
-      assertThat(runtime.registry().hasScenarios(sessionId)).as("registered, stopped").isTrue();
+        session.activate(scenario).stop();
+        assertThat(runtime.registry().hasScenarios(sessionId)).as("registered, stopped").isTrue();
 
-      // A stopped scenario is replaced by the next activation under its id.
-      session.activate(scenario);
-      assertThat(runtime.registry().hasScenarios(sessionId)).as("replaced").isTrue();
-      assertThat(runtime.registry().hasScenarios(otherId)).as("other session").isFalse();
+        // A stopped scenario is replaced by the next activation under its id.
+        session.activate(scenario);
+        assertThat(runtime.registry().hasScenarios(sessionId)).as("replaced").isTrue();
+        assertThat(runtime.registry().hasScenarios(otherId)).as("other session").isFalse();
+      }
+
+      assertThat(runtime.registry().hasScenarios(sessionId)).as("after close").isFalse();
     }
-
-    assertThat(runtime.registry().hasScenarios(sessionId)).as("after close").isFalse();
-    runtime.close();
   }
 
   @Test

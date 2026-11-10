@@ -62,29 +62,46 @@ class ChaosMicronautExtensionGuardsTest {
   void contextBeanActivationEndsWithTheLastClass() {
     final ExtensionContext first = context(new HashMap<>(), null);
     final ExtensionContext second = context(new HashMap<>(), null);
-    extension.beforeAll(first);
-    extension.beforeAll(second);
-    final ChaosControlPlane bean =
-        ChaosMicronautExtension.contextPlane(
-            com.macstab.chaos.jvm.bootstrap.ChaosPlatform.installLocally());
-    final com.macstab.chaos.jvm.api.ChaosEventListener listener = event -> {};
-    bean.addEventListener(listener);
-    bean.activate(
-        com.macstab.chaos.jvm.api.ChaosScenario.builder("mn-context-bean-jvm")
-            .selector(
-                com.macstab.chaos.jvm.api.ChaosSelector.executor(
-                    java.util.Set.of(com.macstab.chaos.jvm.api.OperationType.EXECUTOR_SUBMIT)))
-            .effect(com.macstab.chaos.jvm.api.ChaosEffect.delay(java.time.Duration.ofMillis(1)))
-            .build());
+    // Whether each class is still running; a failure must not leave one counted as running. The
+    // contexts are proxies without equals, so they are tracked by flag, not in a collection.
+    boolean firstRunning = false;
+    boolean secondRunning = false;
+    try {
+      firstRunning = true;
+      extension.beforeAll(first);
+      secondRunning = true;
+      extension.beforeAll(second);
+      final ChaosControlPlane bean =
+          ChaosMicronautExtension.contextPlane(
+              com.macstab.chaos.jvm.bootstrap.ChaosPlatform.installLocally());
+      final com.macstab.chaos.jvm.api.ChaosEventListener listener = event -> {};
+      bean.addEventListener(listener);
+      bean.activate(
+          com.macstab.chaos.jvm.api.ChaosScenario.builder("mn-context-bean-jvm")
+              .selector(
+                  com.macstab.chaos.jvm.api.ChaosSelector.executor(
+                      java.util.Set.of(com.macstab.chaos.jvm.api.OperationType.EXECUTOR_SUBMIT)))
+              .effect(com.macstab.chaos.jvm.api.ChaosEffect.delay(java.time.Duration.ofMillis(1)))
+              .build());
 
-    extension.afterAll(first);
-    assertThat(beanScenario()).as("a class still running uses it").isPresent();
+      firstRunning = false;
+      extension.afterAll(first);
+      assertThat(beanScenario()).as("a class still running uses it").isPresent();
 
-    extension.afterAll(second);
-    assertThat(beanScenario()).isEmpty();
-    assertThat(bean.removeEventListener(listener))
-        .as("the application's listener is the application's")
-        .isTrue();
+      secondRunning = false;
+      extension.afterAll(second);
+      assertThat(beanScenario()).isEmpty();
+      assertThat(bean.removeEventListener(listener))
+          .as("the application's listener is the application's")
+          .isTrue();
+    } finally {
+      if (firstRunning) {
+        extension.afterAll(first);
+      }
+      if (secondRunning) {
+        extension.afterAll(second);
+      }
+    }
   }
 
   private static Optional<?> beanScenario() {

@@ -64,15 +64,21 @@ class StartupPlanLifetimeTest {
 
               // Test class A, then test class B, both on the cached context.
               final ExtensionContext classA = classContext();
-              extension.beforeAll(classA);
-              extension.afterAll(classA);
+              try {
+                extension.beforeAll(classA);
+              } finally {
+                extension.afterAll(classA);
+              }
               assertThat(state())
                   .as("after the first class sharing the context ended")
                   .contains(ChaosDiagnostics.ScenarioState.ACTIVE);
 
               final ExtensionContext classB = classContext();
-              extension.beforeAll(classB);
-              extension.afterAll(classB);
+              try {
+                extension.beforeAll(classB);
+              } finally {
+                extension.afterAll(classB);
+              }
               assertThat(state()).contains(ChaosDiagnostics.ScenarioState.ACTIVE);
             });
 

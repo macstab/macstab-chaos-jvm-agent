@@ -75,6 +75,7 @@ class ChaosArcProducerTestModeTest {
   void injectedActivationIsReleasedAfterTheClass() throws Exception {
     final ChaosQuarkusExtension extension = new ChaosQuarkusExtension();
     final ExtensionContext classContext = classContext();
+    boolean classEnded = false;
     try (URLClassLoader quarkusLoader = quarkusLikeLoader()) {
       extension.beforeAll(classContext);
       final ChaosControlPlane plane = produce(quarkusLoader);
@@ -83,12 +84,18 @@ class ChaosArcProducerTestModeTest {
       plane.activate(scenario("quarkus-injected"));
       assertThat(ChaosPlatform.current().diagnostics().scenario("quarkus-injected")).isPresent();
 
+      classEnded = true;
       extension.afterAll(classContext);
 
       assertThat(ChaosPlatform.current().diagnostics().scenario("quarkus-injected")).isEmpty();
       assertThat(plane.removeEventListener(listener))
           .as("the application's listener is the application's")
           .isTrue();
+    } finally {
+      // A failure before the class ended must not leave the class counted as running.
+      if (!classEnded) {
+        extension.afterAll(classContext);
+      }
     }
   }
 

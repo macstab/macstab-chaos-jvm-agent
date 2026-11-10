@@ -198,13 +198,19 @@ class NewStressorLifecycleTest {
         final SafepointStormStressor storm =
             new SafepointStormStressor(
                 new ChaosEffect.SafepointStormEffect(Duration.ofMillis(20), 0), Optional.empty());
-        await().atMost(2, TimeUnit.SECONDS).until(() -> storm.gcCycleCount() > 0);
-        storm.close();
+        try {
+          await().atMost(2, TimeUnit.SECONDS).until(() -> storm.gcCycleCount() > 0);
+        } finally {
+          storm.close();
+        }
         final ReferenceQueueFloodStressor flood =
             new ReferenceQueueFloodStressor(
                 new ChaosEffect.ReferenceQueueFloodEffect(5, Duration.ofMillis(20)));
-        await().atMost(2, TimeUnit.SECONDS).until(() -> flood.floodCycleCount() > 0);
-        flood.close();
+        try {
+          await().atMost(2, TimeUnit.SECONDS).until(() -> flood.floodCycleCount() > 0);
+        } finally {
+          flood.close();
+        }
       } finally {
         logger.removeHandler(capture);
         logger.setLevel(previous);

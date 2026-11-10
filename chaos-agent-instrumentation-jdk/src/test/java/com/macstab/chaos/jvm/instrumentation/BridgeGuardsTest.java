@@ -135,13 +135,17 @@ class BridgeGuardsTest {
       "idle is true wherever a call passes through, and false only when it may be a target")
   void idleAnswers() throws Throwable {
     assertThat(BootstrapDispatcher.idle(OperationTags.MESSAGE_RECEIVE)).as("no agent").isTrue();
-    BootstrapDispatcher.install(new Object(), null);
-    assertThat(BootstrapDispatcher.idle(OperationTags.MESSAGE_RECEIVE)).as("no handles").isTrue();
-    BootstrapDispatcher.install(new Object(), failingHandles(new Exception("delegate failure")));
-    assertThat(BootstrapDispatcher.idle(OperationTags.MESSAGE_RECEIVE))
-        .as("a delegate failure: evaluate as before")
-        .isFalse();
-    BootstrapDispatcher.install(null, null);
+    try {
+      BootstrapDispatcher.install(new Object(), null);
+      assertThat(BootstrapDispatcher.idle(OperationTags.MESSAGE_RECEIVE)).as("no handles").isTrue();
+      BootstrapDispatcher.install(new Object(), failingHandles(new Exception("delegate failure")));
+      assertThat(BootstrapDispatcher.idle(OperationTags.MESSAGE_RECEIVE))
+          .as("a delegate failure: evaluate as before")
+          .isFalse();
+    } finally {
+      // The delegate is JVM-global: a failure must not leave it installed for later tests.
+      BootstrapDispatcher.install(null, null);
+    }
 
     final ChaosRuntime runtime = new ChaosRuntime();
     try (AutoCloseable connected = JdkInstrumentationInstaller.connectDispatcher(runtime)) {
