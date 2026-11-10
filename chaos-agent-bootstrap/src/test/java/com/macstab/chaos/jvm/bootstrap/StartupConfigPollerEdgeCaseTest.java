@@ -302,6 +302,10 @@ class StartupConfigPollerEdgeCaseTest {
   @Test
   @DisplayName("a same-size edit within the same whole second is applied")
   void sameSecondEditIsApplied() throws Exception {
+    untilOnTime(this::sameSecondEditIsAppliedOnce);
+  }
+
+  private boolean sameSecondEditIsAppliedOnce() throws Exception {
     when(runtime.activate(any(ChaosScenario.class))).thenReturn(handle);
     // Pin the clock to 20..300 ms past a whole second T: a read then is not within 20 ms of T,
     // and the next tick still falls within T + 1 s.
@@ -318,12 +322,14 @@ class StartupConfigPollerEdgeCaseTest {
     // A file system storing whole seconds gives the edit the same stamp.
     Files.writeString(config, planJson("b"));
     Files.setLastModifiedTime(config, wholeSecond);
-    org.junit.jupiter.api.Assumptions.assumeTrue(
-        System.currentTimeMillis() < wholeSecond.toMillis() + 900L, "the tick ran late");
+    if (System.currentTimeMillis() >= wholeSecond.toMillis() + 900L) {
+      return false; // the tick ran late
+    }
     poller.pollOnce();
 
     verify(runtime, times(2)).activate(any(ChaosScenario.class));
     verify(handle).stop();
+    return true;
   }
 
   @Test
@@ -331,6 +337,10 @@ class StartupConfigPollerEdgeCaseTest {
       "a same-size edit after a read in the same whole second is applied by the tick after the"
           + " window")
   void sameSecondEditAfterTheReadIsAppliedPastTheWindow() throws Exception {
+    untilOnTime(this::sameSecondEditAfterTheReadIsAppliedPastTheWindowOnce);
+  }
+
+  private boolean sameSecondEditAfterTheReadIsAppliedPastTheWindowOnce() throws Exception {
     when(runtime.activate(any(ChaosScenario.class))).thenReturn(handle);
     // The read at T + 0.7 s of a file modified at the whole second T; its window ends at T + 1 s.
     while (System.currentTimeMillis() % 1_000L < 700L
@@ -349,8 +359,9 @@ class StartupConfigPollerEdgeCaseTest {
     }
     Files.writeString(config, planJson("b"));
     Files.setLastModifiedTime(config, wholeSecond);
-    org.junit.jupiter.api.Assumptions.assumeTrue(
-        System.currentTimeMillis() < wholeSecond.toMillis() + 1_000L, "the edit ran late");
+    if (System.currentTimeMillis() >= wholeSecond.toMillis() + 1_000L) {
+      return false; // the edit ran late
+    }
 
     // The tick at T + 1.2 s, past the window: the last read began inside it, so it reads again.
     while (System.currentTimeMillis() < wholeSecond.toMillis() + 1_200L) {
@@ -360,6 +371,34 @@ class StartupConfigPollerEdgeCaseTest {
 
     verify(runtime, times(2)).activate(any(ChaosScenario.class));
     verify(handle).stop();
+    return true;
+  }
+
+  /** Attempts of a run tied to a phase of the wall clock's second before a late run fails. */
+  private static final int TIMED_ATTEMPTS = 5;
+
+  /**
+   * Runs {@code attempt} until one keeps to its phase of the wall clock's second. An attempt that
+   * answers {@code false} ran late on a slow runner: it is repeated with fresh mocks and a fresh
+   * file, and the test fails when every attempt ran late, so a slow runner never skips the check.
+   */
+  private void untilOnTime(final TimedAttempt attempt) throws Exception {
+    for (int i = 0; i < TIMED_ATTEMPTS; i++) {
+      if (i > 0) {
+        tearDown();
+        setUp();
+      }
+      if (attempt.run()) {
+        return;
+      }
+    }
+    throw new AssertionError("each of " + TIMED_ATTEMPTS + " attempts ran late");
+  }
+
+  /** One attempt of a run tied to the wall clock; {@code false} when it ran late. */
+  @FunctionalInterface
+  private interface TimedAttempt {
+    boolean run() throws Exception;
   }
 
   @Test

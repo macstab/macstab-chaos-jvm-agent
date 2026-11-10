@@ -22,6 +22,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -266,9 +267,12 @@ class WallClockWindowTest {
             }
           });
       runtime.activate(submitScenario(ActivationPolicy.window(null, T0.plusMillis(50))));
+      final int readsAtActivation = clock.reads();
 
-      // The first check runs about 50 ms from now and finds the runtime's clock still at T0.
-      await().pollDelay(Duration.ofMillis(200)).atMost(Duration.ofSeconds(1)).until(() -> true);
+      // The first check runs about 50 ms from now and finds the runtime's clock still at T0; each
+      // check reads the clock and schedules the next one 50 ms later. Wait for several checks, not
+      // for a fixed time: a slow runner then cannot pass this before the first check ran.
+      await().atMost(Duration.ofSeconds(5)).until(() -> clock.reads() >= readsAtActivation + 6);
       assertThat(inactive).as("not ended by an early check").isEmpty();
       clock.set(T0.plusMillis(50));
 
@@ -326,6 +330,7 @@ class WallClockWindowTest {
 
   private static final class MutableClock extends Clock {
     private volatile Instant instant;
+    private final AtomicInteger reads = new AtomicInteger();
 
     MutableClock(final Instant instant) {
       this.instant = instant;
@@ -333,6 +338,11 @@ class WallClockWindowTest {
 
     void set(final Instant newInstant) {
       instant = newInstant;
+    }
+
+    /** How often the clock has been read. */
+    int reads() {
+      return reads.get();
     }
 
     @Override
@@ -347,6 +357,7 @@ class WallClockWindowTest {
 
     @Override
     public Instant instant() {
+      reads.incrementAndGet();
       return instant;
     }
   }
