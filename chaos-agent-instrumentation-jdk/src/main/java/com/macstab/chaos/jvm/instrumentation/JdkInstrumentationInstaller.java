@@ -236,8 +236,9 @@ public final class JdkInstrumentationInstaller {
           final ResettableClassFileTransformer transformer;
           try {
             transformer = group.apply(buildBaseAgentBuilder()).installOn(instrumentation);
-          } catch (final RuntimeException failure) {
-            // Not recorded as woven: the next activation that needs the group tries again.
+          } catch (final RuntimeException | LinkageError failure) {
+            // Not recorded as woven: the next activation that needs the group tries again. A
+            // LinkageError (a type of a module the runtime lacks) fails the group, not the JVM.
             HookCoverage.failed(group.name(), failure);
             throw new IllegalStateException(
                 "failed to instrument " + group + " for " + group.operations(), failure);
@@ -1174,10 +1175,11 @@ public final class JdkInstrumentationInstaller {
    *
    * <p>HikariCP and c3p0 are compileOnly dependencies and are instrumented via {@link
    * #instrumentOptional} so their absence is tolerated. {@code java.sql.Statement} and {@code
-   * java.sql.Connection} are JDK interfaces — the type matcher is restricted to concrete subtypes
-   * via {@code isSubTypeOf + not(isInterface())} so the advice only binds to implementations
-   * (driver classes such as {@code HikariProxyStatement}, {@code org.postgresql.jdbc.PgStatement},
-   * etc.).
+   * java.sql.Connection} are JDK interfaces of the optional {@code java.sql} module, matched by
+   * name (a runtime without the module, a jlink image, has no such types and weaves nothing here) —
+   * the type matcher is restricted to concrete subtypes via {@code isSubTypeOf +
+   * not(isInterface())} so the advice only binds to implementations (driver classes such as {@code
+   * HikariProxyStatement}, {@code org.postgresql.jdbc.PgStatement}, etc.).
    */
   private static AgentBuilder applyPhase2JdbcInterception(AgentBuilder agentBuilder) {
     agentBuilder =
@@ -1232,7 +1234,7 @@ public final class JdkInstrumentationInstaller {
     // takesArgument(0, String.class) is sufficient and binds to all overloads.
     return agentBuilder
         .type(
-            TypeMatchers.subTypeOf(java.sql.Statement.class)
+            TypeMatchers.superType(ElementMatchers.named("java.sql.Statement"))
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
                 .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
         .transform(
@@ -1266,7 +1268,7 @@ public final class JdkInstrumentationInstaller {
                                 .and(ElementMatchers.takesArguments(0))
                                 .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
         .type(
-            TypeMatchers.subTypeOf(java.sql.PreparedStatement.class)
+            TypeMatchers.superType(ElementMatchers.named("java.sql.PreparedStatement"))
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
                 .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
         .transform(
@@ -1279,7 +1281,7 @@ public final class JdkInstrumentationInstaller {
                             .and(ElementMatchers.takesArguments(0))
                             .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
         .type(
-            TypeMatchers.subTypeOf(java.sql.Connection.class)
+            TypeMatchers.superType(ElementMatchers.named("java.sql.Connection"))
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
                 .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
         .transform(
