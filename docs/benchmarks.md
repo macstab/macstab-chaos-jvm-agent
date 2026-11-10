@@ -32,7 +32,7 @@ The two benchmark classes cover the two hot-path entry points added in roadmap 2
 
 Both measure the dispatch classes' method calls directly, bypassing the `BootstrapDispatcher` → `ChaosBridge` indirection. This isolates the dispatch logic (scenario registry match, selector evaluation, decision building) from the fixed overhead of the classloader bridge.
 
-`BridgeDispatchBenchmark` (§8) measures the full path woven advice takes, through `BootstrapDispatcher`, and is the one to compare when a change touches the dispatch path.
+`BridgeDispatchBenchmark` (§8) measures the dispatch woven advice calls, through `BootstrapDispatcher`, and is the one to compare when a change touches the dispatch path. It calls the dispatcher directly: nothing is woven, so the advice's own bytecode (its scope guard, the arguments it extracts and, in the client advice, its `idle` check) is not in its figures.
 
 ### Module and Execution
 
@@ -563,8 +563,8 @@ The dispatch costs **0.016 ms of it — 0.002 % of one CPU core.**
 
 0.098 ms out of 1 000 ms = **0.01 % of one CPU core.**
 
-These are dispatch costs; a woven call adds its hook (7–12 ns with no scenario for the operation,
-section 8), about 0.005 % of a core at 5 300 calls/sec. Even with four exhausted scenarios sitting in
+These are dispatch costs; a woven call adds its hook's dispatch (7–12 ns with no scenario for the
+operation, section 8) and the advice's own bytecode, about 0.005 % of a core at 5 300 calls/sec. Even with four exhausted scenarios sitting in
 the registry across all operation types, the agent consumes about a hundredth of one percent of one
 CPU core in a realistic microservice workload. The dominant cost is always the business logic, the
 I/O, and the network — not the dispatch overhead.
@@ -615,11 +615,11 @@ which shares the JIT state of the harness and of earlier benchmark classes.
 
 ---
 
-## 8. `BridgeDispatchBenchmark` — the woven path
+## 8. `BridgeDispatchBenchmark` — the dispatch behind woven advice
 
 ### 8.1 What It Measures
 
-Each benchmark method calls a `BootstrapDispatcher` dispatch method exactly as woven advice does: the inline reentrancy guard, the method-handle hop into `ChaosBridge`, the operation index in `ChaosDispatcher` and, when a scenario's selector matches, the policy checks. `JdkInstrumentationInstaller.connectDispatcher(runtime)` connects a runtime to the dispatcher without weaving any class. Methods: `clockMillis`, `clockRead`, `clockReadMillis`, `threadSleep`, `fileRead`, `fileClose`, `socketRead`, `socketChannelRead`, `datagramSend`, `executorSubmit`.
+Each benchmark method calls a `BootstrapDispatcher` dispatch method with the arguments woven advice passes: the inline reentrancy guard, the method-handle hop into `ChaosBridge`, the operation index in `ChaosDispatcher` and, when a scenario's selector matches, the policy checks. `JdkInstrumentationInstaller.connectDispatcher(runtime)` connects a runtime to the dispatcher without weaving any class, so the figures leave out the advice's own bytecode (section 5). Methods: `clockMillis`, `clockRead`, `clockReadMillis`, `threadSleep`, `fileRead`, `fileClose`, `socketRead`, `socketChannelRead`, `datagramSend`, `executorSubmit`.
 
 | `scenarios`           | Active scenarios                                                                       |
 |-----------------------|----------------------------------------------------------------------------------------|
@@ -629,7 +629,7 @@ Each benchmark method calls a `BootstrapDispatcher` dispatch method exactly as w
 
 ### 8.2 Measured Results
 
-Apple M-series, JDK 25, `-f 3 -wi 3 -i 5 -prof gc` (indicative; compare runs on the same machine):
+Apple M-series, JDK 25, `-f 3 -wi 3 -i 5 -prof gc` (indicative; compare runs on the same machine). A shorter run at the 2.0 release candidate (JDK 25.0.1, `-f 1 -wi 2 -i 3 -prof gc`) re-confirmed these figures within their noise:
 
 | Method              | `none`        | `otherOperation` | `matchedNotYetActive` |
 |---------------------|---------------|------------------|-----------------------|

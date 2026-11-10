@@ -593,7 +593,7 @@ The instrumentation layer has two potential security implications:
 When `ScenarioRegistry.controllers` is empty:
 - Advice fires: ~2–5 ns (advice bytecode inlined into method)
 - `BootstrapDispatcher` dispatch method: `DEPTH.get()` (1 ThreadLocal read) + inline depth check + null-check of `delegate` → returns fallback; no allocation
-- Total additional overhead per intercepted method call: 7–12 ns, allocation-free (`BridgeDispatchBenchmark`, JDK 25; [benchmarks.md §8](benchmarks.md#8-bridgedispatchbenchmark--the-woven-path))
+- Dispatch overhead per intercepted method call: 7–12 ns, allocation-free (`BridgeDispatchBenchmark`, JDK 25; [benchmarks.md §8](benchmarks.md#8-bridgedispatchbenchmark--the-dispatch-behind-woven-advice)), plus the advice's own bytecode
 
 ## Advice Overhead (with scenarios)
 

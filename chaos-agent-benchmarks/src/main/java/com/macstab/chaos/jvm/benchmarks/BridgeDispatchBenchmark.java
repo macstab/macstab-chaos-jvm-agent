@@ -28,10 +28,11 @@ import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Warmup;
 
 /**
- * The cost woven advice pays per intercepted call, measured through {@link BootstrapDispatcher}:
+ * The dispatch cost behind woven advice per intercepted call, measured by calling {@link
+ * BootstrapDispatcher} directly (nothing is woven, so the advice's own bytecode is not included):
  * the reentrancy guard, the method-handle hop into the agent, the operation index and, when a
- * scenario's selector matches, the policy checks. This is the path the release-over-release
- * benchmark gate compares.
+ * scenario's selector matches, the policy checks. To compare a change to the dispatch path, run it
+ * for both builds on the same machine ({@code docs/benchmarks.md} §8.3).
  *
  * <ul>
  *   <li>{@code none}: no scenario is active, the cost every intercepted call pays once its hook

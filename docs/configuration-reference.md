@@ -644,7 +644,7 @@ REGEX patterns are compiled once per unique expression string and cached (GLOB p
 
 ## 11.4 Reentrancy Guard Overhead
 
-The guard is one `ThreadLocal<int[]>` read per woven call; the array holds one counter per call-depth scope and avoids boxing on every read and write. It is part of the 7–12 ns a woven call with no scenario for its operation costs in total, guard and bridge hop included ([benchmarks.md §8](benchmarks.md#8-bridgedispatchbenchmark--the-woven-path), `BridgeDispatchBenchmark`, JDK 25).
+The guard is one `ThreadLocal<int[]>` read per woven call; the array holds one counter per call-depth scope and avoids boxing on every read and write. It is part of the 7–12 ns the dispatch of a woven call with no scenario for its operation costs, guard and bridge hop included ([benchmarks.md §8](benchmarks.md#8-bridgedispatchbenchmark--the-dispatch-behind-woven-advice), `BridgeDispatchBenchmark`, JDK 25); the advice's own bytecode comes on top.
 
 ---
 

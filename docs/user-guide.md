@@ -824,7 +824,7 @@ Dispatch cost per intercepted call, measured with JMH on JDK 25 (Apple Silicon; 
 | Ten scenarios on the operation (nine regex non-matches)    | ~295 ns  | 3% of a 10 µs pool acquire — use only transiently  |
 | Session-scoped scenario, calling thread outside the session | ~17 ns  | Invisible; about 14 ns over zero scenarios         |
 
-The agent is designed to be permanently installed in production. A woven call with no scenario for its operation costs 7–12 ns through the `BootstrapDispatcher` path and allocates nothing (`BridgeDispatchBenchmark`, [benchmarks.md §8](benchmarks.md#8-bridgedispatchbenchmark--the-woven-path)). Hook groups are woven on demand, so call sites whose hook group no scenario has needed yet are not instrumented at all.
+The agent is designed to be permanently installed in production. A woven call with no scenario for its operation costs 7–12 ns in its `BootstrapDispatcher` dispatch, plus the advice's own bytecode, and allocates nothing (`BridgeDispatchBenchmark`, [benchmarks.md §8](benchmarks.md#8-bridgedispatchbenchmark--the-dispatch-behind-woven-advice)). Hook groups are woven on demand, so call sites whose hook group no scenario has needed yet are not instrumented at all.
 
 ---
 

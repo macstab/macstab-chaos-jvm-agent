@@ -26,7 +26,7 @@
 | 5 | Hooks are woven on demand | you rely on hooks being in place before activation, or on start-up cost | nothing, or `instrumentation=eager` (§5) |
 | 6 | The agent JAR is self-contained and shades its libraries | your code used the agent's ByteBuddy or Jackson | depend on them yourself (§6) |
 | 7 | New abstract methods on API interfaces | you implement `ChaosControlPlane` or `ChaosActivationHandle` | implement them (§7) |
-| 8 | `ChaosEffect.Errno.code()` is the current OS's number | you compare it with Linux numbers on macOS | use `linuxCode()` (§8) |
+| 8 | `ChaosEffect.Errno.code()` is the current OS's number | you used a 2.0 pre-release (`Errno` is new in 2.0) and compare it with Linux numbers on macOS | use `linuxCode()` (§8) |
 | 9 | `OperationType` gained constants between existing ones | you persist ordinals | persist names (§9) |
 | 10 | Bridge handle slots renumbered | you call `BootstrapDispatcher` directly | none for applications (§10) |
 | 11 | A glob's `*` also matches line terminators | a GLOB must not match across a line break | use a REGEX (§11) |
@@ -37,7 +37,7 @@
 | 16 | A pool task carries a session only once the session has a scenario | another service relies on `X-Chaos-Session` from pool tasks of a session without local scenarios | activate a scenario in the session first, or set the header from `session.id()` (§16) |
 | 17 | Direct-buffer pressure above the direct memory limit is refused | a `directBufferPressure` asks for more than `-XX:MaxDirectMemorySize` (by default the maximum heap) | lower `totalBytes` or raise the limit (§17) |
 | 18 | `suppress` on HTTP and JDBC is refused; `ChaosHttpSuppressException` / `ChaosJdbcSuppressException` are removed | a plan suppresses `HTTP_CLIENT_*` or `JDBC_*`, or code catches those exceptions | use `reject` and catch `IOException` / `SQLException` (§18) |
-| 19 | `reject` and `errno` raise the real call's exception; errnos apply per operation | a test catches the 1.x type of a reject or a file errno, reads its top stack frame, or applies a file errno to a call the kernel never reports it for | catch the type in §19; pick an errno the call can report (§19) |
+| 19 | `reject` and `errno` raise the real call's exception; errnos apply per operation | a test catches the 1.x type of a reject or reads its top stack frame; with a 2.0 pre-release (errnos are new in 2.0), a test catches the type of a file errno or applies one to a call the kernel never reports it for | catch the type in §19; pick an errno the call can report (§19) |
 | 20 | The destructive-effect refusal is a `ChaosValidationException`; `suppress` is refused where a call cannot be skipped | code catches `ChaosActivationException` for a deadlock or thread leak without `allowDestructiveEffects`, or matches `plan rejected:` in the HTTP/JMX answer; a plan suppresses an operation outside the suppress list | catch `ChaosValidationException`, match `invalid plan:`; delay or reject instead (§20) |
 | 21 | Stressor parameters are refused instead of reduced | a `heapPressure` asks for more than the free heap; a `stringInternPressure` exceeds its caps or its length's distinct strings; a `floodInterval`, `gcInterval` or `heartbeat` is below 1 ms | lower the value or raise `-Xmx`, lengthen the strings, use 1 ms or more (§21) |
 | 22 | Unused `@Internal` `ChaosRuntime` overloads removed | code calls `beforeThreadStart(Thread)`, `beforeSocketRead(Object)`, `beforeSocketWrite(Object, int)` or `beforeFileIo(String, Object)` on `ChaosRuntime` | call the full forms (§22) |
@@ -186,6 +186,8 @@ long appliedCount();
 
 ## 8. `ChaosEffect.Errno.code()` is the current OS's number
 
+Relevant only to code written against a 2.0 pre-release: `ChaosEffect.Errno` and the errno effect are new in 2.0, so a 1.x setup has nothing to change here.
+
 `code()` returns the number the JDK prints in `error=N` on the running system: `EAGAIN` is 11 on Linux and 35 on macOS. Compare with Linux numbers through `linuxCode()`.
 
 ## 9. `OperationType` gained constants between existing ones
@@ -284,10 +286,12 @@ A `RejectEffect` fails the call with the exception the real call raises, and eve
 
 `METHOD_ENTER`, `METHOD_EXIT` and `SCHEDULE_TICK` keep `IllegalStateException`. The two messages of the JVM (thread start, shutdown hook) replace the reject's message.
 
+The errno changes below are relevant only to code written against a 2.0 pre-release: the errno effect is new in 2.0, so a 1.x setup has none.
+
 An `ErrnoEffect` on a call on an open file — `FILE_IO_READ`, `FILE_IO_WRITE`, `FILE_IO_TRUNCATE`, `FILE_IO_MAP`, `FILE_IO_CLOSE` — fails with `IOException("<reason>")`, as the JDK reports it, instead of a `FileSystemException` naming the path; an open, delete or move still names it. An errno applies only to the calls the kernel reports it for (the table in the configuration reference); `ENOENT` or `EACCES` on a read, `EROFS` on a truncate or `ENOSPC` on a delete is refused at activation with `ChaosValidationException`.
 
-- In tests: catch the 2.0 type (`IOException` covers the file and socket rows), and read the reason from `getMessage()` instead of `FileSystemException.getReason()`.
-- In plans: an errno a call cannot report becomes one it can: `EIO` for a failing read or truncate, `ENOENT` / `EACCES` on `FILE_IO_OPEN`.
+- In tests: catch the 2.0 type (`IOException` covers the file and socket rows); with a 2.0 pre-release, read a file errno's reason from `getMessage()` instead of `FileSystemException.getReason()`.
+- In plans written for a 2.0 pre-release: an errno a call cannot report becomes one it can: `EIO` for a failing read or truncate, `ENOENT` / `EACCES` on `FILE_IO_OPEN`.
 
 ## 20. The destructive-effect refusal is a validation error; `suppress` is refused where a call cannot be skipped
 
