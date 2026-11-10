@@ -1,11 +1,14 @@
 package com.macstab.chaos.jvm.examples.sb4pinning;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.spring.boot4.test.ChaosTest;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -40,6 +43,17 @@ class VirtualThreadPinningIT {
         .as("ChaosStartupPlan activated the pinning scenario at startup")
         .hasValueSatisfying(
             report -> assertThat(report.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE));
+    // ACTIVE alone also holds when the stressor holds nothing (a single carrier skips it): check
+    // that carriers are held. The agent keeps one carrier free, so two need three carriers.
+    final long held = Math.min(2, Runtime.getRuntime().availableProcessors() - 1);
+    assertThat(held).as("this machine has a carrier to hold").isPositive();
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .untilAsserted(
+            () ->
+                assertThat(carriersRunningAVirtualThread())
+                    .as("carriers held by the pinning scenario")
+                    .isGreaterThanOrEqualTo(held));
     final RestClient client = RestClient.create("http://localhost:" + port);
     int concurrency = 100;
     List<Future<ResponseEntity<Void>>> futures = new ArrayList<>(concurrency);
@@ -93,5 +107,22 @@ class VirtualThreadPinningIT {
     assertThat(snapshot.getBody().get("test"))
         .as("Recorded count must equal the number of successful requests")
         .isEqualTo((long) concurrency);
+  }
+
+  /**
+   * The carriers of the virtual-thread scheduler that have a virtual thread mounted. No request is
+   * in flight when this is called, so a mounted virtual thread is one that holds its carrier.
+   */
+  private static long carriersRunningAVirtualThread() {
+    return Thread.getAllStackTraces().entrySet().stream()
+        .filter(e -> e.getKey().getClass().getName().equals("jdk.internal.misc.CarrierThread"))
+        .filter(
+            e ->
+                Arrays.stream(e.getValue())
+                    .anyMatch(
+                        frame ->
+                            frame.getClassName().equals("java.lang.VirtualThread")
+                                && frame.getMethodName().equals("runContinuation")))
+        .count();
   }
 }
