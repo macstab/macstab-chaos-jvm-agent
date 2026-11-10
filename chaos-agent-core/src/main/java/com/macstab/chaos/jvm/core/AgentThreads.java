@@ -14,12 +14,21 @@ import java.util.stream.Collectors;
  * dispatch depth raised. A thread started with the depth raised still begins its own depth at zero,
  * so the body has to raise it too. A stressor thread's body reports its failure (a {@link
  * Throwable} escaping it) to an end callback, so its scenario ends instead of staying {@code
- * ACTIVE} without load (L17). A platform thread made here has no context class loader, so it keeps
- * no application's loader reachable.
+ * ACTIVE} without load (L17). A platform thread made here keeps no application's loader reachable
+ * from the thread that made it: it has no context class loader, does not inherit that thread's
+ * inheritable thread-locals, and (JDK 21 to 23) is made under {@code doPrivileged}, so the
+ * access-control context it keeps holds only the agent's frames, not the caller's.
  */
 final class AgentThreads {
 
   private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
+
+  /**
+   * Makes the agent's platform threads without the creating thread's inheritable thread-locals (an
+   * application's request context, an MDC adapter), whose values are application classes.
+   */
+  private static final ThreadFactory PLATFORM =
+      Thread.ofPlatform().inheritInheritableThreadLocals(false).factory();
 
   /** How long a rollback waits for each thread it stops. */
   private static final long ROLLBACK_JOIN_MILLIS = 1_000L;
@@ -89,7 +98,7 @@ final class AgentThreads {
    * @return the unstarted thread
    */
   static Thread platform(final String name, final boolean daemon, final Runnable body) {
-    return named(new Thread(owned(body)), name, daemon);
+    return named(created(PLATFORM, owned(body)), name, daemon);
   }
 
   /**
@@ -104,7 +113,7 @@ final class AgentThreads {
    */
   static Thread platform(
       final String name, final boolean daemon, final Runnable body, final Runnable onFailure) {
-    return platform(Thread::new, name, daemon, body, onFailure);
+    return platform(PLATFORM, name, daemon, body, onFailure);
   }
 
   /**
@@ -124,7 +133,19 @@ final class AgentThreads {
       final boolean daemon,
       final Runnable body,
       final Runnable onFailure) {
-    return named(threads.newThread(owned(body, onFailure)), name, daemon);
+    return named(created(threads, owned(body, onFailure)), name, daemon);
+  }
+
+  /**
+   * Makes the thread under {@code doPrivileged}: on JDK 21 to 23 a new thread keeps the
+   * access-control context of the frames that made it, whose protection domains reference their
+   * class loaders, until it ends; the JVM-wide expiry thread never ends. Privileged, the context
+   * stops at this frame. From JDK 24 the call only runs the action.
+   */
+  @SuppressWarnings("removal") // AccessController is the only way to drop the caller's context
+  private static Thread created(final ThreadFactory threads, final Runnable body) {
+    return java.security.AccessController.doPrivileged(
+        (java.security.PrivilegedAction<Thread>) () -> threads.newThread(body));
   }
 
   private static Thread named(final Thread thread, final String name, final boolean daemon) {

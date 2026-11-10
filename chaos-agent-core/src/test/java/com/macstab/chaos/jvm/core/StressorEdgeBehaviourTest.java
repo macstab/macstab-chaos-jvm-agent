@@ -864,5 +864,152 @@ class StressorEdgeBehaviourTest {
       assertThat(expiryLike.getContextClassLoader()).isNull();
       assertThat(stressorLike.getContextClassLoader()).isNull();
     }
+
+    @Test
+    @DisplayName(
+        "a running agent thread keeps no loader through the inheritable thread-locals of the thread"
+            + " that made it")
+    void agentThreadInheritsNoThreadLocals() throws Exception {
+      // Arrange
+      ClassLoader application = new ThrowawayLoader();
+      final java.lang.ref.WeakReference<ClassLoader> loader =
+          new java.lang.ref.WeakReference<>(application);
+      REQUEST_CONTEXT.set(LoaderFrame.in(application));
+      application = null;
+      final java.util.concurrent.CountDownLatch release =
+          new java.util.concurrent.CountDownLatch(1);
+      final List<Thread> threads;
+      try {
+        // Act
+        threads =
+            AgentThreads.startAll(
+                List.of(
+                    AgentThreads.platform("edge-itl-expiry", true, () -> awaitQuietly(release)),
+                    AgentThreads.platform(
+                        "edge-itl-stressor", true, () -> awaitQuietly(release), () -> {})));
+      } finally {
+        REQUEST_CONTEXT.remove();
+      }
+      try {
+        // Assert
+        assertThat(collected(loader)).as("the loader is collected while the threads run").isTrue();
+      } finally {
+        release.countDown();
+        AgentThreads.stopAll(threads, 5_000L);
+      }
+    }
+
+    @Test
+    @DisplayName(
+        "a running agent thread keeps no loader through the access-control context of the frames"
+            + " that made it (JDK 21)")
+    void agentThreadKeepsNoCallerFrames() throws Exception {
+      // Arrange
+      ClassLoader application = new ThrowawayLoader();
+      final java.lang.ref.WeakReference<ClassLoader> loader =
+          new java.lang.ref.WeakReference<>(application);
+      final java.util.concurrent.CountDownLatch release =
+          new java.util.concurrent.CountDownLatch(1);
+      final AtomicReference<List<Thread>> threads = new AtomicReference<>(List.of());
+      // Act: the threads are made from a frame of a class the throwaway loader defined
+      LoaderFrame.in(application)
+          .accept(
+              () ->
+                  threads.set(
+                      AgentThreads.startAll(
+                          List.of(
+                              AgentThreads.platform(
+                                  "edge-acc-expiry", true, () -> awaitQuietly(release)),
+                              AgentThreads.platform(
+                                  "edge-acc-stressor",
+                                  true,
+                                  () -> awaitQuietly(release),
+                                  () -> {})))));
+      application = null;
+      try {
+        // Assert
+        assertThat(collected(loader)).as("the loader is collected while the threads run").isTrue();
+      } finally {
+        release.countDown();
+        AgentThreads.stopAll(threads.get(), 5_000L);
+      }
+    }
+
+    private static void awaitQuietly(final java.util.concurrent.CountDownLatch release) {
+      try {
+        release.await();
+      } catch (final InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      }
+    }
+
+    /** Whether a full GC clears {@code loader} within 10 s. */
+    private static boolean collected(final java.lang.ref.WeakReference<ClassLoader> loader)
+        throws InterruptedException {
+      final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+      while (loader.get() != null && System.nanoTime() < deadline) {
+        System.gc();
+        Thread.sleep(20);
+      }
+      return loader.get() == null;
+    }
+  }
+
+  /** An application's inheritable request context (Spring's, an MDC adapter's). */
+  private static final InheritableThreadLocal<Object> REQUEST_CONTEXT =
+      new InheritableThreadLocal<>();
+
+  /** Runs a task from a frame of its own class; {@link ThrowawayLoader} defines a copy of it. */
+  public static final class LoaderFrame implements Consumer<Runnable> {
+
+    /** For the reflective instantiation of the throwaway loader's copy. */
+    public LoaderFrame() {}
+
+    @Override
+    public void accept(final Runnable task) {
+      task.run();
+    }
+
+    /** An instance of the copy of this class that {@code loader} defines. */
+    @SuppressWarnings("unchecked") // the copy implements the parent loader's Consumer
+    static Consumer<Runnable> in(final ClassLoader loader) throws ReflectiveOperationException {
+      return (Consumer<Runnable>)
+          loader.loadClass(LoaderFrame.class.getName()).getDeclaredConstructor().newInstance();
+    }
+  }
+
+  /**
+   * A loader that defines its own copy of {@link LoaderFrame}, as an application's (a dev-mode
+   * restart's) loader defines the application's classes, and delegates everything else.
+   */
+  private static final class ThrowawayLoader extends ClassLoader {
+
+    ThrowawayLoader() {
+      super(StressorEdgeBehaviourTest.class.getClassLoader());
+    }
+
+    @Override
+    protected Class<?> loadClass(final String name, final boolean resolve)
+        throws ClassNotFoundException {
+      if (!name.equals(LoaderFrame.class.getName())) {
+        return super.loadClass(name, resolve);
+      }
+      synchronized (getClassLoadingLock(name)) {
+        final Class<?> loaded = findLoadedClass(name);
+        if (loaded != null) {
+          return loaded;
+        }
+        try (java.io.InputStream in =
+            getParent().getResourceAsStream(name.replace('.', '/') + ".class")) {
+          if (in == null) {
+            throw new ClassNotFoundException(name);
+          }
+          final byte[] bytes = in.readAllBytes();
+          return defineClass(name, bytes, 0, bytes.length);
+        } catch (final java.io.IOException unreadable) {
+          throw new ClassNotFoundException(name, unreadable);
+        }
+      }
+    }
   }
 }
