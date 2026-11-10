@@ -141,16 +141,16 @@ class TrustedSourcesTest {
     @Test
     @DisplayName("is off for false, and off with one warning for an unrecognised value")
     void falseAndUnrecognised() {
+      // A switch of its own: each line is written once per JVM, so the test can run again in it.
+      final String name = SWITCH + "." + System.nanoTime();
       assertThat(
               TrustedSources.switchedOn(
-                  SWITCH, lookup(Map.of(SWITCH, sourced("off", "local"))), "local"::equals))
+                  name, lookup(Map.of(name, sourced("off", "local"))), "local"::equals))
           .isFalse();
       for (int call = 0; call < 2; call++) {
         assertThat(
                 TrustedSources.switchedOn(
-                    SWITCH,
-                    lookup(Map.of(SWITCH, sourced("tru\nforged", "local"))),
-                    "local"::equals))
+                    name, lookup(Map.of(name, sourced("tru\nforged", "local"))), "local"::equals))
             .isFalse();
       }
 
@@ -160,7 +160,7 @@ class TrustedSourcesTest {
               record -> {
                 assertThat(record.getLevel()).isEqualTo(Level.WARNING);
                 assertThat(record.getMessage())
-                    .contains(SWITCH)
+                    .contains(name)
                     .contains("tru�forged")
                     .doesNotContain("\n");
               });
@@ -234,9 +234,11 @@ class TrustedSourcesTest {
     @Test
     @DisplayName("is off when the lookup fails, for the switch or for allow-remote-enable")
     void lookupFails() {
+      // A switch of its own: each line is written once per JVM.
+      final String key = SWITCH + "." + System.nanoTime();
       assertThat(
               TrustedSources.switchedOn(
-                  SWITCH,
+                  key,
                   name -> {
                     throw new IllegalStateException("unresolvable ${expression}");
                   },
@@ -244,9 +246,9 @@ class TrustedSourcesTest {
           .isFalse();
       assertThat(
               TrustedSources.switchedOn(
-                  SWITCH,
+                  key,
                   name -> {
-                    if (name.equals(SWITCH)) {
+                    if (name.equals(key)) {
                       return sourced("true", "consul");
                     }
                     throw new IllegalStateException("unresolvable");
