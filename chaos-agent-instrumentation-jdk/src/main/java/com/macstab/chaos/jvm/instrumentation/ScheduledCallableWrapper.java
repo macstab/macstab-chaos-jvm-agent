@@ -77,15 +77,12 @@ public final class ScheduledCallableWrapper<T> implements Callable<T> {
     if (!proceed) {
       // The scenario vetoed the tick. Returning a value would hand the caller a result the task
       // never produced (a null that NPEs on unboxing): the task is cancelled instead, as the JDK
-      // cancels a task it will not run. The cancelled future ignores the null returned here.
+      // cancels a task it will not run. The cancelled future ignores the null returned here. The
+      // cancel runs at depth 0: a future of the application's decorateTask runs its own cancel
+      // and done, which are the application's code.
       final Future<?> own = boundFuture();
       if (own != null) {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          own.cancel(false);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
+        own.cancel(false);
         return null;
       }
       throw new CancellationException(

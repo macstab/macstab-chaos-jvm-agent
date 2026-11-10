@@ -145,6 +145,7 @@ public final class DefectProbeMain {
       case "agent-owned-stressors" -> agentOwnedStressors();
       case "finalizer-backlog-sleep" -> finalizerBacklogSleep();
       case "scheduled-callable-suppress" -> scheduledCallableSuppress();
+      case "scheduled-callable-cancel-override" -> scheduledCallableCancelOverride();
       case "plan-reload-under-file-reject" -> planReloadUnderFileReject();
       case "plan-reload" -> planReload();
       case "tick-warning-to-log-file" -> tickWarningToLogFile();
@@ -4030,6 +4031,123 @@ public final class DefectProbeMain {
       } finally {
         executor.shutdownNow();
       }
+    }
+  }
+
+  /**
+   * A SCHEDULE_TICK suppress, a THREAD_SLEEP delay on the pool's worker, and a pool whose {@code
+   * decorateTask} returns a future whose {@code cancel} sleeps: prints how the future ends ({@code
+   * outcome}), the calls of the override ({@code cancels}) and the worker's sleeps the scenario
+   * matched ({@code workerSleepsMatched}).
+   */
+  private static void scheduledCallableCancelOverride() throws Exception {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    try (ChaosActivationHandle sleeps =
+            plane.activate(
+                ChaosScenario.builder("cancel-override-sleep")
+                    .selector(
+                        new ChaosSelector.ThreadSelector(
+                            Set.of(OperationType.THREAD_SLEEP),
+                            ChaosSelector.ThreadKind.ANY,
+                            NamePattern.exact("cancel-override-worker"),
+                            null))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        ChaosActivationHandle ignored =
+            plane.activate(
+                ChaosScenario.builder("tick-suppress")
+                    .selector(ChaosSelector.scheduling(Set.of(OperationType.SCHEDULE_TICK)))
+                    .effect(ChaosEffect.suppress())
+                    .activationPolicy(ActivationPolicy.always())
+                    .build())) {
+      final AtomicLong cancels = new AtomicLong();
+      final java.util.concurrent.ScheduledThreadPoolExecutor executor =
+          new java.util.concurrent.ScheduledThreadPoolExecutor(
+              1, task -> new Thread(task, "cancel-override-worker")) {
+            @Override
+            protected <V> java.util.concurrent.RunnableScheduledFuture<V> decorateTask(
+                final java.util.concurrent.Callable<V> callable,
+                final java.util.concurrent.RunnableScheduledFuture<V> task) {
+              return new SleepingCancel<>(task, cancels);
+            }
+          };
+      try {
+        System.out.println(
+            "outcome=" + outcome(executor.schedule(() -> "ran", 20L, TimeUnit.MILLISECONDS)));
+        System.out.println("cancels=" + cancels.get());
+      } finally {
+        executor.shutdownNow();
+      }
+      System.out.println("workerSleepsMatched=" + sleeps.matchedCount());
+    }
+  }
+
+  /** The application's future of a task: its {@code cancel} sleeps before it cancels the task. */
+  private static final class SleepingCancel<V>
+      implements java.util.concurrent.RunnableScheduledFuture<V> {
+
+    private final java.util.concurrent.RunnableScheduledFuture<V> task;
+    private final AtomicLong cancels;
+
+    SleepingCancel(
+        final java.util.concurrent.RunnableScheduledFuture<V> task, final AtomicLong cancels) {
+      this.task = task;
+      this.cancels = cancels;
+    }
+
+    @Override
+    public boolean cancel(final boolean mayInterruptIfRunning) {
+      cancels.incrementAndGet();
+      try {
+        Thread.sleep(1L);
+      } catch (final InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      }
+      return task.cancel(mayInterruptIfRunning);
+    }
+
+    @Override
+    public void run() {
+      task.run();
+    }
+
+    @Override
+    public boolean isPeriodic() {
+      return task.isPeriodic();
+    }
+
+    @Override
+    public boolean isCancelled() {
+      return task.isCancelled();
+    }
+
+    @Override
+    public boolean isDone() {
+      return task.isDone();
+    }
+
+    @Override
+    public V get() throws InterruptedException, java.util.concurrent.ExecutionException {
+      return task.get();
+    }
+
+    @Override
+    public V get(final long timeout, final TimeUnit unit)
+        throws InterruptedException,
+            java.util.concurrent.ExecutionException,
+            java.util.concurrent.TimeoutException {
+      return task.get(timeout, unit);
+    }
+
+    @Override
+    public long getDelay(final TimeUnit unit) {
+      return task.getDelay(unit);
+    }
+
+    @Override
+    public int compareTo(final Delayed other) {
+      return task.compareTo(other);
     }
   }
 

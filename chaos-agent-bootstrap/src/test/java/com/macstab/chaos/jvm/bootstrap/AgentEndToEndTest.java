@@ -2878,6 +2878,20 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName(
+        "the cancel of a suppressed tick runs the cancel override of a decorateTask future as"
+            + " application code, and nothing else of it is a target")
+    void suppressedCallableTickCancelRunsTheApplicationsOverride() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "scheduled-callable-cancel-override");
+      assertThat(result.value("outcome")).isEqualTo("cancelled");
+      assertThat(result.longValue("cancels")).isEqualTo(1L);
+      assertThat(result.longValue("workerSleepsMatched"))
+          .as("the override's sleep, and no sleep of the agent's on the worker")
+          .isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("a THREAD_SLEEP delay on the Finalizer thread never matches the backlog's sleeps")
     void finalizerBacklogSleepIsAgentWork() throws Exception {
       final ChildJvmProbe.ProbeResult result =
