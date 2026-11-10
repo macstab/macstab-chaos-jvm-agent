@@ -58,6 +58,55 @@ class LoggingStartTest {
   }
 
   @Test
+  @DisplayName(
+      "the waiting thread keeps no context class loader and no inheritable thread-local of the"
+          + " thread that starts it")
+  void waiterKeepsNothingOfItsStarter() throws Exception {
+    final InheritableThreadLocal<String> request = new InheritableThreadLocal<>();
+    final ClassLoader starterLoader = new java.net.URLClassLoader(new java.net.URL[0]);
+    final java.util.concurrent.atomic.AtomicReference<Object> seen =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    final Thread self = Thread.currentThread();
+    final ClassLoader previous = self.getContextClassLoader();
+    self.setContextClassLoader(starterLoader);
+    request.set("request-context");
+    final Thread waiter;
+    try {
+      waiter =
+          LoggingStart.runAfter(
+              () -> true,
+              Duration.ofMinutes(1),
+              () ->
+                  seen.set(
+                      java.util.Arrays.asList(
+                          Thread.currentThread().getContextClassLoader(), request.get())));
+    } finally {
+      request.remove();
+      self.setContextClassLoader(previous);
+    }
+    waiter.join(10_000);
+
+    assertThat(seen.get()).isEqualTo(java.util.Arrays.asList(null, null));
+  }
+
+  @Test
+  @DisplayName("the held lines' shutdown hook keeps no context class loader of its maker")
+  void logReleaseHookKeepsNoLoader() {
+    final ClassLoader starterLoader = new java.net.URLClassLoader(new java.net.URL[0]);
+    final Thread self = Thread.currentThread();
+    final ClassLoader previous = self.getContextClassLoader();
+    self.setContextClassLoader(starterLoader);
+    try {
+      final Thread hook = ChaosAgentBootstrap.logReleaseHook();
+
+      assertThat(hook.getContextClassLoader()).isNull();
+      assertThat(hook.getName()).isEqualTo("macstab-chaos-log-release");
+    } finally {
+      self.setContextClassLoader(previous);
+    }
+  }
+
+  @Test
   @DisplayName("without the jdk.internal.misc open the state is unreadable and the limit decides")
   void unreadableStateWaitsForTheLimit() {
     // The agent opens the package to itself (LogManagerIntegrationTest reads the state for real);

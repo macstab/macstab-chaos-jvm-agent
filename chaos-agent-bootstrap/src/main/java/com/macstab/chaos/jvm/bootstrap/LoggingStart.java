@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.bootstrap;
 
+import com.macstab.chaos.jvm.core.AgentThreads;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import java.lang.reflect.Method;
 import java.time.Duration;
@@ -36,8 +37,13 @@ final class LoggingStart {
    */
   static Thread runAfter(
       final BooleanSupplier initialised, final Duration limit, final Runnable deferred) {
+    // AgentThreads: the thread keeps no context class loader, no inheritable thread-local and (on
+    // JDK 21 to 23) no access-control context of the thread that calls premain, which can be a
+    // framework starter's self-attach.
     final Thread waiter =
-        new Thread(
+        AgentThreads.unstarted(
+            "macstab-chaos-logging-start",
+            true,
             () -> {
               BootstrapDispatcher.beginInternalCall();
               try {
@@ -54,9 +60,7 @@ final class LoggingStart {
                   BootstrapDispatcher.endInternalCall();
                 }
               }
-            },
-            "macstab-chaos-logging-start");
-    waiter.setDaemon(true);
+            });
     BootstrapDispatcher.beginInternalCall();
     try {
       waiter.start();

@@ -4,6 +4,7 @@ import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.jfr.JfrIntegration;
 import com.macstab.chaos.jvm.core.AgentHookThread;
 import com.macstab.chaos.jvm.core.AgentLog;
+import com.macstab.chaos.jvm.core.AgentThreads;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
@@ -245,23 +246,35 @@ public final class ChaosAgentBootstrap {
    * by the JDK ({@link AgentHookThread}) and the hook's work are the agent's own (L3).
    */
   private static void releaseHeldLinesAtExit() {
-    final Thread hook =
-        new AgentHookThread(
-            () -> {
-              BootstrapDispatcher.beginInternalCall();
-              try {
-                AgentLog.releaseToStandardError();
-              } finally {
-                BootstrapDispatcher.endInternalCall();
-              }
-            },
-            "macstab-chaos-log-release");
+    final Thread hook = logReleaseHook();
     BootstrapDispatcher.beginInternalCall();
     try {
       Runtime.getRuntime().addShutdownHook(hook);
     } finally {
       BootstrapDispatcher.endInternalCall();
     }
+  }
+
+  /**
+   * The unstarted shutdown hook {@link #releaseHeldLinesAtExit()} registers; package-private as a
+   * test seam.
+   *
+   * @return the hook
+   */
+  static Thread logReleaseHook() {
+    // AgentThreads: a registered hook stays reachable until the JVM exits, so it keeps nothing of
+    // the thread that made it (its context class loader, inheritable thread-locals, access-control
+    // context).
+    return AgentThreads.shutdownHook(
+        "macstab-chaos-log-release",
+        () -> {
+          BootstrapDispatcher.beginInternalCall();
+          try {
+            AgentLog.releaseToStandardError();
+          } finally {
+            BootstrapDispatcher.endInternalCall();
+          }
+        });
   }
 
   /**
