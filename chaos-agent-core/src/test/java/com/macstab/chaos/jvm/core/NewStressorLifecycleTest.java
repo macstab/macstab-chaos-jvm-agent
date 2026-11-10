@@ -217,15 +217,23 @@ class NewStressorLifecycleTest {
       }
 
       assertThat(lines)
-          .anyMatch(line -> line.startsWith("CodeCachePressureStressor loaded 2 classes"))
+          .anyMatch(
+              line -> line.startsWith("[chaos-agent] CodeCachePressureStressor loaded 2 classes"))
           .anyMatch(
               line ->
-                  line.equals("StringInternPressureStressor interned 10 strings of 8 bytes each"))
-          .anyMatch(line -> line.startsWith("SafepointStormStressor started; gcInterval=20ms"))
-          .anyMatch(line -> line.startsWith("SafepointStormStressor stopped after "))
+                  line.equals(
+                      "[chaos-agent] StringInternPressureStressor interned 10 strings of 8 bytes"
+                          + " each"))
           .anyMatch(
-              line -> line.startsWith("ReferenceQueueFloodStressor started; referenceCount=5"))
-          .anyMatch(line -> line.startsWith("ReferenceQueueFloodStressor stopped after "));
+              line ->
+                  line.startsWith("[chaos-agent] SafepointStormStressor started; gcInterval=20ms"))
+          .anyMatch(line -> line.startsWith("[chaos-agent] SafepointStormStressor stopped after "))
+          .anyMatch(
+              line ->
+                  line.startsWith(
+                      "[chaos-agent] ReferenceQueueFloodStressor started; referenceCount=5"))
+          .anyMatch(
+              line -> line.startsWith("[chaos-agent] ReferenceQueueFloodStressor stopped after "));
     }
   }
 

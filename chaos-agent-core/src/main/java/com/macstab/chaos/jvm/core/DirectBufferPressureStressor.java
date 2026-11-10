@@ -59,7 +59,7 @@ final class DirectBufferPressureStressor implements ManagedStressor {
   private static void warnNoEagerRelease(final Throwable cause) {
     LOGGER.warning(
         () ->
-            "DirectBufferPressure: the direct buffer cleaner is out of reach ("
+            "[chaos-agent] DirectBufferPressure: the direct buffer cleaner is out of reach ("
                 + cause
                 + "); a stopped stressor's memory is freed only by a later GC");
   }
@@ -140,7 +140,10 @@ final class DirectBufferPressureStressor implements ManagedStressor {
         CLEANER_CLEAN.invoke(cleaner);
       }
     } catch (final Exception e) {
-      LOGGER.fine(() -> "DirectBufferPressureStressor: could not eagerly free direct buffer: " + e);
+      LOGGER.fine(
+          () ->
+              "[chaos-agent] DirectBufferPressureStressor: could not eagerly free direct buffer: "
+                  + e);
     }
   }
 }

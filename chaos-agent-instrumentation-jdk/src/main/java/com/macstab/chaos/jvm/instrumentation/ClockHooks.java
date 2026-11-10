@@ -111,7 +111,8 @@ final class ClockHooks {
       // nothing silently.
       LOGGER.warning(
           () ->
-              "chaos: a SYSTEM_CLOCK_MILLIS/NANOS scenario is active but clockCallSites is not set;"
+              "[chaos-agent] a SYSTEM_CLOCK_MILLIS/NANOS scenario is active but clockCallSites"
+                  + " is not set;"
                   + " direct System.currentTimeMillis()/nanoTime() calls are not skewed");
       return agentBuilder;
     }

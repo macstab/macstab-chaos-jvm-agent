@@ -133,7 +133,7 @@ final class ReturnValueCorruptor {
     if (returnType.isPrimitive()) {
       LOGGER.fine(
           () ->
-              "ReturnValueCorruption NULL is inapplicable to primitive "
+              "[chaos-agent] ReturnValueCorruption NULL is inapplicable to primitive "
                   + returnType.getName()
                   + " in scenario "
                   + scenarioId
@@ -172,7 +172,7 @@ final class ReturnValueCorruptor {
     // safely substitute use ZERO.
     LOGGER.fine(
         () ->
-            "ReturnValueCorruption EMPTY is inapplicable to "
+            "[chaos-agent] ReturnValueCorruption EMPTY is inapplicable to "
                 + returnType.getName()
                 + " in scenario "
                 + scenarioId
@@ -289,7 +289,7 @@ final class ReturnValueCorruptor {
     }
     LOGGER.fine(
         () ->
-            "ReturnValueCorruption "
+            "[chaos-agent] ReturnValueCorruption "
                 + strategyName
                 + " is inapplicable to "
                 + returnType.getName()

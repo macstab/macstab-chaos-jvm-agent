@@ -400,11 +400,14 @@ class DispatchPathsTest {
             .isNull();
         assertThat(log.messages())
             .contains(
-                "ReturnValueCorruption NULL is inapplicable to primitive int in scenario s1;"
+                "[chaos-agent] ReturnValueCorruption NULL is inapplicable to primitive int in"
+                    + " scenario s1;"
                     + " falling back to ZERO",
-                "ReturnValueCorruption EMPTY is inapplicable to java.lang.Thread in scenario s2;"
+                "[chaos-agent] ReturnValueCorruption EMPTY is inapplicable to java.lang.Thread"
+                    + " in scenario s2;"
                     + " falling back to ZERO",
-                "ReturnValueCorruption BOUNDARY_MAX is inapplicable to java.lang.String in"
+                "[chaos-agent] ReturnValueCorruption BOUNDARY_MAX is inapplicable to"
+                    + " java.lang.String in"
                     + " scenario s3; falling back to ZERO");
       }
     }
@@ -485,7 +488,9 @@ class DispatchPathsTest {
             .anyMatch(
                 record ->
                     record.getLevel() == Level.FINE
-                        && record.getMessage().equals("chaos session hand-off release failed")
+                        && record
+                            .getMessage()
+                            .equals("[chaos-agent] chaos session hand-off release failed")
                         && record.getThrown() instanceof IllegalStateException);
       }
       assertThat(scope.currentSessionId()).isNull();

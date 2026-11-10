@@ -159,7 +159,9 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
       try {
         local.set(holder);
         LOGGER.fine(
-            () -> "chaos thread-local-leak planted entry on " + Thread.currentThread().getName());
+            () ->
+                "[chaos-agent] chaos thread-local-leak planted entry on "
+                    + Thread.currentThread().getName());
       } finally {
         ChaosDispatcher.decrementDispatchDepth();
       }

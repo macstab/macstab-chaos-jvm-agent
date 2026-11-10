@@ -75,7 +75,7 @@ final class ThreadLeakStressor implements ManagedStressor {
                     return;
                   }
                 }
-                LOGGER.fine(() -> "chaos thread-leak thread terminated: " + name);
+                LOGGER.fine(() -> "[chaos-agent] chaos thread-leak thread terminated: " + name);
                 if (!stopped.get()) {
                   // The leak ends with the lifespan, and so does the scenario (L17); the first
                   // thread to end reports it.

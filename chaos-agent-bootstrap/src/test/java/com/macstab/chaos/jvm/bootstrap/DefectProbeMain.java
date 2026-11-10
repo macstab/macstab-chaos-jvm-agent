@@ -781,7 +781,7 @@ public final class DefectProbeMain {
           @Override
           public void publish(final java.util.logging.LogRecord logRecord) {
             final String message = String.valueOf(logRecord.getMessage());
-            if (message.startsWith("chaos method hooks woven")) {
+            if (message.startsWith("[chaos-agent] chaos method hooks woven")) {
               System.out.println("wovenLog=" + message);
             }
           }
@@ -2908,7 +2908,7 @@ public final class DefectProbeMain {
     final Path log = directory.resolve("agent.log");
     final java.util.logging.FileHandler file = new java.util.logging.FileHandler(log.toString());
     final java.util.function.Predicate<java.util.logging.LogRecord> tickWarning =
-        logRecord -> String.valueOf(logRecord.getMessage()).startsWith("chaos: suppressing");
+        logRecord -> String.valueOf(logRecord.getMessage()).startsWith("[chaos-agent] suppressing");
     file.setFilter(tickWarning::test);
     final java.util.concurrent.atomic.AtomicInteger warnings =
         new java.util.concurrent.atomic.AtomicInteger();

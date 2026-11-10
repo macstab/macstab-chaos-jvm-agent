@@ -132,7 +132,7 @@ final class BridgeInjector {
       try {
         Files.deleteIfExists(bridgeJar);
       } catch (final IOException inUse) {
-        LOGGER.fine(() -> "bridge jar kept until exit: " + bridgeJar);
+        LOGGER.fine(() -> "[chaos-agent] bridge jar kept until exit: " + bridgeJar);
       }
     } catch (final IOException exception) {
       // Failure path: clear the injected flag so a subsequent install() can retry rather
@@ -336,7 +336,7 @@ final class BridgeInjector {
         }
       }
     } catch (final IOException | SecurityException unavailable) {
-      LOGGER.fine(() -> "bridge jar sweep skipped: " + unavailable);
+      LOGGER.fine(() -> "[chaos-agent] bridge jar sweep skipped: " + unavailable);
     }
   }
 

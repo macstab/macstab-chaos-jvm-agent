@@ -66,7 +66,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Changed
 
-* **bootstrap, spring, micronaut, quarkus:** the `message` of a management activation answer (HTTP and JMX) starts with one prefix per outcome: `invalid plan:` for every `invalid` answer (also a blank plan, and an activation failure that is neither a validation error nor a conflict, which said `plan rejected:`), `plan conflict:` for `conflict` (it said `plan rejected:`), and `plan rejected:` only for `rejected`. Every log line and printed warning of the agent and its integrations starts with `[chaos-agent] ` (most said `chaos-agent: `), and a missing agent is "the chaos agent is not installed" everywhere.
+* **bootstrap, spring, micronaut, quarkus:** the `message` of a management activation answer (HTTP and JMX) starts with one prefix per outcome: `invalid plan:` for every `invalid` answer (also a blank plan, and an activation failure that is neither a validation error nor a conflict, which said `plan rejected:`), `plan conflict:` for `conflict` (it said `plan rejected:`), and `plan rejected:` only for `rejected`. Every log line and printed warning of the agent and its integrations starts with `[chaos-agent] ` (most said `chaos-agent: `, `chaos: ` or nothing), except the event lines, whose `type=X …` format [configuration-reference §12.2](docs/configuration-reference.md#122-structured-logging) defines, and a missing agent is "the chaos agent is not installed" everywhere.
 
 * **startup-config:** a `file:` source (the status file's `source=`, `LoadedPlan.source()`, `ConfigLoadException.getSource()`) is the plan file's absolute, normalised path, also when it was configured relative.
 

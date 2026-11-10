@@ -241,7 +241,8 @@ final class ObservabilityBus {
             LOGGER.log(
                 failedBefore ? Level.FINE : Level.WARNING,
                 () ->
-                    "asynchronous ChaosEventListener threw; delivery continues. listener="
+                    "[chaos-agent] asynchronous ChaosEventListener threw; delivery continues."
+                        + " listener="
                         + delegate.getClass().getName()
                         + " error="
                         + listenerFailure);
@@ -314,7 +315,7 @@ final class ObservabilityBus {
         } catch (final Exception ex) {
           LOGGER.warning(
               () ->
-                  "ChaosEventListener threw during close; continuing. listener="
+                  "[chaos-agent] ChaosEventListener threw during close; continuing. listener="
                       + listener.getClass().getName()
                       + " error="
                       + ex);
@@ -381,7 +382,7 @@ final class ObservabilityBus {
         LOGGER.log(
             failedListeners.add(listener) ? Level.WARNING : Level.FINE,
             () ->
-                "ChaosEventListener threw during publish; delivery continues."
+                "[chaos-agent] ChaosEventListener threw during publish; delivery continues."
                     + " event="
                     + type
                     + " scenarioId="
@@ -416,7 +417,7 @@ final class ObservabilityBus {
       // everything, log once at WARNING, and keep the application semantics clean.
       LOGGER.warning(
           () ->
-              "ChaosMetricsSink threw during incrementMetric; metric dropped."
+              "[chaos-agent] ChaosMetricsSink threw during incrementMetric; metric dropped."
                   + " name="
                   + name
                   + " sink="

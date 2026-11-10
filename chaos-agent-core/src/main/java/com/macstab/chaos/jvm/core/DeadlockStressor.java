@@ -89,7 +89,7 @@ final class DeadlockStressor implements ManagedStressor {
                   }
                 } catch (final InterruptedException e) {
                   Thread.currentThread().interrupt();
-                  LOGGER.fine(() -> "chaos deadlock thread interrupted: " + name);
+                  LOGGER.fine(() -> "[chaos-agent] chaos deadlock thread interrupted: " + name);
                 }
               },
               ManagedStressor.failure(onEnd, "Deadlock")));

@@ -319,7 +319,9 @@ final class ScopeContext {
           LOGGER.log(
               Level.FINE,
               scopeCloseFailure,
-              () -> "chaos scope binding close failed; session stack may be inconsistent");
+              () ->
+                  "[chaos-agent] chaos scope binding close failed; session stack may be"
+                      + " inconsistent");
         }
       }
     }
@@ -339,7 +341,9 @@ final class ScopeContext {
           LOGGER.log(
               Level.FINE,
               scopeCloseFailure,
-              () -> "chaos scope binding close failed; session stack may be inconsistent");
+              () ->
+                  "[chaos-agent] chaos scope binding close failed; session stack may be"
+                      + " inconsistent");
         }
       }
     }

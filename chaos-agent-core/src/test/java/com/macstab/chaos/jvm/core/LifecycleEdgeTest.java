@@ -501,7 +501,8 @@ class LifecycleEdgeTest {
                         && record
                             .getMessage()
                             .equals(
-                                "chaos scope binding close failed; session stack may be"
+                                "[chaos-agent] chaos scope binding close failed; session stack"
+                                    + " may be"
                                     + " inconsistent")
                         && record.getThrown() instanceof IllegalStateException);
       }

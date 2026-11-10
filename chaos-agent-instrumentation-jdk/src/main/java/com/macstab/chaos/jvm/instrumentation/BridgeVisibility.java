@@ -85,7 +85,11 @@ final class BridgeVisibility {
     if (reason != null) {
       HookCoverage.failed("class loader " + loader, reason);
       LOGGER.warning(
-          () -> "chaos hooks are not woven into the classes of " + loader + ": " + reason);
+          () ->
+              "[chaos-agent] chaos hooks are not woven into the classes of "
+                  + loader
+                  + ": "
+                  + reason);
     }
     return ownCopy;
   }

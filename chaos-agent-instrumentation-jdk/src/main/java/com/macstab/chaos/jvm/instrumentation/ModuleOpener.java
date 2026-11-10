@@ -52,7 +52,7 @@ final class ModuleOpener {
     try {
       openTo.add(Class.forName(BootstrapDispatcher.class.getName(), false, null).getModule());
     } catch (final ClassNotFoundException notInjected) {
-      LOGGER.fine(() -> "bootstrap bridge not injected; its module is not opened to");
+      LOGGER.fine(() -> "[chaos-agent] bootstrap bridge not injected; its module is not opened to");
     }
 
     // moduleClass → packages to open. Loaded reflectively so this code stays compilable on
@@ -72,13 +72,22 @@ final class ModuleOpener {
       final String packageName = entry[1];
       final Module module = ModuleLayer.boot().findModule(moduleName).orElse(null);
       if (module == null) {
-        LOGGER.fine(() -> "module " + moduleName + " not present; skipping open of " + packageName);
+        LOGGER.fine(
+            () ->
+                "[chaos-agent] module "
+                    + moduleName
+                    + " not present; skipping open of "
+                    + packageName);
         continue;
       }
       if (!module.getPackages().contains(packageName)) {
         LOGGER.fine(
             () ->
-                "module " + moduleName + " does not contain package " + packageName + "; skipping");
+                "[chaos-agent] module "
+                    + moduleName
+                    + " does not contain package "
+                    + packageName
+                    + "; skipping");
         continue;
       }
       try {
@@ -96,7 +105,7 @@ final class ModuleOpener {
             Level.FINE,
             failure,
             () ->
-                "failed to redefineModule open for "
+                "[chaos-agent] failed to redefineModule open for "
                     + moduleName
                     + "/"
                     + packageName

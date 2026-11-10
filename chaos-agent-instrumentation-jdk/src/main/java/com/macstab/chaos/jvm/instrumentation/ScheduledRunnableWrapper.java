@@ -73,7 +73,8 @@ public final class ScheduledRunnableWrapper implements Runnable {
                   Level.WARNING,
                   chaosFailure,
                   () ->
-                      "chaos: suppressing chaos-injected exception from beforeScheduledTick to"
+                      "[chaos-agent] suppressing chaos-injected exception from"
+                          + " beforeScheduledTick to"
                           + " preserve periodicity (task="
                           + delegate.getClass().getName()
                           + ")");

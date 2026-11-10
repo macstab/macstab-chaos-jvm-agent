@@ -51,7 +51,7 @@ final class StringInternPressureStressor implements ManagedStressor {
     this.internedStrings = List.copyOf(strings);
     LOGGER.fine(
         () ->
-            "StringInternPressureStressor interned "
+            "[chaos-agent] StringInternPressureStressor interned "
                 + strings.size()
                 + " strings of "
                 + lengthBytes

@@ -70,7 +70,8 @@ class ObservabilityBusIsolationTest {
           .anyMatch(
               message ->
                   message.startsWith(
-                          "ChaosEventListener threw during publish; delivery continues. event=APPLIED"
+                          "[chaos-agent] ChaosEventListener threw during publish; delivery"
+                              + " continues. event=APPLIED"
                               + " scenarioId=s1 listener=")
                       && message.endsWith("error=java.lang.IllegalStateException: listener broke"));
     }
@@ -100,7 +101,8 @@ class ObservabilityBusIsolationTest {
                     .filteredOn(
                         message ->
                             message.startsWith(
-                                "asynchronous ChaosEventListener threw; delivery continues."))
+                                "[chaos-agent] asynchronous ChaosEventListener threw; delivery"
+                                    + " continues."))
                     .hasSize(2);
               });
     } finally {
@@ -164,7 +166,9 @@ class ObservabilityBusIsolationTest {
       assertThat(log.messages())
           .anyMatch(
               message ->
-                  message.startsWith("ChaosEventListener threw during close; continuing. listener=")
+                  message.startsWith(
+                          "[chaos-agent] ChaosEventListener threw during close; continuing."
+                              + " listener=")
                       && message.endsWith("error=java.lang.Exception: close broke"));
     }
   }
@@ -191,7 +195,8 @@ class ObservabilityBusIsolationTest {
           .anyMatch(
               message ->
                   message.startsWith(
-                          "ChaosMetricsSink threw during incrementMetric; metric dropped."
+                          "[chaos-agent] ChaosMetricsSink threw during incrementMetric; metric"
+                              + " dropped."
                               + " name=chaos.applied sink=")
                       && message.endsWith("error=java.lang.IllegalStateException: registry gone"));
     }
@@ -339,7 +344,9 @@ class ObservabilityBusIsolationTest {
 
       final List<LogRecord> failures =
           log.records().stream()
-              .filter(record -> record.getMessage().startsWith("ChaosEventListener threw"))
+              .filter(
+                  record ->
+                      record.getMessage().startsWith("[chaos-agent] ChaosEventListener threw"))
               .toList();
       assertThat(failures).hasSize(50);
       assertThat(failures).filteredOn(record -> record.getLevel() == Level.WARNING).hasSize(1);
@@ -370,7 +377,9 @@ class ObservabilityBusIsolationTest {
                     log.records().stream()
                         .filter(
                             record ->
-                                record.getMessage().startsWith("asynchronous ChaosEventListener"))
+                                record
+                                    .getMessage()
+                                    .startsWith("[chaos-agent] asynchronous ChaosEventListener"))
                         .toList();
                 assertThat(failures).hasSize(5);
                 assertThat(failures)

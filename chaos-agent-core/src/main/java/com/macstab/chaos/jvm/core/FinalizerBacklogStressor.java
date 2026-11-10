@@ -37,7 +37,7 @@ final class FinalizerBacklogStressor implements ManagedStressor {
     this.createdCount = effect.objectCount();
     LOGGER.fine(
         () ->
-            "chaos finalizer-backlog stressor created "
+            "[chaos-agent] chaos finalizer-backlog stressor created "
                 + createdCount
                 + " objects with "
                 + delayMs

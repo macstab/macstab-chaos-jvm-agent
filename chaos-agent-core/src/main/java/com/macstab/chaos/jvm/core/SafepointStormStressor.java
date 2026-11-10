@@ -80,7 +80,7 @@ final class SafepointStormStressor implements ManagedStressor {
             ManagedStressor.failure(onEnd, "SafepointStorm"));
     LOGGER.fine(
         () ->
-            "SafepointStormStressor started; gcInterval="
+            "[chaos-agent] SafepointStormStressor started; gcInterval="
                 + intervalMillis
                 + "ms, retransformClassCount="
                 + retransformCount);
@@ -90,7 +90,11 @@ final class SafepointStormStressor implements ManagedStressor {
   public void close() {
     running.set(false);
     AgentThreads.stopAll(java.util.List.of(stormThread), 5_000L);
-    LOGGER.fine(() -> "SafepointStormStressor stopped after " + gcCycleCount.get() + " GC cycles");
+    LOGGER.fine(
+        () ->
+            "[chaos-agent] SafepointStormStressor stopped after "
+                + gcCycleCount.get()
+                + " GC cycles");
   }
 
   /** Returns the total number of GC cycles triggered so far. */
@@ -120,7 +124,9 @@ final class SafepointStormStressor implements ManagedStressor {
         retransformed++;
       } catch (final Exception exception) {
         // Some system classes cannot be retransformed: skip the class, with a trace.
-        LOGGER.fine(() -> "SafepointStormStressor skipped " + cls.getName() + ": " + exception);
+        LOGGER.fine(
+            () ->
+                "[chaos-agent] SafepointStormStressor skipped " + cls.getName() + ": " + exception);
       }
     }
   }

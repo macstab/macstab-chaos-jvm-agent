@@ -155,7 +155,7 @@ final class GcPressureStressor implements ManagedStressor {
         }
         if (elapsed >= durationNanos) {
           running.set(false);
-          LOGGER.fine(() -> "chaos-gc-pressure stressor completed");
+          LOGGER.fine(() -> "[chaos-agent] chaos-gc-pressure stressor completed");
           // The load ends with the duration, and so does the scenario (L17).
           onEnd.accept("duration elapsed");
           return;
@@ -168,7 +168,7 @@ final class GcPressureStressor implements ManagedStressor {
         }
       }
       running.set(false);
-      LOGGER.fine(() -> "chaos-gc-pressure stressor completed");
+      LOGGER.fine(() -> "[chaos-agent] chaos-gc-pressure stressor completed");
     };
   }
 

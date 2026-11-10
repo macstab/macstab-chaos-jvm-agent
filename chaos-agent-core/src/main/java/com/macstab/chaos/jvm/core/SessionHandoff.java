@@ -87,7 +87,8 @@ final class SessionHandoff {
     try {
       binding.close();
     } catch (final RuntimeException closeFailure) {
-      LOGGER.log(Level.FINE, closeFailure, () -> "chaos session hand-off release failed");
+      LOGGER.log(
+          Level.FINE, closeFailure, () -> "[chaos-agent] chaos session hand-off release failed");
     }
   }
 

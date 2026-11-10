@@ -2118,7 +2118,8 @@ class AgentEndToEndTest {
       // compareTo(Shape) and area() twice; label() and area() once. The bridge compareTo(Object)
       // and the lambda's synthetic body would each count once more.
       assertThat(result.longValue("matched.shape-methods")).isEqualTo(5L);
-      assertThat(result.value("wovenLog")).isEqualTo("chaos method hooks woven for 1 selector(s)");
+      assertThat(result.value("wovenLog"))
+          .isEqualTo("[chaos-agent] chaos method hooks woven for 1 selector(s)");
     }
   }
 

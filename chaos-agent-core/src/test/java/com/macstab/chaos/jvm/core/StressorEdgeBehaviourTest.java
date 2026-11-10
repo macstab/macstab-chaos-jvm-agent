@@ -283,7 +283,10 @@ class StressorEdgeBehaviourTest {
           await().atMost(5, TimeUnit.SECONDS).until(() -> !stressor.isRunning());
           await()
               .atMost(5, TimeUnit.SECONDS)
-              .until(() -> log.messages().contains("chaos-gc-pressure stressor completed"));
+              .until(
+                  () ->
+                      log.messages()
+                          .contains("[chaos-agent] chaos-gc-pressure stressor completed"));
         } finally {
           stressor.close();
         }
@@ -361,7 +364,7 @@ class StressorEdgeBehaviourTest {
         stressor.close();
         assertThat(stressor.aliveCount()).isZero();
         assertThat(log.messages())
-            .contains("chaos carrier-pin thread terminated: chaos-carrier-pin-0");
+            .contains("[chaos-agent] chaos carrier-pin thread terminated: chaos-carrier-pin-0");
       }
     }
 
@@ -450,7 +453,8 @@ class StressorEdgeBehaviourTest {
         // and logs; the next may take the lock it released before its own interrupt arrives and
         // then leaves through the park loop without logging. At least one is interrupted.
         assertThat(log.messages())
-            .anyMatch(message -> message.startsWith("chaos deadlock thread interrupted: "));
+            .anyMatch(
+                message -> message.startsWith("[chaos-agent] chaos deadlock thread interrupted: "));
       } finally {
         stressor.close();
       }
@@ -548,7 +552,9 @@ class StressorEdgeBehaviourTest {
             new ThreadLocalLeakStressor(new ChaosEffect.ThreadLocalLeakEffect(1, 1));
         stressor.close();
         assertThat(log.messages())
-            .filteredOn(message -> message.startsWith("chaos thread-local-leak planted entry on "))
+            .filteredOn(
+                message ->
+                    message.startsWith("[chaos-agent] chaos thread-local-leak planted entry on "))
             .hasSize(stressor.plantedCount());
       }
     }
@@ -618,7 +624,8 @@ class StressorEdgeBehaviourTest {
             new ThreadLeakStressor(new ChaosEffect.ThreadLeakEffect(1, "edge-leak-", true, null));
         stressor.close();
         assertThat(stressor.aliveCount()).isZero();
-        assertThat(log.messages()).contains("chaos thread-leak thread terminated: edge-leak-0");
+        assertThat(log.messages())
+            .contains("[chaos-agent] chaos thread-leak thread terminated: edge-leak-0");
       }
     }
 
@@ -762,7 +769,8 @@ class StressorEdgeBehaviourTest {
         stressor.close();
         assertThat(log.messages())
             .contains(
-                "chaos finalizer-backlog stressor created 1 objects with 3 ms finalizer delay");
+                "[chaos-agent] chaos finalizer-backlog stressor created 1 objects with 3 ms"
+                    + " finalizer delay");
       }
     }
   }

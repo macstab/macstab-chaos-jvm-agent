@@ -96,7 +96,8 @@ final class MethodWeaver {
       BootstrapDispatcher.endInternalCall();
     }
     woven = snapshot;
-    LOGGER.fine(() -> "chaos method hooks woven for " + snapshot.size() + " selector(s)");
+    LOGGER.fine(
+        () -> "[chaos-agent] chaos method hooks woven for " + snapshot.size() + " selector(s)");
   }
 
   /**

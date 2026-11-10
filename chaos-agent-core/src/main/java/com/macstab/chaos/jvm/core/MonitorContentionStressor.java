@@ -95,7 +95,8 @@ final class MonitorContentionStressor implements ManagedStressor {
                     lock.unlock();
                   }
                 }
-                LOGGER.fine(() -> "chaos monitor-contention thread terminated: " + name);
+                LOGGER.fine(
+                    () -> "[chaos-agent] chaos monitor-contention thread terminated: " + name);
               },
               ManagedStressor.failure(onEnd, "MonitorContention")));
     }

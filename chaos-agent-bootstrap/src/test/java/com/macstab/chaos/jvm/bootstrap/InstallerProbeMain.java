@@ -94,9 +94,11 @@ public final class InstallerProbeMain {
 
     System.out.println(
         "sweepSkippedLogged="
-            + fineMessages.stream().anyMatch(m -> m.startsWith("bridge jar sweep skipped")));
+            + fineMessages.stream()
+                .anyMatch(m -> m.startsWith("[chaos-agent] bridge jar sweep skipped")));
     System.out.println(
-        "wovenLogged=" + fineMessages.stream().anyMatch(m -> m.startsWith("chaos hooks woven")));
+        "wovenLogged="
+            + fineMessages.stream().anyMatch(m -> m.startsWith("[chaos-agent] chaos hooks woven")));
   }
 
   /**

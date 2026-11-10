@@ -5,6 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import net.bytebuddy.agent.builder.AgentBuilder;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -29,6 +34,42 @@ class ClockCallSitePackagesTest {
           .as(prefix)
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessageContaining("JDK");
+    }
+  }
+
+  @Test
+  @DisplayName("warns with the agent's log prefix when a clock scenario has no call-site packages")
+  void warnsWithAgentPrefixWithoutPackages() {
+    final List<String> previous = JdkInstrumentationInstaller.clockPackages;
+    final Logger logger = Logger.getLogger(JdkInstrumentationInstaller.class.getName());
+    final List<String> messages = new CopyOnWriteArrayList<>();
+    final Handler capture =
+        new Handler() {
+          @Override
+          public void publish(final LogRecord record) {
+            messages.add(record.getMessage());
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    logger.addHandler(capture);
+    JdkInstrumentationInstaller.clockPackages = List.of();
+    try {
+      final AgentBuilder builder = new AgentBuilder.Default();
+
+      assertThat(ClockHooks.applyClockCallSiteTransformations(builder)).isSameAs(builder);
+
+      assertThat(messages)
+          .singleElement()
+          .asString()
+          .startsWith("[chaos-agent] a SYSTEM_CLOCK_MILLIS/NANOS scenario is active");
+    } finally {
+      JdkInstrumentationInstaller.clockPackages = previous;
+      logger.removeHandler(capture);
     }
   }
 }

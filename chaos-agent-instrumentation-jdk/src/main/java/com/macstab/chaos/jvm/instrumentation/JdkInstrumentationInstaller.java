@@ -244,7 +244,7 @@ public final class JdkInstrumentationInstaller {
           }
           WOVEN_GROUPS.put(group, transformer);
           wovenNow = true;
-          LOGGER.fine(() -> "chaos hooks woven: " + group);
+          LOGGER.fine(() -> "[chaos-agent] chaos hooks woven: " + group);
         }
       } finally {
         // Some JDK classes (the object streams, the socket classes) can be loaded as a side effect
@@ -942,7 +942,8 @@ public final class JdkInstrumentationInstaller {
           instrumentation.retransformClasses(escapee);
         } catch (final Throwable failure) {
           HookCoverage.failed(escapee.getName(), failure);
-          LOGGER.warning(() -> "failed to retransform " + escapee.getName() + ": " + failure);
+          LOGGER.warning(
+              () -> "[chaos-agent] failed to retransform " + escapee.getName() + ": " + failure);
         }
       }
     }
@@ -1002,7 +1003,8 @@ public final class JdkInstrumentationInstaller {
           final boolean loaded,
           final Throwable throwable) {
         HookCoverage.failed(typeName, throwable);
-        LOGGER.warning(() -> "chaos instrumentation failed for " + typeName + ": " + throwable);
+        LOGGER.warning(
+            () -> "[chaos-agent] chaos instrumentation failed for " + typeName + ": " + throwable);
       }
     };
   }

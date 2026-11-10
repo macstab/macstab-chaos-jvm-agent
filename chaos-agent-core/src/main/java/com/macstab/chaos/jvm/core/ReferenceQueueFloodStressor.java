@@ -99,7 +99,7 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
             ManagedStressor.failure(onEnd, "ReferenceQueueFlood"));
     LOGGER.fine(
         () ->
-            "ReferenceQueueFloodStressor started; referenceCount="
+            "[chaos-agent] ReferenceQueueFloodStressor started; referenceCount="
                 + referenceCount
                 + ", floodInterval="
                 + intervalMillis
@@ -113,7 +113,9 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
     drain();
     LOGGER.fine(
         () ->
-            "ReferenceQueueFloodStressor stopped after " + floodCycleCount.get() + " flood cycles");
+            "[chaos-agent] ReferenceQueueFloodStressor stopped after "
+                + floodCycleCount.get()
+                + " flood cycles");
   }
 
   /** Returns the number of completed flood cycles so far. */
