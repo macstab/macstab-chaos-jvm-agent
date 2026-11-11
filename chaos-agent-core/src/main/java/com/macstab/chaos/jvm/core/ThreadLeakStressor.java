@@ -72,6 +72,8 @@ final class ThreadLeakStressor implements ManagedStressor {
                 while (!stopped.get() && System.nanoTime() - start < lifespanNanos) {
                   java.util.concurrent.locks.LockSupport.parkNanos(50_000_000L /* 50 ms */);
                   if (Thread.interrupted()) {
+                    // close() interrupts a parked thread: it ends here, and is logged as ended.
+                    LOGGER.fine(() -> "[chaos-agent] chaos thread-leak thread terminated: " + name);
                     ManagedStressor.interrupted(onEnd, "ThreadLeak", stopped.get());
                     return;
                   }

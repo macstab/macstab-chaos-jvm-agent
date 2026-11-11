@@ -705,6 +705,30 @@ class StressorEdgeBehaviourTest {
     }
 
     @Test
+    @DisplayName("ThreadLeakStressor logs a thread it ends while the thread is parked")
+    void threadLeakLogsTerminationOfParkedThread() {
+      try (LogCapture log = LogCapture.agent()) {
+        final ThreadLeakStressor stressor =
+            new ThreadLeakStressor(
+                new ChaosEffect.ThreadLeakEffect(1, "edge-leak-parked-", true, null));
+        // close() interrupts the thread inside its park, not before its first loop check.
+        await()
+            .atMost(Duration.ofSeconds(10))
+            .until(
+                () ->
+                    Thread.getAllStackTraces().keySet().stream()
+                        .anyMatch(
+                            thread ->
+                                thread.getName().equals("edge-leak-parked-0")
+                                    && thread.getState() == Thread.State.TIMED_WAITING));
+        stressor.close();
+        assertThat(stressor.aliveCount()).isZero();
+        assertThat(log.messages())
+            .contains("[chaos-agent] chaos thread-leak thread terminated: edge-leak-parked-0");
+      }
+    }
+
+    @Test
     @DisplayName("ThreadLeakStressor: an interrupted close() hands the interrupt back")
     void threadLeakInterruptedClose() {
       final ThreadLeakStressor stressor =
