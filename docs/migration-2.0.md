@@ -62,6 +62,7 @@
 | 41 | A test's sessions and listeners end with it | a test opens a session or adds a listener through the injected `ChaosControlPlane` and a later test relies on it | open or add it again in that test, or through `ChaosPlatform.current()` (§41) |
 | 42 | `spuriousWakeup` selects `NIO_SELECTOR_SELECT` alone | a `spuriousWakeup` scenario's `NioSelector` also lists a channel operation (`NIO_CHANNEL_READ`, `NIO_CHANNEL_WRITE`, `NIO_CHANNEL_CONNECT`, `NIO_CHANNEL_ACCEPT`) | remove the other operations, or put them in a scenario of their own (§42) |
 | 43 | The Quarkus and Micronaut modules no longer bring `chaos-agent-testkit` | a test uses `@QuarkusChaosTest`, `@MicronautChaosTest`, `@WithChaos` or `ChaosAssertions` and gets the testkit only through `chaos-agent-quarkus-extension` or `chaos-agent-micronaut-integration` | add `chaos-agent-testkit` to the test dependencies (§43) |
+| 44 | Of `chaos-agent-bootstrap`, only `ChaosPlatform` is API | you reference `StartupConfigPoller`, `ChaosAgentBootstrap`, `ChaosDiagnosticsMXBean`, `JfrIntegration` or the JFR event classes | use `ChaosPlatform` and the `configWatchInterval` agent argument (§44) |
 
 ---
 
@@ -486,6 +487,12 @@ Before (1.x): `new NioSelector(Set.of(NIO_SELECTOR_SELECT, NIO_CHANNEL_READ), �
 `chaos-agent-quarkus-extension` and `chaos-agent-micronaut-integration` compile against `chaos-agent-testkit` but no longer export it: their POMs do not list it. An application ships these modules for its `ChaosControlPlane` bean and its management endpoint, and the testkit (with `TrackingChaosControlPlane`, `@WithChaos` and `ChaosAssertions`) is test support, so it no longer reaches the production class path. The test support in the two modules (`@QuarkusChaosTest` and `ChaosQuarkusExtension`; `@MicronautChaosTest`, `ChaosMicronautExtension` and the tracked control-plane bean of a chaos test's context) is built on it and needs it in the test dependencies.
 
 Before (1.x): the testkit came with the module, also into the packaged application. Now declare it where your tests run; with Gradle, for example, `testImplementation("com.macstab.chaos.jvm:chaos-agent-testkit")` next to the module (its version from `chaos-agent-bom`). An application that uses neither the test annotations nor the testkit's classes changes nothing.
+
+## 44. Of `chaos-agent-bootstrap`, only `ChaosPlatform` is API
+
+`ChaosPlatform` is the one supported type of the agent jar's module (`chaos-agent-bootstrap`); `apiCheck` and `japicmp` guard it. `StartupConfigPoller`, which was `public` in 1.x (`createIfEnabled`, `startWithInitialPlan`, `intervalMs`, `close`, and the constants `ENV_WATCH_INTERVAL` and `ARG_WATCH_INTERVAL`), is package-private. `ChaosAgentBootstrap`, `ChaosDiagnosticsMXBean`, `JfrIntegration` and the JFR event classes (`ChaosEffectAppliedEvent`, `ChaosScenarioLifecycleEvent`, `ChaosStressorSnapshotEvent`) stay `public` for the agent's own use but are `@Internal`: they can change in any release.
+
+Before (1.x): code could start a poller with `StartupConfigPoller.createIfEnabled(...)` or read its constants. Now get the control plane through `ChaosPlatform` (`ChaosPlatform.installLocally()` or `ChaosPlatform.current()`), and have the agent reload its plan file with the `configWatchInterval` agent argument (`-Dmacstab.chaos.configWatchInterval`, `MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL`; [configuration reference](configuration-reference.md#supported-agent-args)). The MXBean is still registered and read through JMX by its object name; only compiling against its interface is unsupported. The JFR events keep their names and fields (§40), so JFR recordings and JMC are unaffected.
 
 ---
 
