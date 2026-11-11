@@ -83,7 +83,9 @@ public final class DatagramProbeMain {
                 ChaosEffect.suppress())) {
       receiver.setSoTimeout(RECEIVE_TIMEOUT_MILLIS / 4);
       final InetSocketAddress peer = (InetSocketAddress) receiver.getLocalSocketAddress();
-      final InetSocketAddress other = new InetSocketAddress(loopback, peer.getPort() + 1);
+      final InetSocketAddress other =
+          new InetSocketAddress(
+              loopback, peer.getPort() == 65_535 ? peer.getPort() - 1 : peer.getPort() + 1);
 
       final DatagramChannel closed = DatagramChannel.open();
       closed.close();
