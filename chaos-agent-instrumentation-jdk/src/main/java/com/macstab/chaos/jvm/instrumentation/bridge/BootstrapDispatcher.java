@@ -1641,6 +1641,8 @@ public final class BootstrapDispatcher {
       final long outcome = (long) h[BEFORE_NIO_SELECT].invoke(d, selector, timeoutMillis);
       if (outcome > 0L) {
         stallSelect(selector, outcome);
+      } else if (!SELECT_WAKEUPS.isEmpty()) {
+        SELECT_WAKEUPS.remove(selector); // this select returns at once on the JDK's own wakeup
       }
       return outcome >= 0L;
     } catch (final Throwable throwable) {
@@ -1656,14 +1658,27 @@ public final class BootstrapDispatcher {
       new java.util.concurrent.ConcurrentHashMap<>();
 
   /**
+   * The selectors woken up with no stall to end, while a {@code NIO_SELECTOR_SELECT} scenario is
+   * indexed (identity: selector implementations keep {@code Object}'s equality): the next select of
+   * such a selector returns at once, as the JDK keeps a wakeup made with no select in progress. A
+   * select of the selector, or its close, removes it.
+   */
+  private static final java.util.concurrent.ConcurrentHashMap<Object, Boolean> SELECT_WAKEUPS =
+      new java.util.concurrent.ConcurrentHashMap<>();
+
+  /**
    * Stalls a select for at most {@code nanos}: a real select with no ready channel returns at once
-   * on {@code wakeup()}, the selector's close (which wakes it up) and an interrupt, so the stall
-   * ends on them too.
+   * on {@code wakeup()}, also one made before it, the selector's close (which wakes it up) and an
+   * interrupt, so the stall ends on them too.
    */
   private static void stallSelect(final Object selector, final long nanos) {
     final Thread self = Thread.currentThread();
     SELECT_STALLS.put(selector, self);
     try {
+      // After the registration: a wakeup either finds this stall or is seen here.
+      if (SELECT_WAKEUPS.remove(selector) != null) {
+        return;
+      }
       final long deadline = System.nanoTime() + nanos;
       long left;
       while (SELECT_STALLS.get(selector) == self
@@ -1678,16 +1693,26 @@ public final class BootstrapDispatcher {
 
   /**
    * Called after a selector's {@code wakeup()} (also the one its close makes): ends a {@code
-   * timeout()} stall of a select on it. Without a stall it only asks whether one exists.
+   * timeout()} stall of a select on it. While a {@code NIO_SELECTOR_SELECT} scenario is indexed, a
+   * wakeup of an open selector is also kept for its next select ({@link #SELECT_WAKEUPS}); idle, it
+   * only asks whether a stall exists.
    *
    * @param selector the selector woken up
    */
   public static void selectorWoken(final Object selector) {
+    if (!idle(OperationTags.NIO_SELECTOR_SELECT)
+        && !(selector instanceof java.nio.channels.Selector closed && !closed.isOpen())) {
+      // Recorded before the stall is looked up: a stall registering meanwhile sees it.
+      SELECT_WAKEUPS.put(selector, Boolean.TRUE);
+    } else if (!SELECT_WAKEUPS.isEmpty()) {
+      SELECT_WAKEUPS.remove(selector);
+    }
     if (SELECT_STALLS.isEmpty()) {
       return;
     }
     final Thread stalled = SELECT_STALLS.remove(selector);
     if (stalled != null) {
+      SELECT_WAKEUPS.remove(selector); // this wakeup ended the stall
       java.util.concurrent.locks.LockSupport.unpark(stalled);
     }
   }

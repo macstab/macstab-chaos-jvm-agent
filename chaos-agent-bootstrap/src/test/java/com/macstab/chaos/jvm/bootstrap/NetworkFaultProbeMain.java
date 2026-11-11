@@ -254,8 +254,10 @@ public final class NetworkFaultProbeMain {
   /**
    * A {@code timeout()} stall of a 3 s select, socket read, adaptor read and connect, each ended by
    * another thread 200 ms after the call entered the stall: a {@code wakeup()} or {@code close()}
-   * of the selector, a close of the socket or channel. Prints {@code <row>.millis} (how long the
-   * call took) and {@code <row>.outcome} (what it returned or threw) and {@code <row>.applied}.
+   * of the selector, a close of the socket or channel; and a stalled select after a {@code
+   * wakeup()} made before it, and on a closed selector. Prints {@code <row>.millis} (how long the
+   * call took), {@code <row>.outcome} (what it returned or threw) and, for an ended stall, {@code
+   * <row>.applied}.
    */
   private static void stallEnds() throws Exception {
     final ChaosSelector select = ChaosSelector.nio(Set.of(OperationType.NIO_SELECTOR_SELECT));
@@ -264,6 +266,20 @@ public final class NetworkFaultProbeMain {
     }
     final java.nio.channels.Selector closing = java.nio.channels.Selector.open();
     stall("selectClose", select, () -> closing.select(3_000L), closing::close);
+    // A wakeup with no select in progress: the next select returns at once.
+    try (java.nio.channels.Selector selector = java.nio.channels.Selector.open();
+        ChaosActivationHandle timeout =
+            RealCallRows.activate("selectWakeupBefore", select, ChaosEffect.timeout())) {
+      selector.wakeup();
+      timed("selectWakeupBefore", () -> selector.select(3_000L));
+    }
+    // A select of a closed selector throws ClosedSelectorException.
+    final java.nio.channels.Selector closed = java.nio.channels.Selector.open();
+    closed.close();
+    try (ChaosActivationHandle timeout =
+        RealCallRows.activate("selectClosed", select, ChaosEffect.timeout())) {
+      timed("selectClosed", () -> closed.select(3_000L));
+    }
 
     final ChaosSelector read = ChaosSelector.network(Set.of(OperationType.SOCKET_READ));
     try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {

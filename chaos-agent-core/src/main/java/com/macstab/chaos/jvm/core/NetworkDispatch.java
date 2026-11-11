@@ -41,6 +41,9 @@ public final class NetworkDispatch {
     if (engine.idle(OperationType.NIO_SELECTOR_SELECT) || JdkOwnUse.onHttpClientSelectorThread()) {
       return SELECT_PROCEEDS; // idle, or the JDK HttpClient's own selector loop (L3a)
     }
+    if (selector instanceof java.nio.channels.Selector open && !open.isOpen()) {
+      return SELECT_PROCEEDS; // the real select throws ClosedSelectorException
+    }
     final RuntimeDecision decision =
         engine.evaluate(
             new InvocationContext(

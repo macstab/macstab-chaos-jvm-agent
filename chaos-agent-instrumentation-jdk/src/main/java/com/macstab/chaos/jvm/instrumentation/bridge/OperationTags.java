@@ -114,6 +114,9 @@ public final class OperationTags {
   /** {@code NIO_CHANNEL_READ}. */
   public static final String NIO_CHANNEL_READ = "NIO_CHANNEL_READ";
 
+  /** {@code NIO_SELECTOR_SELECT}. */
+  public static final String NIO_SELECTOR_SELECT = "NIO_SELECTOR_SELECT";
+
   /** {@code QUEUE_OFFER}. */
   public static final String QUEUE_OFFER = "QUEUE_OFFER";
 

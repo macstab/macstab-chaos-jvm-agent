@@ -140,6 +140,13 @@ class NetworkFaultEndToEndTest {
               softly.assertThat(result.longValue(row + ".millis")).as(row).isBetween(150L, 1_499L);
             }
             softly.assertThat(result.value("selectWakeup.outcome")).isEqualTo("ok");
+            // A wakeup made before the select: the select returns at once, as the JDK's does.
+            softly.assertThat(result.longValue("selectWakeupBefore.millis")).isLessThan(500L);
+            softly.assertThat(result.value("selectWakeupBefore.outcome")).isEqualTo("ok");
+            softly.assertThat(result.longValue("selectClosed.millis")).isLessThan(500L);
+            softly
+                .assertThat(result.value("selectClosed.outcome"))
+                .isEqualTo("java.nio.channels.ClosedSelectorException");
             softly.assertThat(result.value("read.outcome")).isEqualTo("java.net.SocketException");
             // The adaptor's stream reports the channel's asynchronous close as it is.
             softly
