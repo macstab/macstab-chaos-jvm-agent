@@ -47,6 +47,38 @@ class StressorHeapBoundTest {
   }
 
   @Test
+  @DisplayName("in this JVM too, both are refused as UNSUPPORTED_RUNTIME, naming the free heap")
+  void refusedInProcess() {
+    try (ChaosRuntime runtime = new ChaosRuntime()) {
+      assertThatThrownBy(
+              () ->
+                  runtime.validate(
+                      ChaosScenario.builder("huge-leak")
+                          .selector(
+                              ChaosSelector.stress(ChaosSelector.StressTarget.THREAD_LOCAL_LEAK))
+                          .effect(new ChaosEffect.ThreadLocalLeakEffect(1_000_000, 1_000_000))
+                          .build()))
+          .isInstanceOf(com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException.class)
+          .hasMessageStartingWith("threadLocalLeak of ")
+          .hasMessageContaining("exceeds the free heap of");
+      assertThatThrownBy(
+              () ->
+                  runtime.validate(
+                      ChaosScenario.builder("huge-flood")
+                          .selector(
+                              ChaosSelector.stress(
+                                  ChaosSelector.StressTarget.REFERENCE_QUEUE_FLOOD))
+                          .effect(
+                              new ChaosEffect.ReferenceQueueFloodEffect(
+                                  Integer.MAX_VALUE, Duration.ofSeconds(1)))
+                          .build()))
+          .isInstanceOf(com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException.class)
+          .hasMessageContaining(
+              "needs about " + (long) Integer.MAX_VALUE * CompatibilityValidator.REFERENCE_BYTES);
+    }
+  }
+
+  @Test
   @DisplayName("a thread-local leak whose entry count overflows an int is an invalid scenario")
   void entryCountOverflowIsInvalid() {
     try (ChaosRuntime runtime = new ChaosRuntime()) {
