@@ -121,7 +121,10 @@ class NetworkFaultEndToEndTest {
           softly -> {
             for (final String row :
                 new String[] {"selectWakeup", "selectClose", "read", "adaptorRead", "connect"}) {
-              softly.assertThat(result.longValue(row + ".millis")).as(row).isLessThan(1_500L);
+              // The stall applied once, and held the call until the other thread ended it 200 ms
+              // after the call entered the stall (the other thread ends nothing before that).
+              softly.assertThat(result.longValue(row + ".applied")).as(row).isEqualTo(1L);
+              softly.assertThat(result.longValue(row + ".millis")).as(row).isBetween(150L, 1_499L);
             }
             softly.assertThat(result.value("selectWakeup.outcome")).isEqualTo("ok");
             softly.assertThat(result.value("read.outcome")).isEqualTo("java.net.SocketException");

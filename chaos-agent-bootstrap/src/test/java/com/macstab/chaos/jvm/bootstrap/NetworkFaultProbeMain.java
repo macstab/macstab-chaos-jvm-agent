@@ -12,6 +12,7 @@ import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.util.Arrays;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.net.ssl.SSLContext;
@@ -217,10 +218,10 @@ public final class NetworkFaultProbeMain {
   // ── a timeout() stall ended by a wakeup or a close ────────────────────────
 
   /**
-   * A {@code timeout()} stall of a 3 s select, socket read, adaptor read and connect, each ended
-   * 200 ms in by another thread: a {@code wakeup()} or {@code close()} of the selector, a close of
-   * the socket or channel. Prints {@code <row>.millis} (how long the call took) and {@code
-   * <row>.outcome} (what it returned or threw).
+   * A {@code timeout()} stall of a 3 s select, socket read, adaptor read and connect, each ended by
+   * another thread 200 ms after the call entered the stall: a {@code wakeup()} or {@code close()}
+   * of the selector, a close of the socket or channel. Prints {@code <row>.millis} (how long the
+   * call took) and {@code <row>.outcome} (what it returned or threw) and {@code <row>.applied}.
    */
   private static void stallEnds() throws Exception {
     final ChaosSelector select = ChaosSelector.nio(Set.of(OperationType.NIO_SELECTOR_SELECT));
@@ -265,12 +266,19 @@ public final class NetworkFaultProbeMain {
     // while the call waits.
     try (ChaosActivationHandle timeout =
         RealCallRows.activate(row, selector, ChaosEffect.timeout())) {
+      final Thread caller = Thread.currentThread();
       final Thread ender =
           Thread.ofPlatform()
               .daemon()
               .start(
                   () -> {
                     try {
+                      // The 200 ms count from the moment the call is in the stall.
+                      awaitFrame(
+                          caller,
+                          frame ->
+                              STALL_FRAMES.contains(frame.getMethodName())
+                                  && frame.getClassName().startsWith("com.macstab.chaos.jvm."));
                       Thread.sleep(200L);
                       interruption.run();
                     } catch (final Exception failed) {
@@ -281,8 +289,36 @@ public final class NetworkFaultProbeMain {
       final String outcome = RealCallRows.outcome(call);
       System.out.println(row + ".millis=" + (System.nanoTime() - start) / 1_000_000L);
       System.out.println(row + ".outcome=" + outcome);
+      System.out.println(row + ".applied=" + timeout.appliedCount());
       ender.join();
     }
+  }
+
+  /**
+   * The agent's stall loops: {@code BootstrapDispatcher.stallSelect} for a select, {@code
+   * NetworkDispatch.stalled} for a read or a connect.
+   */
+  private static final Set<String> STALL_FRAMES = Set.of("stallSelect", "stalled");
+
+  /**
+   * Waits, at most 10 s, until one of {@code thread}'s frames matches {@code frame}.
+   *
+   * @throws IllegalStateException when none did in time
+   */
+  private static void awaitFrame(
+      final Thread thread, final java.util.function.Predicate<StackTraceElement> frame)
+      throws InterruptedException {
+    final long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10L);
+    while (System.nanoTime() < deadline) {
+      for (final StackTraceElement element : thread.getStackTrace()) {
+        if (frame.test(element)) {
+          return;
+        }
+      }
+      Thread.sleep(5L);
+    }
+    throw new IllegalStateException(
+        thread.getName() + " did not reach the frame: " + Arrays.toString(thread.getStackTrace()));
   }
 
   private static ServerSocketChannel loopbackServer() throws IOException {
@@ -300,8 +336,14 @@ public final class NetworkFaultProbeMain {
               .daemon()
               .name("blocked-reader")
               .start(() -> ended.set(RealCallRows.outcome(read)));
-      // Long enough for the reader to block in the read.
-      Thread.sleep(300L);
+      // Closed only once the reader blocks in the JDK's native read (or poll), as a real reader
+      // does: a close before it enters the read would fail it as closed, not as closed meanwhile.
+      awaitFrame(
+          thread,
+          frame ->
+              frame.isNativeMethod()
+                  && (frame.getMethodName().startsWith("read")
+                      || frame.getMethodName().startsWith("poll")));
       return new Reader(thread, ended);
     }
 
