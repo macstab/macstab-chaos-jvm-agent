@@ -894,11 +894,14 @@ public final class ChaosAgentBootstrap {
    * @return the registered {@code ObjectName}, or {@code null} when nothing was registered
    */
   private static @Nullable Object registerMBean(final ChaosRuntime runtime, final boolean control) {
-    if (ModuleLayer.boot().findModule("java.management").isEmpty()) {
+    try {
+      return DiagnosticsMBeanRegistration.register(MBEAN_NAME, runtime, control);
+    } catch (final LinkageError noJavaManagement) {
       System.err.println(
-          "[chaos-agent] MBean registration skipped: java.management is not in the runtime");
+          "[chaos-agent] MBean registration skipped: java.management is not in the runtime ("
+              + noJavaManagement
+              + ")");
       return null;
     }
-    return DiagnosticsMBeanRegistration.register(MBEAN_NAME, runtime, control);
   }
 }

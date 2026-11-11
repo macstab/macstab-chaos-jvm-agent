@@ -9,8 +9,8 @@ import org.jspecify.annotations.Nullable;
  * The registration of the diagnostics MBean: the only place the agent's start names a type of
  * {@code java.management}. Kept out of {@link ChaosAgentBootstrap}, whose method signatures the JVM
  * resolves to find {@code premain}, so the agent starts on a runtime without that module (a jlink
- * image, {@code --limit-modules}); {@link ChaosAgentBootstrap} reaches this class only when the
- * module is present.
+ * image, {@code --limit-modules}); without the module this class fails to link, which {@link
+ * ChaosAgentBootstrap} catches.
  */
 final class DiagnosticsMBeanRegistration {
 
