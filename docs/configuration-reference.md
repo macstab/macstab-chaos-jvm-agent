@@ -1863,7 +1863,7 @@ When `lifespan` elapses the threads end and the scenario ends `INACTIVE` with re
 | `entriesPerThread` | int  | > 0        | ThreadLocal entries per unit of the common pool's parallelism; the pool spreads them over its workers |
 | `valueSizeBytes`   | int  | > 0        | Size of each entry's byte-array value         |
 
-The common pool's parallelism × `entriesPerThread` must fit an `int` (`ChaosValidationException` otherwise), and the planted values, parallelism × `entriesPerThread` × `valueSizeBytes`, the free heap (the maximum heap, `-Xmx`, less what is in use at activation): above it the scenario is refused with `ChaosUnsupportedFeatureException` (`UNSUPPORTED_RUNTIME`) before anything is allocated, as for `heapPressure`.
+The common pool's parallelism × `entriesPerThread` must fit an `int` (`ChaosValidationException` otherwise), and the planted entries must fit the free heap (the maximum heap, `-Xmx`, less what is in use at activation): parallelism × `entriesPerThread` × (`valueSizeBytes` plus its 16-byte array header, rounded up to 8, plus 160 bytes per entry for its `ThreadLocal`, holder, map entry and table slots and the planting task, a conservative estimate; small values are bound by these more than by their own size): above it the scenario is refused with `ChaosUnsupportedFeatureException` (`UNSUPPORTED_RUNTIME`) before anything is allocated, as for `heapPressure`.
 
 **Cleanup:** closing the handle releases the planted values, whichever worker holds them.
 

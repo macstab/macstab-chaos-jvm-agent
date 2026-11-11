@@ -257,14 +257,30 @@ final class CompatibilityValidator {
   /**
    * What one reference of a flood cycle keeps reachable: the {@code WeakReference} and its slot in
    * the cycle's anchor list, rounded up. Its 1 KiB referent is only weakly reachable, so a
-   * collection reclaims it during the cycle.
+   * collection reclaims it during the cycle. Measured: 36 bytes per reference with compressed
+   * references, 56 without.
    */
   static final long REFERENCE_BYTES = 64L;
 
   /**
+   * What one thread-local leak entry keeps reachable besides its value, rounded up: its {@code
+   * ThreadLocal}, its holder, its {@code ThreadLocalMap.Entry} and table slots (the table grows to
+   * three times the entries at most, and holds old and new tables while it resizes), and, until the
+   * activation returns, its planting task and its slots in the stressor's lists. About 90 bytes
+   * with compressed references and 125 without; measured at the activation's peak, 4,000,000
+   * entries of 1-byte values need 400 to 450 MB of heap with compressed references and 450 to 600
+   * MB without.
+   */
+  static final long THREAD_LOCAL_ENTRY_BYTES = 160L;
+
+  /** The header of a {@code byte[]}: its mark word, class pointer and length. */
+  private static final long ARRAY_HEADER_BYTES = 16L;
+
+  /**
    * Refuses a thread-local leak whose entries overflow an {@code int} (an invalid scenario) or
-   * whose planted values exceed the free heap (the runtime cannot hold them): the common pool's
-   * parallelism × {@code entriesPerThread} values of {@code valueSizeBytes} each.
+   * whose entries exceed the free heap (the runtime cannot hold them): the common pool's
+   * parallelism × {@code entriesPerThread} entries, each a {@code valueSizeBytes} array, rounded up
+   * to 8 bytes with its header, and {@link #THREAD_LOCAL_ENTRY_BYTES}.
    */
   private static void validateThreadLocalLeak(final ChaosEffect.ThreadLocalLeakEffect leak) {
     final long parallelism = java.util.concurrent.ForkJoinPool.commonPool().getParallelism();
@@ -280,9 +296,17 @@ final class CompatibilityValidator {
               + " entries, more than "
               + Integer.MAX_VALUE);
     }
-    final long bytes = saturatedProduct(entries, leak.valueSizeBytes());
+    final long perEntry =
+        ((ARRAY_HEADER_BYTES + leak.valueSizeBytes() + 7L) & ~7L) + THREAD_LOCAL_ENTRY_BYTES;
+    final long bytes = saturatedProduct(entries, perEntry);
     validateHeapLimit(
-        "threadLocalLeak of " + entries + " values of " + leak.valueSizeBytes() + " bytes exceeds",
+        "threadLocalLeak of "
+            + entries
+            + " entries of "
+            + leak.valueSizeBytes()
+            + "-byte values needs about "
+            + bytes
+            + " bytes, which exceeds",
         bytes);
   }
 

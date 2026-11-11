@@ -47,6 +47,34 @@ class StressorHeapBoundTest {
   }
 
   @Test
+  @DisplayName("a thread-local leak of small values is bounded by its entries, not only its values")
+  void smallValuesCountTheEntries() throws Exception {
+    final String output =
+        BoundedChildJvm.run(
+            List.of(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-Xmx256m",
+                "-Djava.util.concurrent.ForkJoinPool.common.parallelism=8",
+                "-cp",
+                System.getProperty("java.class.path"),
+                HeapBoundProbeMain.class.getName(),
+                "small-values"),
+            Duration.ofSeconds(60));
+
+    // 4,000,000 entries of 1 byte: 4 MB of values, but well over 256 MB with their entries.
+    assertThat(output).contains("small-thread-local-leak=refused");
+    assertThat(ChildOutput.value(output, "small-thread-local-leak.message"))
+        .startsWith("threadLocalLeak of 4000000 entries")
+        .contains("free heap");
+    assertThat(Long.parseLong(ChildOutput.value(output, "small-thread-local-leak.peakPercent")))
+        .as("the refused activation filled no heap")
+        .isLessThan(50L);
+    assertThat(output)
+        .as("a flood accepted near its bound completes a cycle without running out of memory")
+        .contains("flood-at-bound=cycled");
+  }
+
+  @Test
   @DisplayName("in this JVM too, both are refused as UNSUPPORTED_RUNTIME, naming the free heap")
   void refusedInProcess() {
     try (ChaosRuntime runtime = new ChaosRuntime()) {
