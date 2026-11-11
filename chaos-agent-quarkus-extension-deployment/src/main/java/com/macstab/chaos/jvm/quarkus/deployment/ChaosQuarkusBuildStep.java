@@ -10,8 +10,10 @@ import io.quarkus.deployment.annotations.Record;
 import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
 import io.quarkus.deployment.builditem.FeatureBuildItem;
 import io.quarkus.deployment.builditem.TestClassBeanBuildItem;
+import java.lang.reflect.Modifier;
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.AnnotationTarget;
+import org.jboss.jandex.ClassInfo;
 import org.jboss.jandex.DotName;
 
 /**
@@ -73,12 +75,12 @@ public final class ChaosQuarkusBuildStep {
   }
 
   /**
-   * Makes every test class annotated with {@code @QuarkusChaosTest} a bean, as Quarkus does for a
-   * {@code @QuarkusTest} class, so its {@code @Inject} fields are injected. Quarkus finds a test
-   * class only by an {@code @ExtendWith(QuarkusTestExtension.class)} it sees in the indexed test
-   * classes; the one on {@code @QuarkusChaosTest} is in this extension's jar, which it does not
-   * index, so without this step a {@code @QuarkusChaosTest} class with an injected field cannot be
-   * instantiated.
+   * Makes every test class annotated with {@code @QuarkusChaosTest} a bean, and every concrete
+   * subclass of one (the annotation is inherited), as Quarkus does for a {@code @QuarkusTest}
+   * class, so its {@code @Inject} fields are injected. Quarkus finds a test class only by an
+   * {@code @ExtendWith(QuarkusTestExtension.class)} it sees in the indexed test classes; the one on
+   * {@code @QuarkusChaosTest} is in this extension's jar, which it does not index, so without this
+   * step a {@code @QuarkusChaosTest} class with an injected field cannot be instantiated.
    *
    * @param index the application's combined index, which holds the test classes in test mode
    * @param testClassBeans where the test classes are registered
@@ -91,8 +93,15 @@ public final class ChaosQuarkusBuildStep {
         index.getIndex().getAnnotations(QUARKUS_CHAOS_TEST)) {
       if (annotation.target().kind() == AnnotationTarget.Kind.CLASS
           && !annotation.target().asClass().isAnnotation()) {
-        testClassBeans.produce(
-            new TestClassBeanBuildItem(annotation.target().asClass().name().toString()));
+        final ClassInfo annotated = annotation.target().asClass();
+        testClassBeans.produce(new TestClassBeanBuildItem(annotated.name().toString()));
+        // The annotation is @Inherited: JUnit runs a subclass as a chaos test too, and Jandex
+        // lists only the class that declares it.
+        for (final ClassInfo subclass : index.getIndex().getAllKnownSubclasses(annotated.name())) {
+          if (!Modifier.isAbstract(subclass.flags())) {
+            testClassBeans.produce(new TestClassBeanBuildItem(subclass.name().toString()));
+          }
+        }
       }
     }
   }
