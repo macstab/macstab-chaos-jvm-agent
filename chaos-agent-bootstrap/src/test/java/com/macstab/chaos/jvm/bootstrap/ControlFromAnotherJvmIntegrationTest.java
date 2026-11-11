@@ -67,7 +67,7 @@ class ControlFromAnotherJvmIntegrationTest {
                   "-javaagent:"
                       + System.getProperty("chaos.bootstrap.agentJar")
                       + "=jmxControl=true");
-          JMXConnector connector = connect(child.pid())) {
+          JMXConnector connector = connect(child)) {
         final MBeanServerConnection server = connector.getMBeanServerConnection();
         final ObjectName name = new ObjectName(MBEAN);
         assertThat(child.sleepMillis()).as("no plan yet").isLessThan(UNDELAYED_MILLIS);
@@ -103,7 +103,7 @@ class ControlFromAnotherJvmIntegrationTest {
     void refusedWithoutControl() throws Exception {
       try (Child child =
               Child.start("-javaagent:" + System.getProperty("chaos.bootstrap.agentJar"));
-          JMXConnector connector = connect(child.pid())) {
+          JMXConnector connector = connect(child)) {
         final MBeanServerConnection server = connector.getMBeanServerConnection();
         final ObjectName name = new ObjectName(MBEAN);
 
@@ -157,16 +157,12 @@ class ControlFromAnotherJvmIntegrationTest {
             name, "activatePlan", new Object[] {PLAN}, new String[] {String.class.getName()});
   }
 
-  /** Connects to the child through the attach API's local JMX connector. */
-  private static JMXConnector connect(final long pid) throws Exception {
-    final VirtualMachine vm = VirtualMachine.attach(String.valueOf(pid));
-    final String address;
-    try {
-      address = vm.startLocalManagementAgent();
-    } finally {
-      vm.detach();
-    }
-    return JMXConnectorFactory.connect(new JMXServiceURL(address));
+  /**
+   * Connects to the JMX connector the child starts on the loopback address, once the agent's MBean
+   * is registered there (see {@link InteractiveProbeMain}).
+   */
+  private static JMXConnector connect(final Child child) throws Exception {
+    return JMXConnectorFactory.connect(new JMXServiceURL(child.jmxAddress()));
   }
 
   /** A running {@link InteractiveProbeMain}, driven line by line. */
@@ -224,6 +220,13 @@ class ControlFromAnotherJvmIntegrationTest {
 
     long pid() {
       return pid;
+    }
+
+    /** The address of the child's JMX connector, started by this call. */
+    String jmxAddress() throws Exception {
+      commands.write("jmx\n");
+      commands.flush();
+      return await("jmx=");
     }
 
     /** How long {@code Thread.sleep(1)} took on the child's main thread. */
