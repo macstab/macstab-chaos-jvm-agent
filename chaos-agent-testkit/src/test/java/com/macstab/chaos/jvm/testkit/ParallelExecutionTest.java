@@ -70,10 +70,10 @@ class ParallelExecutionTest {
 
     assertThat(SLEEP_MILLIS.get("delayed"))
         .as("the delayed class's sleep, in its session")
-        .isGreaterThanOrEqualTo(250L);
+        .isGreaterThanOrEqualTo(900L);
     assertThat(SLEEP_MILLIS.get("undelayed"))
         .as("the other class's sleep, at the same time, outside that session")
-        .isLessThan(150L);
+        .isLessThan(500L);
     assertThat(SESSION_IDS.get("delayed")).isNotNull().isNotEqualTo(SESSION_IDS.get("undelayed"));
     assertThat(
             ChaosPlatform.current()
@@ -108,7 +108,7 @@ class ParallelExecutionTest {
         """
         {"id": "tk-parallel-sleep", "scope": "SESSION",
          "selector": {"type": "thread", "operations": ["THREAD_SLEEP"]},
-         "effect": {"type": "delay", "minDelay": "PT0.3S", "maxDelay": "PT0.3S"}}
+         "effect": {"type": "delay", "minDelay": "PT1S", "maxDelay": "PT1S"}}
         """)
     void sleepsInItsSession(final ChaosSession session) throws Exception {
       SESSION_IDS.put("delayed", session.id());
