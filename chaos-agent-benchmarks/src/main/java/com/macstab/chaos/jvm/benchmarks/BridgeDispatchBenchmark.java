@@ -258,7 +258,7 @@ public class BridgeDispatchBenchmark {
    */
   @Benchmark
   public int datagramSend() throws Throwable {
-    return BootstrapDispatcher.beforeDatagramSend(this, BUFFER, null);
+    return BootstrapDispatcher.beforeDatagramSend(this, BUFFER, null, true);
   }
 
   private static ChaosScenario scenario(
