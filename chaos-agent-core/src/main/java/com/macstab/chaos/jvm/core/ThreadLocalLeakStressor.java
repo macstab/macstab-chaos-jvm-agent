@@ -10,6 +10,7 @@ import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.RecursiveAction;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.IntFunction;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -23,11 +24,11 @@ import org.jspecify.annotations.Nullable;
  * ChaosEffect.ThreadLocalLeakEffect#valueSizeBytes()} bytes. The pool spreads the tasks over its
  * workers; which worker holds which entry is up to the pool. The constructor returns once every
  * entry is planted, and fails with {@link ChaosUnsupportedFeatureException} when the pool has not
- * planted them all within {@value #PLANT_TIMEOUT_SECONDS} s (its workers are busy or blocked); the
- * entries are then emptied and the remaining tasks cancelled. Only the pool's workers plant: the
- * constructor waits for the entries without joining the tasks, since a join or {@code get()} from a
- * thread outside the pool may run a task still queued on that thread (JDK 25 does), which would
- * plant the entry on the activating application thread.
+ * planted them all within {@value #PLANT_TIMEOUT_SECONDS} s of the last value's allocation (its
+ * workers are busy or blocked); the entries are then emptied and the remaining tasks cancelled.
+ * Only the pool's workers plant: the constructor waits for the entries without joining the tasks,
+ * since a join or {@code get()} from a thread outside the pool may run a task still queued on that
+ * thread (JDK 25 does), which would plant the entry on the activating application thread.
  *
  * <p>The planting is the agent's own work (L3): its tasks are {@link AgentOwned}, so no
  * FORK_JOIN_TASK_RUN scenario holds them, and they run with the dispatch depth raised, so no
@@ -67,6 +68,23 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
    * runs on.
    */
   ThreadLocalLeakStressor(final ChaosEffect.ThreadLocalLeakEffect effect, final int parallelism) {
+    this(
+        effect,
+        parallelism,
+        TimeUnit.SECONDS.toNanos(PLANT_TIMEOUT_SECONDS),
+        valueSizeBytes -> new byte[valueSizeBytes]);
+  }
+
+  /**
+   * Plants {@code parallelism} × {@code entriesPerThread} entries whose values {@code values}
+   * allocates, waiting up to {@code plantTimeoutNanos} for the pool to plant them. Test seam: a
+   * slow {@code values} stands for the zeroing of large values.
+   */
+  ThreadLocalLeakStressor(
+      final ChaosEffect.ThreadLocalLeakEffect effect,
+      final int parallelism,
+      final long plantTimeoutNanos,
+      final IntFunction<byte[]> values) {
     final int totalLocals;
     try {
       // CompatibilityValidator refuses an entry count that overflows an int at activation; this
@@ -83,16 +101,18 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
     }
     final List<Planted> holders = new ArrayList<>(totalLocals);
     final List<ForkJoinTask<?>> tasks = new ArrayList<>(totalLocals);
-    final Progress progress = new Progress(totalLocals);
+    final Progress progress = new Progress(totalLocals, plantTimeoutNanos);
     final int valueSizeBytes = effect.valueSizeBytes();
     for (int i = 0; i < totalLocals; i++) {
       // One instance per entry is the leak this stressor produces.
       @SuppressWarnings("ThreadLocalUsage")
       final ThreadLocal<Planted> local = new ThreadLocal<>();
-      final Planted holder = new Planted(new byte[valueSizeBytes]);
+      final Planted holder = new Planted(values.apply(valueSizeBytes));
       holders.add(holder);
       tasks.add(ForkJoinPool.commonPool().submit(new Planting(local, holder, progress)));
     }
+    // The timeout covers the planting only: allocating large values may take long by itself.
+    progress.arm();
     awaitPlanting(progress, tasks, holders);
     this.planted = List.copyOf(holders);
   }
@@ -126,23 +146,30 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
           "thread-local-leak: the common ForkJoinPool did not plant the "
               + holders.size()
               + " entries within "
-              + PLANT_TIMEOUT_SECONDS
-              + " s; its workers are busy or blocked");
+              + java.time.Duration.ofNanos(progress.timeoutNanos)
+              + "; its workers are busy or blocked");
     }
   }
 
   /**
-   * Counts the entries still to plant and keeps the first planting failure, until {@value
-   * #PLANT_TIMEOUT_SECONDS} s from its creation.
+   * Counts the entries still to plant and keeps the first planting failure, until {@code
+   * timeoutNanos} after {@link #arm()}, which the constructor calls once every value is allocated
+   * and every task submitted.
    */
   private static final class Progress implements ForkJoinPool.ManagedBlocker {
     private final CountDownLatch remaining;
-    private final long deadline;
+    private long deadline;
+    final long timeoutNanos;
     final AtomicReference<@Nullable Throwable> failure = new AtomicReference<>();
 
-    Progress(final int entries) {
+    Progress(final int entries, final long timeoutNanos) {
       this.remaining = new CountDownLatch(entries);
-      this.deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(PLANT_TIMEOUT_SECONDS);
+      this.timeoutNanos = timeoutNanos;
+    }
+
+    /** Starts the timeout; on the constructing thread, before it blocks. */
+    void arm() {
+      deadline = System.nanoTime() + timeoutNanos;
     }
 
     /** Records one planting task as ended, {@code failed} or not. */

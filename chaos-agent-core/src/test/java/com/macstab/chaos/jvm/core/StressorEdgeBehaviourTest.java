@@ -562,6 +562,31 @@ class StressorEdgeBehaviourTest {
     }
 
     @Test
+    @DisplayName("the plant timeout starts once every value is allocated")
+    void plantTimeoutStartsAfterAllocation() {
+      final long timeout = TimeUnit.MILLISECONDS.toNanos(200);
+      final ThreadLocalLeakStressor stressor =
+          new ThreadLocalLeakStressor(
+              new ChaosEffect.ThreadLocalLeakEffect(1, 1),
+              1,
+              timeout,
+              valueSizeBytes -> {
+                // Stands for zeroing gigabytes of values: longer than the whole plant timeout.
+                final long end = System.nanoTime() + 2 * timeout;
+                while (end - System.nanoTime() > 0) {
+                  LockSupport.parkNanos(end - System.nanoTime());
+                }
+                return new byte[valueSizeBytes];
+              });
+      try {
+        assertThat(stressor.plantedCount()).isEqualTo(1);
+        assertThat(stressor.retainedBytes()).isEqualTo(1L);
+      } finally {
+        stressor.close();
+      }
+    }
+
+    @Test
     @DisplayName("on a busy common pool the entries are planted by its workers, not the caller")
     void plantsOnPoolWorkersOnly() throws Exception {
       final ForkJoinPool pool = ForkJoinPool.commonPool();
