@@ -36,6 +36,8 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     // QuarkusAppModel is a launcher session listener.
     testImplementation(libs.junit.platform.launcher)
+    // EngineTestKit runs the fixture classes of SharedApplicationClassesTest.
+    testImplementation(libs.junit.platform.testkit)
     testImplementation(libs.assertj)
 }
 
@@ -90,7 +92,7 @@ val quarkusModelInputs =
         }
     }
 
-tasks.test {
+tasks.withType<Test>().configureEach {
     dependsOn(quarkusModelInputs)
     val modelInputs = layout.buildDirectory.file("quarkus-model-inputs.txt")
     // The model file holds absolute paths, so it is no input of its own; what it is made of is, as a
@@ -109,3 +111,21 @@ tasks.test {
         },
     )
 }
+
+// SharedApplicationClassesTest starts an application of its own in a nested JUnit engine. Quarkus's
+// test extension keeps the running application in static state, so that application must not run
+// in a JVM whose launcher keeps another one up: the test runs in a test JVM of its own.
+val sharedApplicationTest = "com.macstab.chaos.jvm.examples.quarkus.SharedApplicationClassesTest"
+tasks.test {
+    filter { excludeTestsMatching(sharedApplicationTest) }
+}
+val testSharedApplication =
+    tasks.register<Test>("testSharedApplication") {
+        description = "Runs SharedApplicationClassesTest in a test JVM of its own."
+        group = "verification"
+        testClassesDirs = sourceSets.test.get().output.classesDirs
+        classpath = sourceSets.test.get().runtimeClasspath
+        filter { includeTestsMatching(sharedApplicationTest) }
+        shouldRunAfter(tasks.test)
+    }
+tasks.check { dependsOn(testSharedApplication) }
