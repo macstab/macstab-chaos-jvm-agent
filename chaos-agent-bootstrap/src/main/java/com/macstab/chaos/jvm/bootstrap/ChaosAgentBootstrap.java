@@ -896,10 +896,14 @@ public final class ChaosAgentBootstrap {
   private static @Nullable Object registerMBean(final ChaosRuntime runtime, final boolean control) {
     try {
       return DiagnosticsMBeanRegistration.register(MBEAN_NAME, runtime, control);
-    } catch (final LinkageError noJavaManagement) {
+    } catch (final LinkageError linkage) {
+      // Without branches: this runs only in a JVM that cannot record coverage of it.
       System.err.println(
-          "[chaos-agent] MBean registration skipped: java.management is not in the runtime ("
-              + noJavaManagement
+          "[chaos-agent] MBean registration skipped: the diagnostics MBean could not be linked"
+              + " (java.management in the runtime: "
+              + ModuleLayer.boot().findModule("java.management").isPresent()
+              + ", "
+              + linkage
               + ")");
       return null;
     }

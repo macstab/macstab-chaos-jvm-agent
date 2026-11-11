@@ -44,6 +44,10 @@ class LimitedRuntimeTest {
     assertSoftly(
         softly -> {
           softly.assertThat(result.value("javaSql")).isEqualTo("false");
+          softly
+              .assertThat(result.value("mbeanSkipped"))
+              .contains("MBean registration skipped: the diagnostics MBean could not be linked")
+              .contains("java.management in the runtime: false");
           softly.assertThat(result.value("done")).isEqualTo("true");
         });
   }
