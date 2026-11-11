@@ -31,6 +31,19 @@ class DatagramEndToEndTest {
   }
 
   @Test
+  @DisplayName("a reused packet's receive counts its buffer, not the last datagram's length")
+  void reusedPacketCountsItsBuffer() throws Exception {
+    final ChildJvmProbe.ProbeResult result = run("receive-reused");
+
+    assertSoftly(
+        softly -> {
+          softly.assertThat(result.longValue("received")).isEqualTo(10L);
+          // 1024 bytes could be received: more than the 300 the scenario selects.
+          softly.assertThat(result.longValue("applied")).isZero();
+        });
+  }
+
+  @Test
   @DisplayName("a dropped send fails as the real one does where the JDK refuses it")
   void droppedSendKeepsTheJdkChecks() throws Exception {
     final ChildJvmProbe.ProbeResult result = run("dropped-send");
@@ -53,6 +66,9 @@ class DatagramEndToEndTest {
           softly
               .assertThat(result.value("otherPeer.send"))
               .isEqualTo("java.nio.channels.AlreadyConnectedException");
+          softly
+              .assertThat(result.value("family.send"))
+              .isEqualTo("java.nio.channels.UnsupportedAddressTypeException");
           softly
               .assertThat(result.value("noAddress.send"))
               .isEqualTo("java.lang.IllegalArgumentException");

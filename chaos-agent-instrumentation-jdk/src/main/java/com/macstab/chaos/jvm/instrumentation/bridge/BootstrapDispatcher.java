@@ -2829,7 +2829,8 @@ public final class BootstrapDispatcher {
   /**
    * Whether the JDK would send this datagram, so a drop does not report success for a send that
    * fails: the channel is open, a {@code write} needs a connected channel, and a {@code send}'s
-   * destination is resolved, not port 0, and the connected peer when the channel is connected.
+   * destination is resolved, an IPv4 address for an IPv4 channel ({@code Net.checkAddress(target,
+   * family)}), not port 0, and the connected peer when the channel is connected.
    */
   private static boolean sendable(
       final Object channel, final @Nullable Object target, final boolean write) {
@@ -2846,7 +2847,46 @@ public final class BootstrapDispatcher {
     if (!(target instanceof java.net.InetSocketAddress address) || address.isUnresolved()) {
       return false;
     }
+    if (!(address.getAddress() instanceof java.net.Inet4Address)
+        && channelFamily(datagram) == java.net.StandardProtocolFamily.INET) {
+      return false;
+    }
     return peer == null ? address.getPort() != 0 : peer.equals(target);
+  }
+
+  /** {@code DatagramChannelImpl.family}, once looked up; see {@link #channelFamily}. */
+  private static volatile @Nullable MethodHandle family;
+
+  /** Whether {@link #family} was looked up (it stays {@code null} when the JDK lacks it). */
+  private static volatile boolean familyLookedUp;
+
+  /**
+   * The protocol family a datagram channel was opened for ({@code DatagramChannelImpl.family},
+   * private; {@code sun.nio.ch} is opened to the bridge), or {@code null} when it cannot be read:
+   * the send is then not refused for its family.
+   */
+  private static java.net.@Nullable ProtocolFamily channelFamily(
+      final java.nio.channels.DatagramChannel datagram) {
+    if (!familyLookedUp) {
+      try {
+        final java.lang.reflect.Field field =
+            Class.forName("sun.nio.ch.DatagramChannelImpl", false, null).getDeclaredField("family");
+        field.setAccessible(true);
+        family = java.lang.invoke.MethodHandles.lookup().unreflectGetter(field);
+      } catch (final ReflectiveOperationException | RuntimeException absent) {
+        family = null;
+      }
+      familyLookedUp = true;
+    }
+    final MethodHandle getter = family;
+    if (getter == null) {
+      return null;
+    }
+    try {
+      return (java.net.ProtocolFamily) getter.invoke(datagram);
+    } catch (final Throwable unreadable) {
+      return null; // another channel implementation
+    }
   }
 
   /** The connected peer of {@code datagram}, or {@code null} when unconnected or closed. */

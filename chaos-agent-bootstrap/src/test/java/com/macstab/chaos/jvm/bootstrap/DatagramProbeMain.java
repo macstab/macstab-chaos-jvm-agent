@@ -9,6 +9,7 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.StandardProtocolFamily;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
 import java.util.Set;
@@ -26,6 +27,7 @@ public final class DatagramProbeMain {
   public static void main(final String[] args) throws Exception {
     switch (args[0]) {
       case "receive-window" -> receiveWindow();
+      case "receive-reused" -> receiveReused();
       case "dropped-send" -> droppedSend();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
@@ -68,10 +70,44 @@ public final class DatagramProbeMain {
   }
 
   /**
+   * A reused packet: a 1024-byte packet that already received a 10-byte datagram (its {@code
+   * getLength()} is now 10) receives another under a {@code corruptRead()} limited to receives of
+   * at most 300 bytes. The receive still takes up to 1024 bytes, so the scenario does not select
+   * it. Prints {@code received} and {@code applied}.
+   */
+  private static void receiveReused() throws Exception {
+    final InetAddress loopback = InetAddress.getLoopbackAddress();
+    try (DatagramSocket receiver = new DatagramSocket(0, loopback);
+        DatagramSocket sender = new DatagramSocket(0, loopback)) {
+      receiver.setSoTimeout(RECEIVE_TIMEOUT_MILLIS);
+      final DatagramPacket packet = new DatagramPacket(new byte[1024], 1024);
+      sender.send(new DatagramPacket(new byte[10], 10, receiver.getLocalSocketAddress()));
+      receiver.receive(packet);
+      try (ChaosActivationHandle corrupt =
+          RealCallRows.activate(
+              "datagram-reused",
+              new ChaosSelector.NetworkSelector(
+                  Set.of(OperationType.DATAGRAM_RECEIVE),
+                  NamePattern.any(),
+                  null,
+                  null,
+                  null,
+                  300L),
+              ChaosEffect.corruptRead())) {
+        sender.send(new DatagramPacket(new byte[10], 10, receiver.getLocalSocketAddress()));
+        receiver.receive(packet);
+        System.out.println("received=" + packet.getLength());
+        System.out.println("applied=" + corrupt.appliedCount());
+      }
+    }
+  }
+
+  /**
    * Sends the JDK refuses, each under a {@code suppress()} on {@code DATAGRAM_SEND}: they must fail
-   * as without the scenario instead of being reported sent. Prints, per row, the class of what the
-   * send threw ({@code ok} when it returned); for a connected socket's packet without an address,
-   * the address the packet carries afterwards and what the peer received; and a plain drop.
+   * as without the scenario instead of being reported sent (also an IPv6 destination of an IPv4
+   * channel, {@code family}). Prints, per row, the class of what the send threw ({@code ok} when it
+   * returned); for a connected socket's packet without an address, the address the packet carries
+   * afterwards and what the peer received; and a plain drop.
    */
   private static void droppedSend() throws Exception {
     final InetAddress loopback = InetAddress.getLoopbackAddress();
@@ -115,6 +151,12 @@ public final class DatagramProbeMain {
         System.out.println(
             "otherPeer.send="
                 + RealCallRows.outcome(() -> connected.send(ByteBuffer.allocate(4), other)));
+      }
+      try (DatagramChannel inet = DatagramChannel.open(StandardProtocolFamily.INET)) {
+        System.out.println(
+            "family.send="
+                + RealCallRows.outcome(
+                    () -> inet.send(ByteBuffer.allocate(4), new InetSocketAddress("::1", 9))));
       }
       try (DatagramSocket unconnected = new DatagramSocket(0, loopback)) {
         System.out.println(
