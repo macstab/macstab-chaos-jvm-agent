@@ -103,12 +103,14 @@ final class ConcurrencyHooks {
     return builder
         // A subclass that overrides beforeExecute (Spring's executors, without calling super):
         // the JDK method never runs for its tasks. Matched by the method it declares first, so
-        // the superclass walk runs only for those few classes.
+        // the superclass walk runs only for those few classes. The JDK has no such subclass
+        // (ThreadPoolExecutor itself is woven below), so a JDK class is not parsed for its methods.
         .type(
-            ElementMatchers.declaresMethod(beforeExecute)
-                .and(
-                    TypeMatchers.superClass(
-                        ElementMatchers.named("java.util.concurrent.ThreadPoolExecutor"))))
+            TypeMatchers.jdkNamedOr(
+                ElementMatchers.declaresMethod(beforeExecute)
+                    .and(
+                        TypeMatchers.superClass(
+                            ElementMatchers.named("java.util.concurrent.ThreadPoolExecutor")))))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
