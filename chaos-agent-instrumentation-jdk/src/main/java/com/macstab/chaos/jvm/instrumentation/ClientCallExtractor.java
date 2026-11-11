@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
@@ -189,17 +190,56 @@ public final class ClientCallExtractor {
   private static final String GRPC_CHANNEL_PROVIDER =
       "io.grpc.internal.ManagedChannelImpl$ChannelStreamProvider";
 
+  /** The per-attempt stream of a managed channel's call with retries ({@code GrpcNewSubstream}). */
+  static final String GRPC_RETRY_STREAM = GRPC_CHANNEL_PROVIDER + "$1RetryStream";
+
+  /** The method of {@link #GRPC_RETRY_STREAM} that opens one attempt's stream. */
+  static final String GRPC_NEW_SUBSTREAM = "newSubstream";
+
+  /**
+   * Whether a provider class's gRPC has the per-attempt hook's target: a {@link #GRPC_RETRY_STREAM}
+   * that declares {@link #GRPC_NEW_SUBSTREAM} and the {@code val$method} field the advice reads.
+   * The hook matches that class and method by name, so it is woven into every such gRPC with the
+   * call hook (one hook group); a type it could not be woven into is listed in the hook failures.
+   * Looked up once per provider class (weakly held, so a gRPC's class loader can be unloaded).
+   */
+  private static final Map<Class<?>, Boolean> GRPC_ATTEMPT_HOOK =
+      java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+  private static boolean grpcAttemptHook(final Class<?> provider) {
+    final Boolean known = GRPC_ATTEMPT_HOOK.get(provider);
+    if (known != null) {
+      return known;
+    }
+    boolean found = false;
+    try {
+      final Class<?> retryStream =
+          Class.forName(GRPC_RETRY_STREAM, false, provider.getClassLoader());
+      if (retryStream.getDeclaredField("val$method") != null) {
+        for (final java.lang.reflect.Method method : retryStream.getDeclaredMethods()) {
+          found |= GRPC_NEW_SUBSTREAM.equals(method.getName());
+        }
+      }
+    } catch (final ReflectiveOperationException | LinkageError | RuntimeException absent) {
+      found = false;
+    }
+    GRPC_ATTEMPT_HOOK.put(provider, found);
+    return found;
+  }
+
   /**
    * Whether {@code provider} is a managed channel's stream provider with retries enabled (gRPC's
-   * default): it opens a {@code RetriableStream}, whose attempts the retry policy repeats. Those
-   * attempts are evaluated one by one ({@code GrpcNewSubstream}), so the policy sees a rejected
-   * attempt as it sees a real {@code UNAVAILABLE}.
+   * default) whose gRPC has the per-attempt hook: it opens a {@code RetriableStream}, whose
+   * attempts the retry policy repeats. A reject is then evaluated per attempt ({@code
+   * GrpcNewSubstream}), so the policy sees a rejected attempt as it sees a real {@code
+   * UNAVAILABLE}; without that hook it is evaluated for the call.
    *
    * @param provider the {@code ClientStreamProvider}
    * @return {@code true} when the call's attempts are evaluated instead of the call
    */
   public static boolean grpcRetries(final Object provider) {
-    if (!GRPC_CHANNEL_PROVIDER.equals(provider.getClass().getName())) {
+    if (!GRPC_CHANNEL_PROVIDER.equals(provider.getClass().getName())
+        || !grpcAttemptHook(provider.getClass())) {
       return false;
     }
     try {

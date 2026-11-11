@@ -13,6 +13,9 @@ val httpClientProbe: Configuration by configurations.creating
 // Client libraries (Kafka, gRPC, Redis, R2DBC, AWS SDK, Netty) for the client-hook probes; kept
 // off the general probe classpath like the HTTP clients, exposed as chaos.test.clientClasspath.
 val clientLibraryProbe: Configuration by configurations.creating
+// An older gRPC (1.39, whose per-attempt RetryStream.newSubstream takes 2 arguments) for the retry
+// probe, exposed as chaos.test.legacyGrpcClasspath; the probe checks it still has that shape.
+val legacyGrpcProbe: Configuration by configurations.creating
 // Libraries only the hook-coverage probe loads: the hooks for them are verified, nothing else
 // uses them.
 val coverageProbe: Configuration by configurations.creating
@@ -63,6 +66,8 @@ dependencies {
         testCompileOnly(client)
         clientLibraryProbe(client)
     }
+    legacyGrpcProbe(libs.grpc.legacy.core)
+    legacyGrpcProbe(libs.grpc.legacy.stub)
 }
 
 val agentManifest = mapOf(
@@ -206,6 +211,7 @@ tasks.test {
         Triple("jdbcClasspath", "chaos.test.jdbcClasspath", jdbcProbe),
         Triple("httpClasspath", "chaos.test.httpClasspath", httpClientProbe),
         Triple("clientClasspath", "chaos.test.clientClasspath", clientLibraryProbe),
+        Triple("legacyGrpcClasspath", "chaos.test.legacyGrpcClasspath", legacyGrpcProbe),
         Triple("coverageClasspath", "chaos.test.coverageClasspath", coverageProbe),
         Triple("jacocoAgent", "chaos.test.jacocoAgent", jacocoChildAgent),
     )

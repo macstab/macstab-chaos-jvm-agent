@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
+import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.net.InetSocketAddress;
@@ -45,25 +46,77 @@ public final class ClientDispatch {
     if (engine.idle(operationType)) {
       return;
     }
+    applyClientDecision(
+        operationType,
+        client,
+        engine.evaluate(clientContext(operationType, client, target, detail, remoteAddress)));
+  }
+
+  /** A delay or a gate: what holds a call. */
+  private static boolean holds(final ChaosEffect effect) {
+    return effect instanceof ChaosEffect.DelayEffect || effect instanceof ChaosEffect.GateEffect;
+  }
+
+  /** Every other effect: what ends a call (a reject). */
+  private static boolean ends(final ChaosEffect effect) {
+    return !holds(effect);
+  }
+
+  /**
+   * Called for a gRPC call on a channel whose retry policy repeats its attempts, in two parts. Once
+   * for the call, where it is made ({@code newStream}): its delay and gate, as without retries.
+   * Then for each attempt ({@code RetriableStream.newSubstream}): its reject only, so the policy
+   * sees a rejected attempt as a real {@code UNAVAILABLE}. A retried attempt starts on gRPC's own
+   * thread (the transport's, or its timer for a hedge), where a delay or gate would hold every call
+   * served there (ADR 0005).
+   *
+   * @param client the stream provider (the call) or the retrying stream (an attempt)
+   * @param method the full method name, or {@code null}
+   * @param attempt {@code true} for an attempt, {@code false} for the call
+   * @throws Throwable the gRPC status exception of a rejected attempt
+   */
+  public void beforeRpcCall(
+      final Object client, final @Nullable String method, final boolean attempt) throws Throwable {
+    if (engine.idle(OperationType.RPC_CALL)) {
+      return;
+    }
+    applyClientDecision(
+        OperationType.RPC_CALL,
+        client,
+        engine.evaluate(
+            clientContext(OperationType.RPC_CALL, client, method, null, null),
+            attempt ? ClientDispatch::ends : ClientDispatch::holds));
+  }
+
+  private InvocationContext clientContext(
+      final OperationType operationType,
+      final Object client,
+      final @Nullable String target,
+      final @Nullable String detail,
+      final @Nullable Object remoteAddress) {
     final InetSocketAddress peer =
         remoteAddress instanceof InetSocketAddress address ? address : null;
-    final RuntimeDecision decision =
-        engine.evaluate(
-            new InvocationContext(
-                operationType,
-                client == null ? operation : client.getClass().getName(),
-                detail,
-                target,
-                false,
-                null,
-                null,
-                engine.scopeContext.currentSessionId(),
-                InvocationContext.UNKNOWN,
-                null,
-                peer == null ? null : peer.getAddress(),
-                peer == null ? InvocationContext.UNKNOWN : peer.getPort(),
-                null,
-                InvocationContext.UNKNOWN));
+    return new InvocationContext(
+        operationType,
+        client == null ? operationType.name() : client.getClass().getName(),
+        detail,
+        target,
+        false,
+        null,
+        null,
+        engine.scopeContext.currentSessionId(),
+        InvocationContext.UNKNOWN,
+        null,
+        peer == null ? null : peer.getAddress(),
+        peer == null ? InvocationContext.UNKNOWN : peer.getPort(),
+        null,
+        InvocationContext.UNKNOWN);
+  }
+
+  /** Applies a client call's delay and gate, then throws its reject as the library's exception. */
+  private void applyClientDecision(
+      final OperationType operationType, final Object client, final RuntimeDecision decision)
+      throws Throwable {
     engine.applyDelayAndGate(decision);
     final TerminalAction terminal = decision.terminalAction();
     if (terminal instanceof TerminalAction.Throw thrown) {

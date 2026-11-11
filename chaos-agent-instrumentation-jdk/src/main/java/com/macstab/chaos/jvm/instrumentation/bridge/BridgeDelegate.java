@@ -842,6 +842,17 @@ public interface BridgeDelegate {
       throws Throwable;
 
   /**
+   * Called for a gRPC call on a channel with retries, in two parts: the call's delay and gate where
+   * the call is made, then each attempt's reject.
+   *
+   * @param client the stream provider (the call) or the retrying stream (an attempt)
+   * @param method the full method name, or {@code null}
+   * @param attempt {@code true} for an attempt, {@code false} for the call
+   * @throws Throwable if a scenario rejects the attempt
+   */
+  void beforeRpcCall(Object client, @Nullable String method, boolean attempt) throws Throwable;
+
+  /**
    * Records the current session for a fork-join task being submitted or forked.
    *
    * @param carrier the task

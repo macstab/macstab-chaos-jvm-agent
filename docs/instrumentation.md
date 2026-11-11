@@ -9,7 +9,7 @@
 
 # chaos-agent-instrumentation-jdk — Instrumentation Layer Reference
 
-> Internal reference for the bootstrap bridge, ByteBuddy advice classes, reentrancy guard, and the 78-handle interception surface.
+> Internal reference for the bootstrap bridge, ByteBuddy advice classes, reentrancy guard, and the 79-handle interception surface.
 > 
 > *Engineered by* **[Christian Schnapka](https://macstab.com)** — Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
@@ -22,7 +22,7 @@
 `chaos-agent-instrumentation-jdk` is the adapter between ByteBuddy's advice model and `ChaosRuntime`'s normalized dispatch API. Its responsibilities:
 
 1. Package `BootstrapDispatcher` into a temp JAR and append it to the bootstrap classpath
-2. Build a 78-slot `MethodHandle[]` array and wire it into `BootstrapDispatcher` via reflection
+2. Build a 79-slot `MethodHandle[]` array and wire it into `BootstrapDispatcher` via reflection
 3. Register a `HookDemand` callback on the runtime and weave each hook group (one `AgentBuilder` installation per `HookGroup`) the first time a scenario needs one of its operations — or every group at once in `eager` mode
 
 Apart from weaving hook groups on demand, this module has no further runtime role. All runtime execution paths go through `BootstrapDispatcher` → `ChaosBridge` → `ChaosRuntime`.
@@ -31,9 +31,9 @@ Apart from weaving hook groups on demand, this module has no further runtime rol
 
 In scope:
 - `JdkInstrumentationInstaller` — entry point; orchestrates all startup steps
-- `BootstrapDispatcher` — bootstrap-classloader-resident static dispatcher (78 handle slots + reentrancy guard and call-depth scopes)
+- `BootstrapDispatcher` — bootstrap-classloader-resident static dispatcher (79 handle slots + reentrancy guard and call-depth scopes)
 - `ChannelBuffers` — bootstrap-resident shaping of a channel call's buffers (single, scattering, gathering): limits for torn and trickled calls, the bit flip of a corrupted read
-- `BridgeDelegate` — interface defining the 78-method contract, one method per handle slot
+- `BridgeDelegate` — interface defining the 79-method contract, one method per handle slot
 - `ChaosBridge` — agent-classloader implementation of `BridgeDelegate`; thin delegation to `ChaosRuntime`
 - All `@Advice` classes, grouped into `JdkInstrumentationInstaller.HookGroup`s
 - `ScheduledCallableWrapper`, `ScheduledRunnableWrapper` — task wrappers for tick-level interception
@@ -100,8 +100,8 @@ When an open is refused (a JVM that denies `redefineModule`), `DirectBufferPress
 | **Bootstrap classloader** | The JVM root classloader; loads `java.*`, `javax.*`. Has no parent. Can only see classes from `rt.jar`/`java.base` and explicitly appended JARs.                                                                                                         |
 | **Agent classloader**     | The classloader created for the agent JAR. Has the bootstrap classloader as parent (indirect). Can see all agent classes.                                                                                                                                |
 | **Advice class**          | A ByteBuddy concept: a class containing `@Advice.OnMethodEnter` and/or `@Advice.OnMethodExit` static methods, whose bytecode is inlined into the instrumented method. Not a real class instantiation at runtime — the advice body is copied as bytecode. |
-| **BootstrapDispatcher**   | A class that must be visible to the bootstrap classloader. Provides the static dispatch methods advice calls, served by 78 handle slots, and the scope helpers.                                                                                         |
-| **BridgeDelegate**        | Interface in the agent classloader defining the 78-method contract (one method per slot). Implemented by `ChaosBridge`.                                                                                                                                  |
+| **BootstrapDispatcher**   | A class that must be visible to the bootstrap classloader. Provides the static dispatch methods advice calls, served by 79 handle slots, and the scope helpers.                                                                                         |
+| **BridgeDelegate**        | Interface in the agent classloader defining the 79-method contract (one method per slot). Implemented by `ChaosBridge`.                                                                                                                                  |
 | **MethodHandle**          | A typed reference to a method, invokable across classloader boundaries. Built from the agent classloader; stored in `BootstrapDispatcher.handles[]`.                                                                                                     |
 | **DEPTH guard**           | `ThreadLocal<int[]>` in `BootstrapDispatcher`. Prevents infinite recursion when chaos code calls instrumented JDK methods.                                                                                                                               |
 | **Hook group**            | A `JdkInstrumentationInstaller.HookGroup`: related interception points (e.g. `SOCKET`, `JDBC`) tagged with the `OperationType`s they serve. Woven once, on the first activation needing them (or at start when eager); stays woven until uninstall.      |
@@ -136,7 +136,7 @@ JdkInstrumentationInstaller.install(instrumentation, runtime, eager)
      only one copy of the agent can be active per JVM
 
 2. installDelegate(new ChaosBridge(runtime))
-   — buildMethodHandles(): 78 MethodHandle[] via MethodHandles.publicLookup() against BridgeDelegate
+   — buildMethodHandles(): 79 MethodHandle[] via MethodHandles.publicLookup() against BridgeDelegate
    — Class.forName("...BootstrapDispatcher", true, null)  // null CL = bootstrap CL
    — bootstrapDispatcherClass.getMethod("install", Object.class, MethodHandle[].class)
                               .invoke(null, bridgeDelegate, mh)
@@ -301,7 +301,7 @@ Opening a session weaves the groups that carry the session to other threads (`EX
 
 **One copy of the bridge**: only the bootstrap copy of `BootstrapDispatcher` carries the delegate, and advice woven into a class links against whatever copy that class's loader resolves. The agent JAR therefore keeps the bridge classes under `META-INF/macstab-chaos-bridge/` (`chaos-agent-bootstrap/build.gradle.kts`), so a child-first loader over it (`WEB-INF/lib`) finds no copy of its own and resolves the bootstrap one through its parents. `BridgeVisibility` guards the rest: on a class loader's first sight in the type matcher (an ignore rule of every hook group and of method weaving) it asks `loader.getResource(".../bridge/BootstrapDispatcher.class")`, as an internal call and outside its cache lock, and never loads a class. No class file, or the one the agent's own loader sees, means the loader resolves the bootstrap copy: its classes are woven (a bridge appended at run time is invisible to `getResource`). Any other class file is a copy of its own (a thin jar bundled in the application): its classes are not woven, and the loader is named once in `hookFailures`. A loader that delegates the bridge package nowhere and holds no copy cannot be detected that way; delegate `com.macstab.chaos.jvm.instrumentation` to the boot path there (JBoss Modules `jboss.modules.system.pkgs`, OSGi `org.osgi.framework.bootdelegation`).
 
-**`buildMethodHandles()`**: Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class`. Public lookup is required because the bootstrap classloader must be able to invoke the handles; a full-access lookup with the agent classloader's module system would not be reachable from the bootstrap context. Each handle is a virtual method handle; when invoked with `delegate` as the first argument, it dispatches to the `ChaosBridge` implementation. The array has `HANDLE_COUNT` (78) slots; see §7 for the full slot table.
+**`buildMethodHandles()`**: Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class`. Public lookup is required because the bootstrap classloader must be able to invoke the handles; a full-access lookup with the agent classloader's module system would not be reachable from the bootstrap context. Each handle is a virtual method handle; when invoked with `delegate` as the first argument, it dispatches to the `ChaosBridge` implementation. The array has `HANDLE_COUNT` (79) slots; see §7 for the full slot table.
 
 The wiring is derived, not written per slot: each `public static final int` slot constant `FOO_BAR` on `BootstrapDispatcher` (other than `SCOPE_*` and `HANDLE_COUNT`) is served by the `BridgeDelegate` method `fooBar`. Adding a dispatch entry point is therefore a constant, a delegate method and its `ChaosBridge` implementation; `buildMethodHandles()` checks the table in full and fails the install naming the mismatch — a slot without a method, a method without a slot, an index used twice or left unset, an overloaded delegate method.
 
@@ -400,7 +400,7 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 
 ---
 
-# 7. The 78 Interception Handles
+# 7. The 79 Interception Handles
 
 | Index | Constant                             | JDK method(s) intercepted                                                                                                                                                       | Direction                                    |
 |-------|--------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
@@ -463,7 +463,7 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 | 56    | `ADJUST_LOCAL_DATE_TIME_NOW_IN_ZONE` | `LocalDateTime.now(ZoneId)` (static; `now(Clock)` is not hooked)                                                                                                                | exit (`LocalDateTime` rewrite)               |
 | 57    | `BEFORE_METHOD_ENTER`                | Entry of every method a `MethodSelector` names (woven per scenario by `MethodWeaver`)                                                                                            | enter                                        |
 | 58    | `AFTER_METHOD_EXIT`                  | Normal exit of every method a `MethodSelector` names                                                                                                                              | exit (return-value rewrite)                  |
-| 59    | `BEFORE_CLIENT_CALL`                 | Kafka `KafkaProducer.waitOnMetadata` inside `send(record, callback)` (`SCOPE_MESSAGE_SEND`; a reject fails the send's future and callback) / `KafkaConsumer.poll(Duration)`, gRPC `ClientStreamProvider.newStream` (a reject returns a `FailingClientStream`), Jedis `Connection.sendCommand(CommandArguments)`, Lettuce `RedisChannelHandler.dispatch` (a command or a batch; a reject completes the commands exceptionally), R2DBC `Statement.execute()` (a reject returns `Mono.error` / `Flux.error`), AWS SDK v2 `BaseSync/AsyncClientHandler.execute`, Netty `doWrite(ChannelOutboundBuffer)` of the channel types that declare it (a reject fails the flushed writes and closes the channel) and stream-channel reads | enter (reject throws the library's exception) |
+| 59    | `BEFORE_CLIENT_CALL`                 | Kafka `KafkaProducer.waitOnMetadata` inside `send(record, callback)` (`SCOPE_MESSAGE_SEND`; a reject fails the send's future and callback) / `KafkaConsumer.poll(Duration)`, gRPC `ClientStreamProvider.newStream` (a reject returns a `FailingClientStream`; on a channel with retries `BEFORE_RPC_CALL`), Jedis `Connection.sendCommand(CommandArguments)`, Lettuce `RedisChannelHandler.dispatch` (a command or a batch; a reject completes the commands exceptionally), R2DBC `Statement.execute()` (a reject returns `Mono.error` / `Flux.error`), AWS SDK v2 `BaseSync/AsyncClientHandler.execute`, Netty `doWrite(ChannelOutboundBuffer)` of the channel types that declare it (a reject fails the flushed writes and closes the channel) and stream-channel reads | enter (reject throws the library's exception) |
 | 60    | `AFTER_DNS_ANSWER`                   | `InetAddress.getAllByName(String)` exit, on return or `UnknownHostException` (`DNS_ANSWER`)                                                                                       | exit (answer rewrite)                        |
 | 61    | `CAPTURE_SESSION`                    | `ForkJoinPool.poolSubmit(boolean, ForkJoinTask)`, `ForkJoinTask.fork()` — records the submitting thread's session for the task                                                      | enter (session hand-off)                     |
 | 62    | `ENTER_SESSION`                      | `ForkJoinTask.doExec()` enter, `Thread.run()` enter, `VirtualThread.run(Runnable)` enter and `mount()` exit — binds the handed-off session                                        | enter (session hand-off)                     |
@@ -482,6 +482,7 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 | 75    | `BEFORE_PROCESS_WAIT`                | `ProcessImpl.waitFor()` and `waitFor(long, TimeUnit)` (`PROCESS_WAIT`)                                                                                                            | enter (timeout: returns `false`)             |
 | 76    | `IDLE`                               | not woven: `BootstrapDispatcher.idle(String)`, which advice that reads its target reflectively calls first (client libraries, OkHttp, Apache HttpClient, Reactor Netty, HikariCP) | `true`: return before reading (no scenario indexed for the operation) |
 | 77    | `AFTER_PROCESS_START`                | `ProcessBuilder.start(Redirect[])` on return (`PROCESS_WAIT`): records the program the child was started as, for its wait; written while the group is woven, scenario or not | exit (record only)                           |
+| 78    | `BEFORE_RPC_CALL`                    | gRPC on a channel with retries: `ClientStreamProvider.newStream` (the call: its delay and gate) and `RetriableStream.newSubstream` (each attempt: its reject, which returns a `FailingClientStream` the retry policy retries) | enter (an attempt's reject returns the failing stream) |
 
 `BEFORE_SOCKET_CONNECT` returns the endpoint to connect to: the requested one, or another under `ChaosEffect.redirect(...)`, which the `Socket.connect` and `SocketChannel.connect` advice write back into their argument. File operations without a slot of their own (`FILE_IO_OPEN`, `FILE_IO_CLOSE`, `FILE_IO_MAP`, `FILE_IO_MOVE_TARGET`, transfers, scattering and gathering `FileChannel` calls) go through `BEFORE_FILE_IO` with their operation tag; a transfer is one event (`SCOPE_FILE_TRANSFER`), as is a compound read (`FileInputStream.readAllBytes` / `readNBytes(int)`, `RandomAccessFile.readLine`, evaluated at entry with `Integer.MAX_VALUE` or `len` bytes requested; a `corruptRead` flips one bit of the returned bytes in exit advice), a provider open is one event (`SCOPE_FILE_OPEN`), a stream and its channel are one close (`SCOPE_FILE_CLOSE`).
 

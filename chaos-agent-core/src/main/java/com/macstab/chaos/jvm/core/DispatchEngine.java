@@ -202,7 +202,27 @@ final class DispatchEngine {
    * @return the decision
    */
   RuntimeDecision evaluate(final InvocationContext context, final boolean returnCorruptible) {
-    final List<ScenarioContribution> contributions = registry.match(context);
+    return decide(context, registry.match(context), returnCorruptible);
+  }
+
+  /**
+   * Evaluates a call for the scenarios whose effect {@code effects} accepts only: the others are
+   * neither applied nor counted, as when a call is evaluated in parts (a gRPC call's delay and
+   * gate, its attempts' reject).
+   *
+   * @param context the intercepted call
+   * @param effects the effects this evaluation applies
+   * @return the decision
+   */
+  RuntimeDecision evaluate(
+      final InvocationContext context, final java.util.function.Predicate<ChaosEffect> effects) {
+    return decide(context, registry.match(context, effects), true);
+  }
+
+  private RuntimeDecision decide(
+      final InvocationContext context,
+      final List<ScenarioContribution> contributions,
+      final boolean returnCorruptible) {
     if (contributions.isEmpty()) {
       return RuntimeDecision.none();
     }

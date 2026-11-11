@@ -35,12 +35,12 @@ Key properties:
 - **Per-session isolation** — concurrent tests share a JVM; chaos is thread-local unless explicitly JVM-scoped
 - **Runtime control** — scenarios start, stop, fire, and expire without JVM restart
 - **Activation policy composition** — probability, rate limit, warm-up, time window, max-applications, random seed
-- **78 bridge handles** (`BootstrapDispatcher.HANDLE_COUNT`) in 41 hook groups, covering the JDK surface and the client libraries relevant to enterprise backend workloads
+- **79 bridge handles** (`BootstrapDispatcher.HANDLE_COUNT`) in 41 hook groups, covering the JDK surface and the client libraries relevant to enterprise backend workloads
 
 ## Scope
 
 In scope:
-- All JVM interception points of the hook groups ([instrumentation.md §7](instrumentation.md#7-the-78-interception-handles) lists the handles)
+- All JVM interception points of the hook groups ([instrumentation.md §7](instrumentation.md#7-the-79-interception-handles) lists the handles)
 - JVM-global and session-local chaos, independently composable
 - Startup and programmatic activation
 - JSON plan loading at startup (file, inline, base64)
@@ -80,7 +80,7 @@ The agent is a multi-module Gradle project organised as a strict directed depend
 
 - **Public contract** — `chaos-agent-api` is the only module application code compiles against. Sealed hierarchies (`ChaosSelector`, `ChaosEffect`), records (`ChaosScenario`, `ChaosPlan`, `ActivationPolicy`, `NamePattern`), and the `ChaosControlPlane` / `ChaosSession` interfaces form the stable surface. Everything else is implementation.
 - **Runtime core** — `chaos-agent-core` holds the scenario registry, the 9-step evaluation pipeline, session scoping, and every stressor implementation (heap, metaspace, direct-buffer, GC, finalizer, deadlock, thread-leak, monitor, code-cache, safepoint, string-intern, reference-queue, thread-local, keep-alive, virtual-thread carrier pinning). Hot-path code (`ChaosDispatcher`, `ScenarioController`) is profiled against JMH benchmarks.
-- **Bytecode instrumentation** — `chaos-agent-instrumentation-jdk` defines the ByteBuddy `@Advice` classes and the bootstrap-classloader bridge. `BootstrapDispatcher` (bootstrap-resident, appended via `Instrumentation.appendToBootstrapClassLoaderSearch`) is the only path by which instrumented JDK methods reach the agent classloader — a `volatile` two-field publication protocol guarantees JMM visibility of the 78-slot `MethodHandle[]` dispatch table.
+- **Bytecode instrumentation** — `chaos-agent-instrumentation-jdk` defines the ByteBuddy `@Advice` classes and the bootstrap-classloader bridge. `BootstrapDispatcher` (bootstrap-resident, appended via `Instrumentation.appendToBootstrapClassLoaderSearch`) is the only path by which instrumented JDK methods reach the agent classloader — a `volatile` two-field publication protocol guarantees JMM visibility of the 79-slot `MethodHandle[]` dispatch table.
 - **Agent lifecycle** — `chaos-agent-bootstrap` owns the `premain` / `agentmain` entry points, the singleton `ChaosControlPlane` installation, and JMX MBean registration.
 - **Configuration resolution** — `chaos-agent-startup-config` resolves plans from `configFile`, `configJson`, `configBase64`, and environment variables, deserialises them via Jackson polymorphic mapping, and runs the live-reload file watcher.
 - **Test integrations** — `chaos-agent-testkit` provides `ChaosAgentExtension` (JUnit 5) and `ChaosPlatform.installLocally()` for self-attach. `chaos-agent-spring-boot3-test-starter` and `chaos-agent-spring-boot4-test-starter` compose `@ChaosTest` on top and wire a class-scoped `ChaosSession` into Spring Boot tests.
@@ -91,7 +91,7 @@ The agent is a multi-module Gradle project organised as a strict directed depend
 Every intercepted JVM operation travels through five bytecode frames before a decision is reached:
 
 1. **Instrumented JDK method** — e.g. `ThreadPoolExecutor.execute()`, with ByteBuddy advice woven into the method body when a scenario first needs its hook group (not called — *copied* inline)
-2. **`BootstrapDispatcher`** — bootstrap-classloader-resident static entry point holding the 78-slot `MethodHandle[]` and a `ThreadLocal<int[]>` reentrancy depth guard (a one-element `int` array avoids `Integer` autoboxing per call)
+2. **`BootstrapDispatcher`** — bootstrap-classloader-resident static entry point holding the 79-slot `MethodHandle[]` and a `ThreadLocal<int[]>` reentrancy depth guard (a one-element `int` array avoids `Integer` autoboxing per call)
 3. **`BridgeDelegate`** — agent-classloader bridge that unboxes arguments and forwards to the active runtime
 4. **`ChaosDispatcher` / `ScenarioController`** — registry lookup + the 9-step evaluation pipeline: `started` → session → selector → expiry → `activeFrom` → `matchedCount++` and warm-up → probability → rate limit → max-applications reservation
 5. **`ChaosEffect`** — terminal action executed inline on the calling thread (`delay` / `reject` / `suppress` / `gate` / `exception` / `corruptReturnValue` / `skewClock` / stressor handle)
@@ -109,7 +109,7 @@ flowchart TB
   end
   subgraph runtime["Runtime"]
     core["chaos-agent-core"]
-    instr["chaos-agent-instrumentation-jdk<br/>ByteBuddy @Advice + BootstrapDispatcher (bootstrap CL)<br/>78 handle slots, ThreadLocal&lt;int[]&gt; reentrancy guard,<br/>volatile two-field publication"]
+    instr["chaos-agent-instrumentation-jdk<br/>ByteBuddy @Advice + BootstrapDispatcher (bootstrap CL)<br/>79 handle slots, ThreadLocal&lt;int[]&gt; reentrancy guard,<br/>volatile two-field publication"]
     config["chaos-agent-startup-config"]
     boot["chaos-agent-bootstrap"]
   end
@@ -178,7 +178,7 @@ flowchart TB
 | `chaos-agent-api`                       | **Stable public API** — the only module application code should depend on; its one dependency is the JSpecify nullness annotations |
 | `chaos-agent-bootstrap`                 | The agent JAR: entry points, singleton, MBean registration; self-contained, ByteBuddy and Jackson relocated, no transitive dependencies |
 | `chaos-agent-core`                      | Scenario registry, evaluation pipeline, session scoping, stressors        |
-| `chaos-agent-instrumentation-jdk`       | ByteBuddy advice, bootstrap bridge (78 handle slots)              |
+| `chaos-agent-instrumentation-jdk`       | ByteBuddy advice, bootstrap bridge (79 handle slots)              |
 | `chaos-agent-startup-config`            | JSON/base64/file config resolution and Jackson mapping                    |
 | `chaos-agent-spring-boot-common`        | Shared Spring Boot code of both starters: auto-configuration, trusted enablement, Actuator endpoint, session filter |
 | `chaos-agent-quarkus-extension`         | Quarkus `@ChaosTest` support and CDI producer, with its deployment module |
@@ -261,7 +261,7 @@ JdkInstrumentationInstaller.install(instrumentation, runtime, eager, clockCallSi
                                     sessionHeaderHosts, bridgeDir)
     ├── injectBridge(): package BootstrapDispatcher into temp JAR,
     │                   appendToBootstrapClassLoaderSearch
-    ├── installDelegate(): build 78-slot MethodHandle[], wire into BootstrapDispatcher.install()
+    ├── installDelegate(): build 79-slot MethodHandle[], wire into BootstrapDispatcher.install()
     └── runtime.setHookDemand(...): hook groups are woven via retransformation when a
         scenario or a session first needs them (eager: every group now)
   ↓
@@ -507,7 +507,7 @@ flowchart TB
 
 **Bootstrap bridge injection**: Reads `BootstrapDispatcher.class` and the types woven advice references (the scheduled-task wrappers, the API exceptions it throws) from the agent JAR's resources and writes them into a temp JAR in `bridgeDir` when it is set (a trusted directory, or the start is aborted), else in `java.io.tmpdir`, then `/dev/shm` when the temp directory is read-only. The temp JAR (created with mode 0600 on POSIX) is appended to the bootstrap classpath via `Instrumentation.appendToBootstrapClassLoaderSearch`. On POSIX the file is unlinked immediately afterwards (the class path entry keeps its own handle), so nothing is left in the temp directory even after `kill -9`; on Windows, where the open jar cannot be deleted, it stays until the next start sweeps stale jars from earlier JVMs (only the JVM user's own on POSIX). Injection happens once per JVM.
 
-**MethodHandle array construction** (`buildMethodHandles`): Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class` to build `BootstrapDispatcher.HANDLE_COUNT` handles (78). All handles are unbound virtual handles resolved against the interface, not the implementation, so the bootstrap classloader can invoke them without visibility into `ChaosBridge`; each dispatch call supplies the delegate instance as the first argument. The handle array is passed to `BootstrapDispatcher.install()` via reflection (`Class.forName(..., null)` with bootstrap classloader).
+**MethodHandle array construction** (`buildMethodHandles`): Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class` to build `BootstrapDispatcher.HANDLE_COUNT` handles (79). All handles are unbound virtual handles resolved against the interface, not the implementation, so the bootstrap classloader can invoke them without visibility into `ChaosBridge`; each dispatch call supplies the delegate instance as the first argument. The handle array is passed to `BootstrapDispatcher.install()` via reflection (`Class.forName(..., null)` with bootstrap classloader).
 
 **Hook groups**: every interception point belongs to one of 41 `HookGroup`s (`THREAD_START`, `THREAD_POOL_EXECUTOR`, `EXECUTOR_SUBMIT`, `SCHEDULED_EXECUTOR`, `FORK_JOIN`, `BLOCKING_QUEUE`, `COMPLETABLE_FUTURE`, `COMPLETABLE_FUTURE_CANCEL`, `SHUTDOWN_HOOK`, `CLASS_LOADER`, `CLASS_DEFINE`, `JDK_INTERNAL_CLASS_LOAD`, `RUNTIME_LIFECYCLE`, `REFLECTION_INVOKE`, `DIRECT_BUFFER`, `SERIALIZATION`, `THREAD_PARK`, `MONITOR_ENTER`, `NIO`, `SOCKET`, `DATAGRAM`, `SOCKET_CHANNEL`, `ZIP`, `THREAD_LOCAL`, `CLOCK_CALL_SITES`, `TIME_API`, `SSL_HANDSHAKE`, `KAFKA`, `GRPC`, `REDIS`, `R2DBC`, `AWS_SDK`, `NETTY`, `HTTP_CLIENT`, `JDBC`, `JNDI_JMX`, `NATIVE_LIBRARY`, `THREAD_SLEEP`, `DNS`, `PROCESS`, `FILE_IO`; their targets are in [instrumentation.md §5](instrumentation.md#interception-map)) listing the `OperationType`s it serves; method hooks (`METHODS`) are woven per `MethodSelector`. When a scenario is activated (or a session opened, which needs `THREAD_START`, `EXECUTOR_SUBMIT`, `SCHEDULE_SUBMIT`, `FORK_JOIN_TASK_RUN` and `HTTP_CLIENT_SEND`, so it weaves the six groups serving them), the control plane calls `HookDemand.require(operations)` and the installer weaves the groups not yet woven, once each, each with its own `ResettableClassFileTransformer`. Woven groups stay woven until uninstall. A weaving failure fails the activation with failure category `INSTRUMENTATION_FAILURE`. Every group uses retransformation (`Can-Retransform-Classes: true`), so premain, agentmain and self-attach get the same hook set.
 
@@ -782,7 +782,7 @@ When `DEPTH > 0` in a `BootstrapDispatcher` dispatch method, the fallback is ret
 
 - `ScenarioController`: ~200 bytes per instance (fields, AtomicLong, AtomicBoolean, volatile pointers)
 - `ScenarioRegistry`: `ConcurrentHashMap` overhead proportional to N registered controllers
-- `BootstrapDispatcher.handles`: 78 `MethodHandle` references, one array — ~330 bytes
+- `BootstrapDispatcher.handles`: 79 `MethodHandle` references, one array — ~330 bytes
 - `DEPTH ThreadLocal`: one small `int[]` per thread that reached an instrumented call, kept for the thread's lifetime (it also holds call-depth scope counters)
 
 ## Bottlenecks

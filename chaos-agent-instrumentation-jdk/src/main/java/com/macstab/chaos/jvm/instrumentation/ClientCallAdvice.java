@@ -77,7 +77,8 @@ final class ClientCallAdvice {
    * the name resolved). A reject skips the real {@code newStream}, so no transport stream is
    * opened, and returns gRPC's own {@code FailingClientStream}: the call fails through its listener
    * with the status. Only when that stream cannot be built is the status thrown from {@code
-   * newStream}.
+   * newStream}. On a channel with retries only the call's delay and gate apply here; each attempt's
+   * reject is evaluated by {@link GrpcNewSubstream}.
    */
   static final class GrpcNewStream {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
@@ -86,17 +87,20 @@ final class ClientCallAdvice {
       if (BootstrapDispatcher.idle(OperationTags.RPC_CALL)) {
         return null;
       }
+      final boolean retries;
       final String fullMethodName;
       BootstrapDispatcher.beginInternalCall();
       try {
-        if (ClientCallExtractor.grpcRetries(provider)) {
-          return null; // each attempt is evaluated (GrpcNewSubstream)
-        }
+        retries = ClientCallExtractor.grpcRetries(provider);
         fullMethodName = ClientCallExtractor.grpcMethod(method);
       } finally {
         BootstrapDispatcher.endInternalCall();
       }
       try {
+        if (retries) {
+          BootstrapDispatcher.beforeRpcCall(provider, fullMethodName, false);
+          return null;
+        }
         BootstrapDispatcher.beforeClientCall(
             OperationTags.RPC_CALL, provider, fullMethodName, null, null);
         return null;
@@ -129,9 +133,11 @@ final class ClientCallAdvice {
   /**
    * {@code newSubstream} of a managed channel's {@code RetriableStream} ({@code
    * ManagedChannelImpl.ChannelStreamProvider.RetryStream}): once per attempt of a call on a channel
-   * with retries enabled. A reject skips the attempt's real stream and returns gRPC's {@code
-   * FailingClientStream}, so the retry policy sees the {@code UNAVAILABLE} as it sees a real one
-   * and retries it when the policy says so.
+   * with retries enabled. Only a reject is evaluated here: a retried attempt starts on gRPC's own
+   * thread (the transport's, or the timer of a hedge), where a delay or gate would hold every call
+   * it serves, so those stay the call's ({@link GrpcNewStream}). A reject skips the attempt's real
+   * stream and returns gRPC's {@code FailingClientStream}, so the retry policy sees the {@code
+   * UNAVAILABLE} as it sees a real one and retries it when the policy says so.
    */
   static final class GrpcNewSubstream {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
@@ -149,8 +155,7 @@ final class ClientCallAdvice {
         BootstrapDispatcher.endInternalCall();
       }
       try {
-        BootstrapDispatcher.beforeClientCall(
-            OperationTags.RPC_CALL, retryStream, fullMethodName, null, null);
+        BootstrapDispatcher.beforeRpcCall(retryStream, fullMethodName, true);
         return null;
       } catch (final Throwable rejected) {
         return rejected;

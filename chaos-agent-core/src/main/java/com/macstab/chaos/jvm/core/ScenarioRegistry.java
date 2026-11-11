@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.ChaosActivationConflictException;
 import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
+import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Clock;
@@ -414,6 +415,21 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    *     scenario matches
    */
   List<ScenarioContribution> match(final InvocationContext context) {
+    return match(context, null);
+  }
+
+  /**
+   * As {@link #match(InvocationContext)}, asking only the controllers whose scenario's effect
+   * {@code effects} accepts: the others are not evaluated, so nothing of theirs is counted (match
+   * count, probability, rate permit, application budget).
+   *
+   * @param context the invocation context captured at the instrumentation point
+   * @param effects the effects this evaluation applies; {@code null} for every effect
+   * @return an unmodifiable, ordered list of contributions; empty if no such scenario matches
+   */
+  List<ScenarioContribution> match(
+      final InvocationContext context,
+      final java.util.function.@Nullable Predicate<ChaosEffect> effects) {
     final ScenarioController[] candidates = index.get(context.operationType());
     if (candidates == null) {
       return List.of();
@@ -421,6 +437,9 @@ final class ScenarioRegistry implements ChaosDiagnostics {
     ArrayList<ScenarioContribution> results = null;
     try {
       for (final ScenarioController controller : candidates) {
+        if (effects != null && !effects.test(controller.scenario().effect())) {
+          continue;
+        }
         final ScenarioContribution contribution = controller.evaluate(context);
         if (contribution == null) {
           continue;

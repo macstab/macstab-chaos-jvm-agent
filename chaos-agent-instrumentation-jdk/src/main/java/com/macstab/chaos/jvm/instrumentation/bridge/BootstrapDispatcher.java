@@ -614,8 +614,11 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #afterProcessStart(Object, String)}. */
   public static final int AFTER_PROCESS_START = 77;
 
+  /** Handle index for {@link #beforeRpcCall(Object, String, boolean)}. */
+  public static final int BEFORE_RPC_CALL = 78;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 78;
+  public static final int HANDLE_COUNT = 79;
 
   /** The header that carries a session id between services; {@code ChaosSession.HEADER}. */
   public static final String SESSION_HEADER = "X-Chaos-Session";
@@ -3368,6 +3371,35 @@ public final class BootstrapDispatcher {
       final Object d = delegate;
       if (d != null && h != null) {
         h[BEFORE_CLIENT_CALL].invoke(d, operation, client, target, detail, remoteAddress);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Called for a gRPC call on a channel with retries, in two parts: the call's delay and gate where
+   * the call is made ({@code attempt} false), then each attempt's reject ({@code attempt} true).
+   *
+   * @param client the stream provider (the call) or the retrying stream (an attempt)
+   * @param method the full method name, or {@code null}
+   * @param attempt {@code true} for an attempt, {@code false} for the call
+   * @throws Throwable if an active scenario rejects the attempt
+   */
+  public static void beforeRpcCall(
+      final Object client, final @Nullable String method, final boolean attempt) throws Throwable {
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_RPC_CALL].invoke(d, client, method, attempt);
       }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);

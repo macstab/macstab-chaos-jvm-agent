@@ -287,6 +287,38 @@ class DispatchPathsTest {
     }
 
     @Test
+    @DisplayName("a gRPC call with retries: the delay is the call's, the reject each attempt's")
+    void rpcCallInParts() {
+      final ChaosActivationHandle delay =
+          runtime.activate(
+              ChaosScenario.builder("rpc-delay")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.rpc(NamePattern.any()))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                  .build());
+      final ChaosActivationHandle reject =
+          runtime.activate(
+              ChaosScenario.builder("rpc-reject")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.rpc(NamePattern.any()))
+                  .effect(ChaosEffect.reject("unavailable"))
+                  .build());
+
+      assertThatCode(() -> runtime.beforeRpcCall(new Object(), "svc/Get", false))
+          .doesNotThrowAnyException();
+      assertThat(delay.appliedCount()).isEqualTo(1L);
+      assertThat(reject.appliedCount()).isZero();
+
+      assertThatThrownBy(() -> runtime.beforeRpcCall(new Object(), "svc/Get", true))
+          .isInstanceOf(java.io.IOException.class)
+          .hasMessage("unavailable");
+      assertThatThrownBy(() -> runtime.beforeRpcCall(new Object(), "svc/Get", true))
+          .isInstanceOf(java.io.IOException.class);
+      assertThat(delay.appliedCount()).isEqualTo(1L);
+      assertThat(reject.appliedCount()).isEqualTo(2L);
+    }
+
+    @Test
     @DisplayName("a statement is matched on its first 200 characters")
     void longStatementIsTruncated() {
       final String head = "SELECT " + "x".repeat(193);

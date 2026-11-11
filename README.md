@@ -182,7 +182,7 @@ flowchart LR
   subgraph boot["bootstrap class loader"]
     direction TB
     JDK["JDK method<br/>e.g. SocketChannelImpl.write"] --> ADV["inlined @Advice"]
-    ADV --> BD["BootstrapDispatcher<br/>depth guard · 78 slots"]
+    ADV --> BD["BootstrapDispatcher<br/>depth guard · 79 slots"]
   end
   subgraph agent["agent class loader"]
     direction TB
@@ -200,7 +200,7 @@ flowchart LR
 
 The JDK class reaches the agent only through the bridge's method-handle slots ([ADR 0001](docs/adr/0001-bootstrap-bridge.md)); the policy steps and the composition rules are the numbered laws of [docs/semantics.md](docs/semantics.md).
 
-**78 interception handles** span: thread lifecycle, executor submission, scheduled ticks, blocking queues, `CompletableFuture`, NIO selectors, TCP sockets, clock (`currentTimeMillis`/`nanoTime`), GC, `System.exit`, reflection, `ObjectInputStream`, class loading, `LockSupport.park`, AQS acquire, JNDI, JMX, ZIP compression, `ThreadLocal`, native library loading, HTTP client send, JDBC execute, DNS resolve, SSL handshake, `Thread.sleep`, file I/O, and arbitrary method entry/exit.
+**79 interception handles** span: thread lifecycle, executor submission, scheduled ticks, blocking queues, `CompletableFuture`, NIO selectors, TCP sockets, clock (`currentTimeMillis`/`nanoTime`), GC, `System.exit`, reflection, `ObjectInputStream`, class loading, `LockSupport.park`, AQS acquire, JNDI, JMX, ZIP compression, `ThreadLocal`, native library loading, HTTP client send, JDBC execute, DNS resolve, SSL handshake, `Thread.sleep`, file I/O, and arbitrary method entry/exit.
 
 **Session isolation**: each test gets a `ChaosSession` backed by a `ThreadLocal<String>`. Session-scoped chaos evaluates only when the session ID on the current thread matches. Work handed off within a `session.bind()` scope — executor submissions, `ForkJoinPool` tasks (`CompletableFuture.*Async`, parallel streams), started threads and virtual threads — carries the session ID into the thread that runs it, so chaos propagates exactly where intended and nowhere else.
 
@@ -614,7 +614,7 @@ The depth shown in this project — JVMTI re-entrancy debugging on JDK 25, `@Int
 
 Concrete artifacts a reviewer can read:
 
-- **92 `OperationType` values over 78 interception handles** across modern JDK internals — including JDK 25 changes most chaos tools haven't caught up to (`Socket$SocketInputStream` rename, `sun.nio.ch.NioSocketImpl` as default `SocketImpl`, `jdk.internal.loader.NativeLibraries.load` going `native`)
+- **92 `OperationType` values over 79 interception handles** across modern JDK internals — including JDK 25 changes most chaos tools haven't caught up to (`Socket$SocketInputStream` rename, `sun.nio.ch.NioSocketImpl` as default `SocketImpl`, `jdk.internal.loader.NativeLibraries.load` going `native`)
 - **Single-annotation test integration** on Spring Boot 3 and 4 (`@ChaosTest`), Micronaut (`@MicronautChaosTest`) and Quarkus (`@QuarkusChaosTest`) — four frameworks with four different test-context conventions, one annotation each
 - **Honest documentation** of what *cannot* work and why — `SYSTEM_CLOCK_MILLIS` documented with the actual JVM constraints (native `@IntrinsicCandidate`, compiled into a direct call to the VM clock), not papered over
 - **Cross-libc and cross-arch validation** in the sister C repo — `glibc + musl × amd64 + arm64`, 100 % line coverage on shipped sources, Docker runtime validation as a quality gate

@@ -36,7 +36,7 @@
 
 ## 1. What This Is (and Is Not)
 
-This agent intercepts JDK operations through 78 interception handles — thread pools, sockets, NIO, JDBC, HTTP clients, clocks, queues, class loaders, and more — by rewriting JVM bytecode on demand, when a scenario first needs a hook. Every fault it injects is **real**: a real `ConnectException`, a real sleep, a real `OutOfMemoryError`. No mocks.
+This agent intercepts JDK operations through 79 interception handles — thread pools, sockets, NIO, JDBC, HTTP clients, clocks, queues, class loaders, and more — by rewriting JVM bytecode on demand, when a scenario first needs a hook. Every fault it injects is **real**: a real `ConnectException`, a real sleep, a real `OutOfMemoryError`. No mocks.
 
 **This is not a network chaos proxy.** It operates entirely inside one JVM process. For network-layer chaos (packet loss, latency between processes) use a complementary tool like `tc netem` or Toxiproxy.
 

@@ -947,6 +947,21 @@ final class ChaosBridge implements BridgeDelegate {
     runtime.beforeClientCall(operation, client, target, detail, remoteAddress);
   }
 
+  /**
+   * Invoked for a gRPC call on a channel with retries: the call's delay and gate, or an attempt's
+   * reject.
+   *
+   * @param client the stream provider (the call) or the retrying stream (an attempt)
+   * @param method the full method name, or {@code null}
+   * @param attempt {@code true} for an attempt, {@code false} for the call
+   * @throws Throwable if a scenario rejects the attempt
+   */
+  @Override
+  public void beforeRpcCall(
+      final Object client, final @Nullable String method, final boolean attempt) throws Throwable {
+    runtime.beforeRpcCall(client, method, attempt);
+  }
+
   @Override
   public void captureSession(final Object carrier) {
     runtime.captureSession(carrier);

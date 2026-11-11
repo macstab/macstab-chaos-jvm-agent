@@ -427,6 +427,87 @@ class ClientCallExtractorTest {
   }
 
   @Nested
+  @DisplayName("gRPC retries")
+  class GrpcRetries {
+
+    private static final net.bytebuddy.description.modifier.Visibility PUBLIC =
+        net.bytebuddy.description.modifier.Visibility.PUBLIC;
+
+    /**
+     * A managed channel with retries enabled and its stream provider, in a loader of their own,
+     * with the per-attempt stream {@code retryStream} (or none).
+     */
+    private Object provider(
+        final DynamicType.@org.jspecify.annotations.Nullable Unloaded<?> retryStream)
+        throws Exception {
+      final Map<String, byte[]> types = new HashMap<>();
+      final DynamicType.Unloaded<?> channel =
+          new ByteBuddy()
+              .subclass(Object.class)
+              .name("io.grpc.internal.ManagedChannelImpl")
+              .defineField("retryEnabled", boolean.class, PUBLIC)
+              .make();
+      final DynamicType.Unloaded<?> provider =
+          new ByteBuddy()
+              .subclass(Object.class)
+              .name("io.grpc.internal.ManagedChannelImpl$ChannelStreamProvider")
+              .defineField("this$0", Object.class, PUBLIC)
+              .make();
+      for (final DynamicType.Unloaded<?> type :
+          java.util.Arrays.asList(channel, provider, retryStream)) {
+        if (type != null) {
+          types.put(type.getTypeDescription().getName(), type.getBytes());
+        }
+      }
+      final ClassLoader loader = new ByteArrayClassLoader(getClass().getClassLoader(), types);
+      final Object channelInstance =
+          loader.loadClass("io.grpc.internal.ManagedChannelImpl").getConstructor().newInstance();
+      channelInstance.getClass().getField("retryEnabled").setBoolean(channelInstance, true);
+      final Class<?> providerType =
+          loader.loadClass("io.grpc.internal.ManagedChannelImpl$ChannelStreamProvider");
+      final Object providerInstance = providerType.getConstructor().newInstance();
+      providerType.getField("this$0").set(providerInstance, channelInstance);
+      return providerInstance;
+    }
+
+    private DynamicType.Unloaded<?> retryStream(final int newSubstreamArguments) {
+      final List<Class<?>> parameters =
+          java.util.Collections.nCopies(newSubstreamArguments, Object.class);
+      return new ByteBuddy()
+          .subclass(Object.class)
+          .name(ClientCallExtractor.GRPC_RETRY_STREAM)
+          .defineField("val$method", Object.class, PUBLIC)
+          .defineMethod(ClientCallExtractor.GRPC_NEW_SUBSTREAM, Object.class, PUBLIC)
+          .withParameters(parameters)
+          .intercept(net.bytebuddy.implementation.FixedValue.nullValue())
+          .make();
+    }
+
+    @Test
+    @DisplayName("steps aside for attempts with newSubstream of 5 arguments (1.85) or 2 (1.39)")
+    void attemptsOfEitherShape() throws Exception {
+      assertThat(ClientCallExtractor.grpcRetries(provider(retryStream(5)))).isTrue();
+      assertThat(ClientCallExtractor.grpcRetries(provider(retryStream(2)))).isTrue();
+    }
+
+    @Test
+    @DisplayName(
+        "evaluates the call where gRPC has no RetryStream the attempt hook can be woven into")
+    void callWithoutTheAttemptHook() throws Exception {
+      assertThat(ClientCallExtractor.grpcRetries(provider(null))).isFalse();
+      assertThat(
+              ClientCallExtractor.grpcRetries(
+                  provider(
+                      new ByteBuddy()
+                          .subclass(Object.class)
+                          .name(ClientCallExtractor.GRPC_RETRY_STREAM)
+                          .defineField("val$method", Object.class, PUBLIC)
+                          .make())))
+          .isFalse();
+    }
+  }
+
+  @Nested
   @DisplayName("gRPC failing stream")
   class GrpcFailingStream {
 

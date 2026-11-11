@@ -1245,6 +1245,20 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Delegates to {@link ClientDispatch#beforeRpcCall}: a gRPC call on a channel with retries, in
+   * two parts (the call's delay and gate, each attempt's reject).
+   *
+   * @param client the stream provider (the call) or the retrying stream (an attempt)
+   * @param method the full method name, or {@code null}
+   * @param attempt {@code true} for an attempt, {@code false} for the call
+   * @throws Throwable if a scenario rejects the attempt
+   */
+  public void beforeRpcCall(
+      final Object client, final @Nullable String method, final boolean attempt) throws Throwable {
+    clientDispatch.beforeRpcCall(client, method, attempt);
+  }
+
+  /**
    * Delegates to {@link ThreadDispatch#captureSession}.
    *
    * @param carrier the fork-join task being submitted or forked

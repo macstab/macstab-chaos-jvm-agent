@@ -25,7 +25,7 @@ Every intercepted operation that some scenario is indexed under runs through `Sc
 JDK classes (`Thread`, `Socket`, `System`, etc.) are loaded by the **bootstrap classloader** — the root of the classloader hierarchy with no parent. ByteBuddy advice woven into these classes executes *in* the bootstrap classloader's namespace, which cannot see agent classes by name. The bridge:
 
 1. At startup, `BootstrapDispatcher.class` bytecode (plus the few types woven advice references) is extracted from the agent JAR, written to a temp JAR, and appended to the bootstrap classpath via `Instrumentation.appendToBootstrapClassLoaderSearch`
-2. A 78-slot `MethodHandle[]` array (`BootstrapDispatcher.HANDLE_COUNT`) is built against `BridgeDelegate.class` using `MethodHandles.publicLookup()` and wired into `BootstrapDispatcher.install()` via reflection against the bootstrap-classloader version (`Class.forName("...BootstrapDispatcher", true, null)`)
+2. A 79-slot `MethodHandle[]` array (`BootstrapDispatcher.HANDLE_COUNT`) is built against `BridgeDelegate.class` using `MethodHandles.publicLookup()` and wired into `BootstrapDispatcher.install()` via reflection against the bootstrap-classloader version (`Class.forName("...BootstrapDispatcher", true, null)`)
 3. `handles` is written to the `volatile` field **before** `delegate` — the Java Memory Model's happens-before rule on volatile writes guarantees any thread that observes `delegate != null` also observes the fully-initialized `handles` array
 
 ### Reentrancy Guard
