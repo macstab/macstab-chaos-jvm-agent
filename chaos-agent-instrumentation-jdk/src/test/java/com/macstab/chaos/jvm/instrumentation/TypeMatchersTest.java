@@ -67,6 +67,48 @@ class TypeMatchersTest {
         .hasToString(ElementMatchers.isSubTypeOf(java.util.Queue.class).toString());
   }
 
+  /** An application's own BlockingQueue. */
+  abstract static class AppQueue<E> extends java.util.concurrent.LinkedBlockingQueue<E> {}
+
+  @Test
+  @DisplayName("a JDK class is walked only when named with a JDK prefix; any other class always")
+  void jdkClassesNeedTheirPrefix() {
+    final net.bytebuddy.agent.builder.AgentBuilder.RawMatcher queues =
+        TypeMatchers.jdkNamedOr(
+            TypeMatchers.subTypeOf(java.util.concurrent.BlockingQueue.class),
+            "java.util.concurrent.");
+    final net.bytebuddy.agent.builder.AgentBuilder.RawMatcher noJdkImplementation =
+        TypeMatchers.jdkNamedOr(TypeMatchers.subTypeOf(java.util.concurrent.BlockingQueue.class));
+    final TypeDescription jdkQueue =
+        TypeDescription.ForLoadedType.of(java.util.concurrent.ArrayBlockingQueue.class);
+    final TypeDescription appQueue = TypeDescription.ForLoadedType.of(AppQueue.class);
+    final net.bytebuddy.utility.JavaModule javaBase =
+        net.bytebuddy.utility.JavaModule.ofType(java.util.concurrent.ArrayBlockingQueue.class);
+    final net.bytebuddy.utility.JavaModule unnamed =
+        net.bytebuddy.utility.JavaModule.ofType(AppQueue.class);
+    final ClassLoader app = AppQueue.class.getClassLoader();
+
+    assertThat(queues.matches(jdkQueue, null, javaBase, null, null)).as("JDK, prefixed").isTrue();
+    assertThat(noJdkImplementation.matches(jdkQueue, null, javaBase, null, null))
+        .as("JDK, not prefixed: not walked")
+        .isFalse();
+    assertThat(
+            noJdkImplementation.matches(
+                jdkQueue, ClassLoader.getPlatformClassLoader(), javaBase, null, null))
+        .as("platform loader, not prefixed")
+        .isFalse();
+    assertThat(noJdkImplementation.matches(appQueue, app, unnamed, null, null))
+        .as("an application class is walked")
+        .isTrue();
+    assertThat(noJdkImplementation.matches(appQueue, null, unnamed, null, null))
+        .as("a class appended to the boot class path is walked")
+        .isTrue();
+    assertThat(noJdkImplementation.matches(appQueue, null, null, null, null))
+        .as("no module known: walked")
+        .isTrue();
+    assertThat(queues.toString()).contains("java.util.concurrent.");
+  }
+
   @Test
   @DisplayName("any other failure of the matcher is not swallowed")
   void otherFailuresPropagate() {

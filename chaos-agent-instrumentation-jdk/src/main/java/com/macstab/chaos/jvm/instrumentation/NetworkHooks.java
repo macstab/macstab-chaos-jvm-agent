@@ -66,10 +66,12 @@ final class NetworkHooks {
                                     ElementMatchers.takesArguments(
                                         java.util.function.Consumer.class)))))
         .type(
-            TypeMatchers.subTypeOf(java.nio.channels.spi.AbstractSelector.class)
-                .and(ElementMatchers.not(ElementMatchers.isAbstract()))
-                .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+            TypeMatchers.jdkNamedOr(
+                TypeMatchers.subTypeOf(java.nio.channels.spi.AbstractSelector.class)
+                    .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
+                "sun.nio.ch."))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
@@ -97,10 +99,12 @@ final class NetworkHooks {
         // possibly vendor variants) where the actual I/O code lives. Exclude abstract /
         // synthetic matches to avoid VerifyError on bridge methods.
         .type(
-            TypeMatchers.subTypeOf(java.nio.channels.SocketChannel.class)
-                .and(ElementMatchers.not(ElementMatchers.isAbstract()))
-                .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+            TypeMatchers.jdkNamedOr(
+                TypeMatchers.subTypeOf(java.nio.channels.SocketChannel.class)
+                    .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
+                "sun.nio.ch."))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
@@ -135,10 +139,12 @@ final class NetworkHooks {
                                         java.nio.ByteBuffer[].class, int.class, int.class)))))
         // NIO ServerSocketChannel — same abstract-base issue as SocketChannel above.
         .type(
-            TypeMatchers.subTypeOf(java.nio.channels.ServerSocketChannel.class)
-                .and(ElementMatchers.not(ElementMatchers.isAbstract()))
-                .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+            TypeMatchers.jdkNamedOr(
+                TypeMatchers.subTypeOf(java.nio.channels.ServerSocketChannel.class)
+                    .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
+                "sun.nio.ch."))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
@@ -236,10 +242,12 @@ final class NetworkHooks {
   static AgentBuilder applySocketChannelTransformations(final AgentBuilder builder) {
     return builder
         .type(
-            TypeMatchers.subTypeOf(java.nio.channels.SocketChannel.class)
-                .and(ElementMatchers.not(ElementMatchers.isAbstract()))
-                .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+            TypeMatchers.jdkNamedOr(
+                TypeMatchers.subTypeOf(java.nio.channels.SocketChannel.class)
+                    .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
+                "sun.nio.ch."))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
@@ -300,10 +308,12 @@ final class NetworkHooks {
                                     ElementMatchers.takesArguments(
                                         byte[].class, int.class, int.class)))))
         .type(
-            TypeMatchers.subTypeOf(java.nio.channels.ServerSocketChannel.class)
-                .and(ElementMatchers.not(ElementMatchers.isAbstract()))
-                .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+            TypeMatchers.jdkNamedOr(
+                TypeMatchers.subTypeOf(java.nio.channels.ServerSocketChannel.class)
+                    .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
+                "sun.nio.ch."))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
@@ -386,10 +396,12 @@ final class NetworkHooks {
     AgentBuilder agentBuilder =
         builder
             .type(
-                TypeMatchers.subTypeOf(javax.net.ssl.SSLSocket.class)
-                    .and(ElementMatchers.not(ElementMatchers.isAbstract()))
-                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+                TypeMatchers.jdkNamedOr(
+                    TypeMatchers.subTypeOf(javax.net.ssl.SSLSocket.class)
+                        .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                        .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                        .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
+                    "sun.security.ssl."))
             .transform(
                 (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                     typeBuilder.visit(
@@ -407,10 +419,12 @@ final class NetworkHooks {
     agentBuilder =
         agentBuilder
             .type(
-                TypeMatchers.subTypeOf(javax.net.ssl.SSLEngine.class)
-                    .and(ElementMatchers.not(ElementMatchers.isAbstract()))
-                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+                TypeMatchers.jdkNamedOr(
+                    TypeMatchers.subTypeOf(javax.net.ssl.SSLEngine.class)
+                        .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                        .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                        .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
+                    "sun.security.ssl."))
             .transform(
                 (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                     typeBuilder.visit(

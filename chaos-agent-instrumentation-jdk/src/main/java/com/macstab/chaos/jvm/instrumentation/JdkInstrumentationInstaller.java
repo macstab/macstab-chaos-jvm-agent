@@ -1256,9 +1256,10 @@ public final class JdkInstrumentationInstaller {
     // takesArgument(0, String.class) is sufficient and binds to all overloads.
     return agentBuilder
         .type(
-            TypeMatchers.superType(ElementMatchers.named("java.sql.Statement"))
-                .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+            TypeMatchers.jdkNamedOr(
+                TypeMatchers.superType(ElementMatchers.named("java.sql.Statement"))
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                    .and(ElementMatchers.not(ElementMatchers.isSynthetic()))))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
@@ -1290,9 +1291,10 @@ public final class JdkInstrumentationInstaller {
                                 .and(ElementMatchers.takesArguments(0))
                                 .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
         .type(
-            TypeMatchers.superType(ElementMatchers.named("java.sql.PreparedStatement"))
-                .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+            TypeMatchers.jdkNamedOr(
+                TypeMatchers.superType(ElementMatchers.named("java.sql.PreparedStatement"))
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                    .and(ElementMatchers.not(ElementMatchers.isSynthetic()))))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
@@ -1303,9 +1305,10 @@ public final class JdkInstrumentationInstaller {
                             .and(ElementMatchers.takesArguments(0))
                             .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
         .type(
-            TypeMatchers.superType(ElementMatchers.named("java.sql.Connection"))
-                .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+            TypeMatchers.jdkNamedOr(
+                TypeMatchers.superType(ElementMatchers.named("java.sql.Connection"))
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                    .and(ElementMatchers.not(ElementMatchers.isSynthetic()))))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
@@ -1357,9 +1360,11 @@ public final class JdkInstrumentationInstaller {
     // methods. Target concrete subtypes (e.g. JmxMBeanServer) instead.
     return agentBuilder
         .type(
-            TypeMatchers.subTypeOf(javax.management.MBeanServer.class)
-                .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+            TypeMatchers.jdkNamedOr(
+                TypeMatchers.subTypeOf(javax.management.MBeanServer.class)
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
+                "com.sun.jmx."))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
@@ -1550,8 +1555,9 @@ public final class JdkInstrumentationInstaller {
   private static AgentBuilder applyR2dbcTransformations(final AgentBuilder builder) {
     return builder
         .type(
-            TypeMatchers.superType(ElementMatchers.named("io.r2dbc.spi.Statement"))
-                .and(ElementMatchers.not(ElementMatchers.isInterface())))
+            TypeMatchers.jdkNamedOr(
+                TypeMatchers.superType(ElementMatchers.named("io.r2dbc.spi.Statement"))
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(

@@ -1,9 +1,14 @@
 package com.macstab.chaos.jvm.instrumentation;
 
+import java.security.ProtectionDomain;
+import java.util.List;
+import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.matcher.ElementMatcher;
 import net.bytebuddy.matcher.ElementMatchers;
 import net.bytebuddy.pool.TypePool;
+import net.bytebuddy.utility.JavaModule;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Type matchers that walk a type's hierarchy, for which a type whose supertype cannot be resolved
@@ -51,6 +56,69 @@ final class TypeMatchers {
   static <T extends TypeDescription> ElementMatcher.Junction<T> superClass(
       final ElementMatcher<? super TypeDescription> matcher) {
     return new Resolvable<>(ElementMatchers.hasSuperClass(matcher));
+  }
+
+  /**
+   * Restricts {@code types}, a matcher that walks a hierarchy the JDK implements, to the JDK
+   * classes named with one of {@code jdkPrefixes}: a JDK class (one of a named module of the
+   * bootstrap or platform class loader) with another name is not matched and its hierarchy not
+   * walked. The hierarchy walk resolves every supertype of every class defined while the hook group
+   * is woven, which made each class load several times slower for the rest of the JVM's life; the
+   * JDK's own implementations of these types are few and known, so its other classes skip the walk.
+   * A class of any other loader, also one appended to the boot class path, is walked as before.
+   *
+   * @param types the hierarchy matcher
+   * @param jdkPrefixes the name prefixes of the JDK's implementations; none when the JDK has none
+   * @return the matcher
+   */
+  static AgentBuilder.RawMatcher jdkNamedOr(
+      final ElementMatcher<? super TypeDescription> types, final String... jdkPrefixes) {
+    return new JdkNamedOr(types, List.of(jdkPrefixes));
+  }
+
+  /** See {@link #jdkNamedOr}. */
+  private static final class JdkNamedOr implements AgentBuilder.RawMatcher {
+
+    private final ElementMatcher<? super TypeDescription> types;
+    private final List<String> jdkPrefixes;
+
+    JdkNamedOr(
+        final ElementMatcher<? super TypeDescription> types, final List<String> jdkPrefixes) {
+      this.types = types;
+      this.jdkPrefixes = jdkPrefixes;
+    }
+
+    @Override
+    @SuppressWarnings("ReferenceEquality") // a class loader's identity
+    public boolean matches(
+        final TypeDescription typeDescription,
+        final @Nullable ClassLoader classLoader,
+        final @Nullable JavaModule module,
+        final @Nullable Class<?> classBeingRedefined,
+        final @Nullable ProtectionDomain protectionDomain) {
+      final boolean jdkClass =
+          (classLoader == null || classLoader == ClassLoader.getPlatformClassLoader())
+              && module != null
+              && module.isNamed();
+      if (jdkClass && !hasJdkPrefix(typeDescription.getName())) {
+        return false;
+      }
+      return types.matches(typeDescription);
+    }
+
+    private boolean hasJdkPrefix(final String name) {
+      for (final String prefix : jdkPrefixes) {
+        if (name.startsWith(prefix)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    @Override
+    public String toString() {
+      return types + " (JDK classes: " + jdkPrefixes + ")";
+    }
   }
 
   /** A matcher for which a type pool miss while walking the hierarchy is no match. */

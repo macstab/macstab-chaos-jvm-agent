@@ -605,7 +605,18 @@ See [configuration-reference.md §11](configuration-reference.md#11-performance-
 
 ## Retransformation Cost (on-demand weaving)
 
-`AgentBuilder.installOn(instrumentation)` with `RETRANSFORMATION` strategy triggers bytecode rewriting of every matched JDK class. With on-demand weaving (the default), nothing is woven at JVM startup: a JVM without scenarios runs unmodified JDK classes. The first activation that needs a hook group pays that group's one-time retransformation cost, proportional to the number of classes it targets and their method counts; later activations of the same group pay nothing. With `instrumentation=eager` every group is woven at start, as in 1.x — expected range 50–500 ms for the full suite on JDK 21, added to JVM startup time. Either way there is no ongoing cost.
+`AgentBuilder.installOn(instrumentation)` with `RETRANSFORMATION` strategy triggers bytecode rewriting of every matched JDK class. With on-demand weaving (the default), nothing is woven at JVM startup: a JVM without scenarios runs unmodified JDK classes. The first activation that needs a hook group pays that group's one-time retransformation cost, proportional to the number of classes it targets and their method counts; later activations of the same group pay nothing. With `instrumentation=eager` every group is woven at start, as in 1.x, and that retransformation is added to JVM startup time.
+
+A woven group also costs on every later class load, for the rest of the JVM's life (groups stay woven until uninstall): the groups whose hooks target the implementations of an interface or abstract type (JDBC `Statement` / `Connection`, R2DBC `Statement`, `BlockingQueue`, `SocketChannel` / `ServerSocketChannel` / `AbstractSelector`, `SSLSocket` / `SSLEngine`, `MBeanServer`) resolve the supertypes of each class defined while they are woven. The JDK's own classes skip that walk unless they are named like its implementations of these types (`sun.nio.ch.`, `sun.security.ssl.`, `com.sun.jmx.`, `java.util.concurrent.`); an application or library class is still walked. Measured on JDK 21 (Apple M-series, median of five runs; `Class.forName` without initialisation):
+
+| Woven | 3,000 `java.desktop` classes | 737 classes of `jackson-databind` (own class loader) |
+|---|---|---|
+| no agent / agent without a scenario | 60 ms | 80–100 ms |
+| one of the groups above (e.g. JDBC, `BlockingQueue`, SSL, NIO, JMX) | 81–92 ms | 220–270 ms |
+| a group with a name-prefixed type matcher (gRPC, file I/O) | 88–96 ms | 77–84 ms |
+| `instrumentation=eager` | 178 ms | 875 ms |
+
+So an application that loads many classes after a JDBC, queue, socket-channel, TLS or JMX scenario was first activated (or with `instrumentation=eager`) loads them about 2.5 times (one group) to 10 times (eager) slower than without the agent; prefer on-demand weaving and activate those scenarios after start-up where class loading matters.
 
 ---
 
