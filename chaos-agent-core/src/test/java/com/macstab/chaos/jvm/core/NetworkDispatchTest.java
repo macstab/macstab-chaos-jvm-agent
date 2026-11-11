@@ -241,6 +241,29 @@ class NetworkDispatchTest {
     }
 
     @Test
+    @DisplayName("a connect of a connected socket is not evaluated: the live connection stays open")
+    void connectOfAConnectedSocketKeepsTheConnection() throws Throwable {
+      activate(
+          "refused",
+          ChaosSelector.network(Set.of(OperationType.SOCKET_CONNECT)),
+          ChaosEffect.reject("refused"));
+      try (java.net.ServerSocket server =
+              new java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress());
+          java.net.Socket connected =
+              new java.net.Socket(
+                  java.net.InetAddress.getLoopbackAddress(), server.getLocalPort());
+          java.net.Socket accepted = server.accept()) {
+        assertThat(
+                runtime.beforeSocketConnect(
+                    connected, new java.net.InetSocketAddress("127.0.0.1", 9), 0))
+            .isNull();
+        assertThat(connected.isClosed()).isFalse();
+        assertThat(runtime.diagnostics().scenario("refused").orElseThrow().matchedCount()).isZero();
+        assertThat(accepted.isClosed()).isFalse();
+      }
+    }
+
+    @Test
     @DisplayName("a timeout never fires on a connect without a timeout")
     void timeoutNeverFiresOnAnInfiniteConnect() throws Throwable {
       activate(
@@ -575,19 +598,7 @@ class NetworkDispatchTest {
       final Socket reading = new Socket();
       final Socket connecting = new Socket();
       final java.nio.channels.SocketChannel channel = java.nio.channels.SocketChannel.open();
-      final Thread closer =
-          Thread.ofPlatform()
-              .start(
-                  () -> {
-                    try {
-                      Thread.sleep(100L);
-                      reading.close();
-                      connecting.close();
-                      channel.close();
-                    } catch (final Exception ignored) {
-                      // the stalls below then time out and fail the test
-                    }
-                  });
+      final Thread closer = closeAfter(100L, reading);
 
       final Duration read =
           timed(
@@ -595,6 +606,9 @@ class NetworkDispatchTest {
                   assertThatThrownBy(() -> runtime.beforeSocketRead(reading, 8, null, 0, 5_000))
                       .isInstanceOf(SocketException.class)
                       .isNotInstanceOf(SocketTimeoutException.class));
+      // Closed while the connect waits: a connect of an already closed socket is the JDK's own
+      // refusal and not evaluated.
+      final Thread connectCloser = closeAfter(100L, connecting, channel);
       final Duration connect =
           timed(
               () ->
@@ -608,10 +622,27 @@ class NetworkDispatchTest {
       assertThatThrownBy(() -> runtime.beforeSocketRead(channel, 8, null, 0, 5_000))
           .isInstanceOf(java.nio.channels.AsynchronousCloseException.class);
       closer.join();
+      connectCloser.join();
 
       assertThat(read).isLessThan(Duration.ofSeconds(2));
       assertThat(connect).isLessThan(Duration.ofSeconds(2));
       assertThat(NetworkDispatch.EndpointState.closed(new Object())).isFalse();
+    }
+
+    /** Closes {@code endpoints} on a thread of its own after {@code millis}. */
+    private Thread closeAfter(final long millis, final java.io.Closeable... endpoints) {
+      return Thread.ofPlatform()
+          .start(
+              () -> {
+                try {
+                  Thread.sleep(millis);
+                  for (final java.io.Closeable endpoint : endpoints) {
+                    endpoint.close();
+                  }
+                } catch (final Exception ignored) {
+                  // the stalls then time out and fail the test
+                }
+              });
     }
   }
 

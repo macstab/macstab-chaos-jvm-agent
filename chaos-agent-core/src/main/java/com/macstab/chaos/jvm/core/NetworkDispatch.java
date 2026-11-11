@@ -219,6 +219,11 @@ public final class NetworkDispatch {
     if (engine.idle(OperationType.SOCKET_CONNECT)) {
       return null;
     }
+    if (socket instanceof java.net.Socket plain && (plain.isConnected() || plain.isClosed())) {
+      // The JDK refuses it ("already connected", "Socket is closed") and keeps the connection:
+      // no connect is attempted, so there is none to fail, and the live connection stays open.
+      return null;
+    }
     final String remoteHost = extractRemoteHost(socketAddress);
     final InetSocketAddress inetSocketAddress =
         socketAddress instanceof InetSocketAddress address ? address : null;
