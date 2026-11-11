@@ -211,18 +211,21 @@ public final class ClientCallExtractor {
     if (known != null) {
       return known;
     }
-    boolean found = false;
+    boolean field = false;
+    boolean method = false;
     try {
       final Class<?> retryStream =
           Class.forName(GRPC_RETRY_STREAM, false, provider.getClassLoader());
-      if (retryStream.getDeclaredField("val$method") != null) {
-        for (final java.lang.reflect.Method method : retryStream.getDeclaredMethods()) {
-          found |= GRPC_NEW_SUBSTREAM.equals(method.getName());
-        }
+      for (final Field declared : retryStream.getDeclaredFields()) {
+        field |= "val$method".equals(declared.getName());
+      }
+      for (final Method declared : retryStream.getDeclaredMethods()) {
+        method |= GRPC_NEW_SUBSTREAM.equals(declared.getName());
       }
     } catch (final ReflectiveOperationException | LinkageError | RuntimeException absent) {
-      found = false;
+      // no such class in the provider's gRPC
     }
+    final boolean found = field && method;
     GRPC_ATTEMPT_HOOK.put(provider, found);
     return found;
   }

@@ -2857,7 +2857,7 @@ public final class BootstrapDispatcher {
   /** {@code DatagramChannelImpl.family}, once looked up; see {@link #channelFamily}. */
   private static volatile @Nullable MethodHandle family;
 
-  /** Whether {@link #family} was looked up (it stays {@code null} when the JDK lacks it). */
+  /** Whether {@link #family} was looked up. */
   private static volatile boolean familyLookedUp;
 
   /**
@@ -2874,16 +2874,18 @@ public final class BootstrapDispatcher {
         field.setAccessible(true);
         family = java.lang.invoke.MethodHandles.lookup().unreflectGetter(field);
       } catch (final ReflectiveOperationException | RuntimeException absent) {
-        family = null;
+        // No such field: every channel's family reads as unknown.
+        family =
+            java.lang.invoke.MethodHandles.dropArguments(
+                java.lang.invoke.MethodHandles.constant(java.net.ProtocolFamily.class, null),
+                0,
+                Object.class);
       }
       familyLookedUp = true;
     }
-    final MethodHandle getter = family;
-    if (getter == null) {
-      return null;
-    }
     try {
-      return (java.net.ProtocolFamily) getter.invoke(datagram);
+      return (java.net.ProtocolFamily)
+          java.util.Objects.requireNonNull(family, "family").invoke(datagram);
     } catch (final Throwable unreadable) {
       return null; // another channel implementation
     }

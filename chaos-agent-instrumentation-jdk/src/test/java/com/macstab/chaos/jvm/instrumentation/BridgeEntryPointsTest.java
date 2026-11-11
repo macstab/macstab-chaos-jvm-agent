@@ -178,6 +178,63 @@ class BridgeEntryPointsTest {
   }
 
   @Nested
+  @DisplayName("selector stalls")
+  class SelectorStalls {
+
+    private long stalledMillis(final java.nio.channels.Selector selector) throws Throwable {
+      final long start = System.nanoTime();
+      BootstrapDispatcher.beforeNioSelect(selector, 2_000L);
+      return (System.nanoTime() - start) / 1_000_000L;
+    }
+
+    @Test
+    @DisplayName("a wakeup made before the select ends its stall at once; it is kept only once")
+    void wakeupBeforeTheStall() throws Throwable {
+      activate(
+          new ChaosSelector.NioSelector(
+              Set.of(OperationType.NIO_SELECTOR_SELECT), NamePattern.any()),
+          ChaosEffect.timeout());
+      try (java.nio.channels.Selector selector = java.nio.channels.Selector.open()) {
+        BootstrapDispatcher.selectorWoken(selector);
+        assertThat(stalledMillis(selector)).as("after a wakeup").isLessThan(1_000L);
+        // Another object is no selector: nothing to keep, nothing to fail.
+        BootstrapDispatcher.selectorWoken(new Object());
+      }
+    }
+
+    @Test
+    @DisplayName("a closed selector's wakeup is not kept, and idle a wakeup clears a kept one")
+    void closedOrIdle() throws Throwable {
+      final ChaosActivationHandle timeout =
+          runtime.activate(
+              ChaosScenario.builder("select-timeout")
+                  .selector(
+                      new ChaosSelector.NioSelector(
+                          Set.of(OperationType.NIO_SELECTOR_SELECT), NamePattern.any()))
+                  .effect(ChaosEffect.timeout())
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final java.nio.channels.Selector closed = java.nio.channels.Selector.open();
+      closed.close();
+      BootstrapDispatcher.selectorWoken(closed);
+      // The real select of a closed selector throws; it is not stalled.
+      assertThat(BootstrapDispatcher.beforeNioSelect(closed, 2_000L)).isFalse();
+
+      try (java.nio.channels.Selector selector = java.nio.channels.Selector.open()) {
+        // A select that proceeds (no timeout to wait out) consumes the kept wakeup, as the real
+        // select consumes the JDK's own.
+        BootstrapDispatcher.selectorWoken(selector);
+        assertThat(BootstrapDispatcher.beforeNioSelect(selector, 0L)).isFalse();
+        BootstrapDispatcher.selectorWoken(selector);
+        timeout.close();
+        BootstrapDispatcher.selectorWoken(selector); // idle: the kept wakeup is dropped
+        BootstrapDispatcher.selectorWoken(selector); // idle, nothing kept
+        assertThat(BootstrapDispatcher.beforeNioSelect(selector, 0L)).isFalse();
+      }
+    }
+  }
+
+  @Nested
   @DisplayName("datagrams")
   class Datagrams {
 
@@ -251,6 +308,18 @@ class BridgeEntryPointsTest {
         assertThat(BootstrapDispatcher.beforeDatagramSend(connected, pattern(4), other, false))
             .as("a destination other than the connected peer")
             .isZero();
+        // An IPv6 destination of an IPv4 channel is refused where the bridge can read the
+        // channel's family (sun.nio.ch opened to it by the agent): DatagramEndToEndTest.
+        final InetSocketAddress ipv6 = new InetSocketAddress("::1", 9);
+        try (java.nio.channels.DatagramChannel inet6 =
+            java.nio.channels.DatagramChannel.open(java.net.StandardProtocolFamily.INET6)) {
+          assertThat(BootstrapDispatcher.beforeDatagramSend(inet6, pattern(4), ipv6, false))
+              .as("an IPv6 destination of an IPv6 channel")
+              .isEqualTo(5);
+          assertThat(BootstrapDispatcher.beforeDatagramSend(this, pattern(4), ipv6, false))
+              .as("another kind of channel: no family to check")
+              .isEqualTo(5);
+        }
         assertThat(BootstrapDispatcher.beforeDatagramSend(unconnected, pattern(4), peer, false))
             .as("a send the JDK makes")
             .isEqualTo(5);
