@@ -29,6 +29,9 @@ public final class OperationTags {
   /** {@code DATAGRAM_SEND}. */
   public static final String DATAGRAM_SEND = "DATAGRAM_SEND";
 
+  /** {@code DNS_REVERSE}. */
+  public static final String DNS_REVERSE = "DNS_REVERSE";
+
   /** {@code EXECUTOR_AWAIT_TERMINATION}. */
   public static final String EXECUTOR_AWAIT_TERMINATION = "EXECUTOR_AWAIT_TERMINATION";
 

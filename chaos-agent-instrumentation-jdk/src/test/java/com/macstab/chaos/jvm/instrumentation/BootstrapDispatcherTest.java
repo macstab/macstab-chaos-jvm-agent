@@ -463,8 +463,10 @@ class BootstrapDispatcherTest {
           answering(BootstrapDispatcher.BEFORE_DATAGRAM, Integer.MIN_VALUE);
       BootstrapDispatcher.install(new Object(), handles);
 
-      assertThat(BootstrapDispatcher.beforeDatagramSend(executor, null, null)).isEqualTo(1);
-      assertThat(BootstrapDispatcher.dropDatagramPacket(executor, null)).isTrue();
+      assertThat(BootstrapDispatcher.beforeDatagramSend(executor, null, null, true)).isEqualTo(1);
+      assertThat(BootstrapDispatcher.dropDatagramPacket(executor, null))
+          .as("no packet: left to the JDK's own NullPointerException")
+          .isFalse();
       assertThat(
               BootstrapDispatcher.dropDatagramPacket(
                   executor, new java.net.DatagramPacket(new byte[4], 4)))
@@ -506,6 +508,44 @@ class BootstrapDispatcherTest {
       assertThat(dropped).isZero();
       // The packet's InetSocketAddress costs 40 bytes per call, i.e. 400 KB over 10,000 calls.
       assertThat(allocated).as("bytes allocated by idle datagram sends").isLessThan(calls);
+    }
+
+    @Test
+    @DisplayName("an idle reverse lookup allocates nothing: the idle check runs before the address")
+    void idleReverseLookupDoesNotAllocate() throws Throwable {
+      final MethodHandle[] handles = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
+      handles[BootstrapDispatcher.IDLE] = answering(BootstrapDispatcher.IDLE, true);
+      handles[BootstrapDispatcher.BEFORE_DNS_REVERSE] =
+          java.lang.invoke.MethodHandles.empty(
+              JdkInstrumentationInstaller.buildMethodHandles()[
+                  BootstrapDispatcher.BEFORE_DNS_REVERSE]
+                  .type()
+                  .changeParameterType(0, Object.class));
+      BootstrapDispatcher.install(new Object(), handles);
+      final java.net.InetAddress address =
+          java.net.InetAddress.getByAddress(new byte[] {10, 0, 0, 1});
+      final int calls = 10_000;
+      final com.sun.management.ThreadMXBean threads =
+          (com.sun.management.ThreadMXBean)
+              java.lang.management.ManagementFactory.getThreadMXBean();
+      final long threadId = Thread.currentThread().threadId();
+      // The first round warms up the method-handle adaptation, which allocates once.
+      for (int i = 0; i < calls; i++) {
+        BootstrapDispatcher.reverseLookupFails(address);
+      }
+
+      int failed = 0;
+      final long before = threads.getThreadAllocatedBytes(threadId);
+      for (int i = 0; i < calls; i++) {
+        if (BootstrapDispatcher.reverseLookupFails(address)) {
+          failed++;
+        }
+      }
+      final long allocated = threads.getThreadAllocatedBytes(threadId) - before;
+
+      assertThat(failed).isZero();
+      // getHostAddress() builds a String of at least 40 bytes per call.
+      assertThat(allocated).as("bytes allocated by idle reverse lookups").isLessThan(calls);
     }
 
     /** A handle of the delegate's shape for {@code slot} that returns {@code answer}. */
@@ -652,7 +692,7 @@ class BootstrapDispatcherTest {
     void missingBuffers() throws Throwable {
       assertThat(BootstrapDispatcher.beforeSocketChannelWrite(executor, (ByteBuffer) null))
           .isNull();
-      assertThat(BootstrapDispatcher.beforeDatagramSend(executor, null, null)).isZero();
+      assertThat(BootstrapDispatcher.beforeDatagramSend(executor, null, null, true)).isZero();
       assertThat(BootstrapDispatcher.dropDatagramPacket(executor, null)).isFalse();
       assertThat(BootstrapDispatcher.corruptDatagramPacket(executor, null)).isFalse();
     }

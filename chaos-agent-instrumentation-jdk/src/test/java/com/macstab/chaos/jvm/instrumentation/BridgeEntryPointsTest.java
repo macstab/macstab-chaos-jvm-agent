@@ -186,7 +186,7 @@ class BridgeEntryPointsTest {
     void droppedSend() throws Throwable {
       activate(network(OperationType.DATAGRAM_SEND), ChaosEffect.suppress());
       final ByteBuffer source = pattern(12);
-      assertThat(BootstrapDispatcher.beforeDatagramSend(this, source, null)).isEqualTo(13);
+      assertThat(BootstrapDispatcher.beforeDatagramSend(this, source, null, true)).isEqualTo(13);
       assertThat(source.hasRemaining()).isFalse();
       final java.net.DatagramPacket packet =
           new java.net.DatagramPacket(new byte[4], 4, new InetSocketAddress("127.0.0.1", 9));
@@ -197,7 +197,7 @@ class BridgeEntryPointsTest {
     @DisplayName("without a scenario a datagram is sent and received unchanged")
     void unchanged() throws Throwable {
       final ByteBuffer source = pattern(12);
-      assertThat(BootstrapDispatcher.beforeDatagramSend(this, source, null)).isZero();
+      assertThat(BootstrapDispatcher.beforeDatagramSend(this, source, null, true)).isZero();
       assertThat(source.remaining()).isEqualTo(12);
       assertThat(BootstrapDispatcher.beforeDatagramReceive(this, ByteBuffer.allocate(8))).isNull();
       assertThat(BootstrapDispatcher.beforeDatagramReceive(this, null)).isNull();
@@ -205,6 +205,105 @@ class BridgeEntryPointsTest {
               BootstrapDispatcher.corruptDatagramPacket(
                   this, new java.net.DatagramPacket(new byte[4], 4)))
           .isFalse();
+    }
+
+    @Test
+    @DisplayName("a suppressed send the JDK would refuse is not dropped: it proceeds to fail")
+    void refusedSendIsNotDropped() throws Throwable {
+      activate(network(OperationType.DATAGRAM_SEND), ChaosEffect.suppress());
+      final InetSocketAddress peer = new InetSocketAddress(InetAddress.getLoopbackAddress(), 9);
+      final InetSocketAddress other = new InetSocketAddress(InetAddress.getLoopbackAddress(), 10);
+      final java.nio.channels.DatagramChannel closed = java.nio.channels.DatagramChannel.open();
+      closed.close();
+      try (java.nio.channels.DatagramChannel unconnected =
+              java.nio.channels.DatagramChannel.open();
+          java.nio.channels.DatagramChannel connected =
+              java.nio.channels.DatagramChannel.open().connect(peer);
+          java.nio.channels.DatagramChannel nonBlocking =
+              java.nio.channels.DatagramChannel.open()) {
+        nonBlocking.configureBlocking(false);
+
+        assertThat(BootstrapDispatcher.beforeDatagramSend(closed, pattern(4), peer, false))
+            .as("closed")
+            .isZero();
+        assertThat(BootstrapDispatcher.beforeDatagramSend(unconnected, pattern(4), null, true))
+            .as("a write of an unconnected channel")
+            .isZero();
+        assertThat(BootstrapDispatcher.beforeDatagramSend(unconnected, pattern(4), null, false))
+            .as("no destination")
+            .isZero();
+        assertThat(
+                BootstrapDispatcher.beforeDatagramSend(
+                    unconnected,
+                    pattern(4),
+                    InetSocketAddress.createUnresolved("nowhere.invalid", 9),
+                    false))
+            .as("an unresolved destination")
+            .isZero();
+        assertThat(
+                BootstrapDispatcher.beforeDatagramSend(
+                    unconnected,
+                    pattern(4),
+                    new InetSocketAddress(InetAddress.getLoopbackAddress(), 0),
+                    false))
+            .as("port 0")
+            .isZero();
+        assertThat(BootstrapDispatcher.beforeDatagramSend(connected, pattern(4), other, false))
+            .as("a destination other than the connected peer")
+            .isZero();
+        assertThat(BootstrapDispatcher.beforeDatagramSend(unconnected, pattern(4), peer, false))
+            .as("a send the JDK makes")
+            .isEqualTo(5);
+        assertThat(BootstrapDispatcher.beforeDatagramSend(connected, pattern(4), peer, false))
+            .as("a send to the connected peer")
+            .isEqualTo(5);
+        assertThat(BootstrapDispatcher.beforeDatagramSend(connected, pattern(4), null, true))
+            .as("a write of a connected channel")
+            .isEqualTo(5);
+
+        assertThat(
+                BootstrapDispatcher.dropDatagramPacket(
+                    unconnected, new java.net.DatagramPacket(new byte[4], 4)))
+            .as("a packet without an address on an unconnected socket")
+            .isFalse();
+        assertThat(
+                BootstrapDispatcher.dropDatagramPacket(
+                    nonBlocking, new java.net.DatagramPacket(new byte[4], 4, peer)))
+            .as("a non-blocking channel")
+            .isFalse();
+        assertThat(
+                BootstrapDispatcher.dropDatagramPacket(
+                    closed, new java.net.DatagramPacket(new byte[4], 4, peer)))
+            .as("closed")
+            .isFalse();
+        assertThat(
+                BootstrapDispatcher.dropDatagramPacket(
+                    unconnected, new java.net.DatagramPacket(new byte[4], 4, peer)))
+            .as("a packet with an address")
+            .isTrue();
+        final java.net.DatagramPacket toPeer = new java.net.DatagramPacket(new byte[4], 4);
+        assertThat(BootstrapDispatcher.dropDatagramPacket(connected, toPeer))
+            .as("a connected socket's packet without an address")
+            .isTrue();
+        assertThat(toPeer.getSocketAddress()).isEqualTo(peer);
+      }
+    }
+
+    @Test
+    @DisplayName("a packet receive counts the packet's window, also once the packet is reused")
+    void packetWindow() throws Throwable {
+      activate(
+          new ChaosSelector.NetworkSelector(
+              Set.of(OperationType.DATAGRAM_RECEIVE), NamePattern.any(), null, null, 200L, 300L),
+          ChaosEffect.corruptRead());
+      final java.net.DatagramPacket window = new java.net.DatagramPacket(new byte[1024], 512, 256);
+      assertThat(BootstrapDispatcher.corruptDatagramPacket(this, window)).isTrue();
+      assertThat(
+              BootstrapDispatcher.corruptDatagramPacket(
+                  this, new java.net.DatagramPacket(new byte[1024], 1024)))
+          .as("the whole array")
+          .isFalse();
+      assertThat(BootstrapDispatcher.corruptDatagramPacket(this, null)).isFalse();
     }
 
     @Test

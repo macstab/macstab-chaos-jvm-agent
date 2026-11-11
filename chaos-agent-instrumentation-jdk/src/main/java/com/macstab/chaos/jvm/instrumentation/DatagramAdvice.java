@@ -28,7 +28,7 @@ final class DatagramAdvice {
         @Advice.Argument(0) final java.nio.ByteBuffer source,
         @Advice.Argument(1) final Object target)
         throws Throwable {
-      return BootstrapDispatcher.beforeDatagramSend(channel, source, target);
+      return BootstrapDispatcher.beforeDatagramSend(channel, source, target, false);
     }
 
     @Advice.OnMethodExit
@@ -45,7 +45,7 @@ final class DatagramAdvice {
     static int enter(
         @Advice.This final Object channel, @Advice.Argument(0) final java.nio.ByteBuffer source)
         throws Throwable {
-      return BootstrapDispatcher.beforeDatagramSend(channel, source, null);
+      return BootstrapDispatcher.beforeDatagramSend(channel, source, null, true);
     }
 
     @Advice.OnMethodExit

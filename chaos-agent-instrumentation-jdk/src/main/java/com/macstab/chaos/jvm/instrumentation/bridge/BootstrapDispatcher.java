@@ -599,7 +599,7 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #adjustClockReadMillis(long)}. */
   public static final int ADJUST_CLOCK_READ_MILLIS = 72;
 
-  /** Handle index for {@link #beforeDatagramSend(Object, java.nio.ByteBuffer, Object)}. */
+  /** Handle index for {@link #beforeDatagramSend(Object, java.nio.ByteBuffer, Object, boolean)}. */
   public static final int BEFORE_DATAGRAM = 73;
 
   /** Handle index for {@link #reverseLookupFails(java.net.InetAddress)}. */
@@ -2701,17 +2701,29 @@ public final class BootstrapDispatcher {
    * Called before a datagram is sent from {@code source} ({@code DatagramChannel.send}, {@code
    * write}). A dropped datagram is consumed from the buffer, as a sent one is.
    *
+   * <p>A send the JDK would refuse (a closed channel, a {@code write} of an unconnected one, an
+   * unresolved destination, a destination other than the connected peer, port 0) is not evaluated:
+   * it proceeds and fails as the real call does, instead of a drop reporting success.
+   *
    * @param channel the datagram channel
    * @param source the datagram's bytes
-   * @param target the destination, or {@code null} for the connected peer
+   * @param target the destination of a {@code send}; {@code null} for a {@code write}
+   * @param write {@code true} for {@code write} (to the connected peer), {@code false} for {@code
+   *     send}
    * @return {@code 0} to send; the byte count plus one to report without sending (dropped)
    * @throws Throwable if an active scenario fails the send
    */
   public static int beforeDatagramSend(
-      final Object channel, final java.nio.ByteBuffer source, final @Nullable Object target)
+      final Object channel,
+      final java.nio.ByteBuffer source,
+      final @Nullable Object target,
+      final boolean write)
       throws Throwable {
     if (DEPTH.get()[SCOPE_DATAGRAM_SEND] > 0) {
       return 0; // inside a DatagramSocket.send, which was evaluated already
+    }
+    if (idle(OperationTags.DATAGRAM_SEND) || !sendable(channel, target, write)) {
+      return 0;
     }
     final int length = source == null ? 0 : source.remaining();
     if (datagram(OperationTags.DATAGRAM_SEND, channel, target, length) != Integer.MIN_VALUE) {
@@ -2734,15 +2746,61 @@ public final class BootstrapDispatcher {
    */
   public static boolean dropDatagramPacket(
       final Object channel, final java.net.DatagramPacket packet) throws Throwable {
-    if (idle(OperationTags.DATAGRAM_SEND)) {
+    if (idle(OperationTags.DATAGRAM_SEND) || packet == null) {
       return false;
     }
-    return datagram(
-            OperationTags.DATAGRAM_SEND,
-            channel,
-            packet == null || packet.getAddress() == null ? null : packet.getSocketAddress(),
-            packet == null ? 0 : packet.getLength())
-        == Integer.MIN_VALUE;
+    final java.nio.channels.@Nullable DatagramChannel datagram =
+        channel instanceof java.nio.channels.DatagramChannel open ? open : null;
+    final boolean addressed = packet.getAddress() != null;
+    final java.net.@Nullable SocketAddress target =
+        addressed ? packet.getSocketAddress() : datagram == null ? null : connectedPeer(datagram);
+    if (datagram != null
+        && (target == null || !datagram.isBlocking() || !sendable(datagram, target, false))) {
+      return false; // the JDK refuses it ("Address not set", a closed channel): it fails for real
+    }
+    if (datagram(OperationTags.DATAGRAM_SEND, channel, target, packet.getLength())
+        != Integer.MIN_VALUE) {
+      return false;
+    }
+    if (!addressed && target instanceof java.net.InetSocketAddress remote) {
+      // As the JDK's send of a connected socket: the packet carries the peer afterwards.
+      packet.setAddress(remote.getAddress());
+      packet.setPort(remote.getPort());
+    }
+    return true;
+  }
+
+  /**
+   * Whether the JDK would send this datagram, so a drop does not report success for a send that
+   * fails: the channel is open, a {@code write} needs a connected channel, and a {@code send}'s
+   * destination is resolved, not port 0, and the connected peer when the channel is connected.
+   */
+  private static boolean sendable(
+      final Object channel, final @Nullable Object target, final boolean write) {
+    if (!(channel instanceof java.nio.channels.DatagramChannel datagram)) {
+      return true;
+    }
+    if (!datagram.isOpen()) {
+      return false;
+    }
+    final java.net.@Nullable SocketAddress peer = connectedPeer(datagram);
+    if (write) {
+      return peer != null;
+    }
+    if (!(target instanceof java.net.InetSocketAddress address) || address.isUnresolved()) {
+      return false;
+    }
+    return peer == null ? address.getPort() != 0 : peer.equals(target);
+  }
+
+  /** The connected peer of {@code datagram}, or {@code null} when unconnected or closed. */
+  private static java.net.@Nullable SocketAddress connectedPeer(
+      final java.nio.channels.DatagramChannel datagram) {
+    try {
+      return datagram.getRemoteAddress();
+    } catch (final java.io.IOException closed) {
+      return null;
+    }
   }
 
   /**
@@ -2777,12 +2835,62 @@ public final class BootstrapDispatcher {
    */
   public static boolean corruptDatagramPacket(
       final Object channel, final java.net.DatagramPacket packet) throws Throwable {
-    return datagram(
-            OperationTags.DATAGRAM_RECEIVE,
-            channel,
-            null,
-            packet == null ? 0 : packet.getData().length)
-        < 0;
+    if (idle(OperationTags.DATAGRAM_RECEIVE)) {
+      return false;
+    }
+    return datagram(OperationTags.DATAGRAM_RECEIVE, channel, null, receiveCapacity(packet)) < 0;
+  }
+
+  /**
+   * The most bytes a receive into {@code packet} takes: its buffer length ({@code bufLength}), read
+   * with the JDK's own accessor. The packet's {@code getLength()} is the last datagram received
+   * into it once it is reused, so it serves only when the accessor is not there; the space from the
+   * offset to the array's end bounds both.
+   */
+  private static int receiveCapacity(final java.net.@Nullable DatagramPacket packet) {
+    if (packet == null) {
+      return 0;
+    }
+    final int[] depth = DEPTH.get();
+    depth[0]++;
+    try {
+      final MethodHandle accessor = bufLengthAccessor();
+      if (accessor != null) {
+        return (int) accessor.invokeExact(packet);
+      }
+    } catch (final Throwable unreadable) {
+      // falls back below
+    } finally {
+      depth[0]--;
+    }
+    return Math.min(packet.getLength(), packet.getData().length - packet.getOffset());
+  }
+
+  /** The JDK's accessor of a packet's receive capacity, once looked up; see {@link #bufLength}. */
+  private static volatile @Nullable MethodHandle bufLength;
+
+  /** Whether {@link #bufLength} was looked up (it stays {@code null} when the JDK lacks it). */
+  private static volatile boolean bufLengthLookedUp;
+
+  /**
+   * {@code DatagramChannelImpl.DatagramPackets.getBufLength(DatagramPacket)}, the JDK's accessor of
+   * a packet's receive capacity ({@code sun.nio.ch} is opened to the bridge), or {@code null}. Two
+   * threads may both look it up the first time; they find the same accessor.
+   */
+  private static @Nullable MethodHandle bufLengthAccessor() {
+    if (!bufLengthLookedUp) {
+      try {
+        final java.lang.reflect.Method accessor =
+            Class.forName("sun.nio.ch.DatagramChannelImpl$DatagramPackets", false, null)
+                .getDeclaredMethod("getBufLength", java.net.DatagramPacket.class);
+        accessor.setAccessible(true);
+        bufLength = java.lang.invoke.MethodHandles.lookup().unreflect(accessor);
+      } catch (final ReflectiveOperationException | RuntimeException absent) {
+        bufLength = null;
+      }
+      bufLengthLookedUp = true;
+    }
+    return bufLength;
   }
 
   private static int datagram(
@@ -2817,6 +2925,10 @@ public final class BootstrapDispatcher {
     final MethodHandle[] h = handles;
     final Object d = delegate;
     if (depth[0] > 0 || d == null || h == null || address == null) {
+      return false;
+    }
+    // Idle first: getHostAddress() builds a new String on every call.
+    if (idle(OperationTags.DNS_REVERSE)) {
       return false;
     }
     depth[0]++;
