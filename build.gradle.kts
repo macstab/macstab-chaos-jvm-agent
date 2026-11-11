@@ -624,8 +624,10 @@ tasks.register("childJvmCoverage") {
 // implementation modules (core, instrumentation; docs/configuration-reference.md §14.2) and the
 // Quarkus deployment modules, whose build steps only Quarkus calls. Of the agent jar's module
 // (chaos-agent-bootstrap) only ChaosPlatform is API: its other public types are @Internal, so
-// api/chaos-agent-bootstrap.api records ChaosPlatform alone, and japicmp compares that class only
-// (the published artifact is the shaded jar, whose relocated libraries are no API).
+// api/chaos-agent-bootstrap.api records ChaosPlatform alone, and japicmp compares that class only:
+// the module's plain jar (the `jar` task, classifier "plain") against the released agent jar, which
+// is the shaded one. ChaosPlatform's signatures name only JDK and chaos-agent-api types, so the
+// relocated libraries the shaded jar adds play no part in the comparison.
 val nonApiModules = setOf(
     "chaos-agent-core",
     "chaos-agent-instrumentation-jdk",
