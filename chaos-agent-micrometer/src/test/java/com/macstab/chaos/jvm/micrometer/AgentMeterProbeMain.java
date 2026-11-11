@@ -9,6 +9,7 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.Set;
@@ -49,15 +50,15 @@ public final class AgentMeterProbeMain {
       System.out.println(
           "elapsedMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
       System.out.println("handleApplied=" + handle.appliedCount());
-      // The binder counts on an agent thread: wait until it has seen every application.
+      // The binder counts on an agent thread, the counter before the timer: wait until both have
+      // seen every application.
       final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-      while (applications(registry) < CALLS && System.nanoTime() < deadline) {
+      while ((applications(registry) < CALLS || delayTimerCount(registry) < CALLS)
+          && System.nanoTime() < deadline) {
         Thread.sleep(20);
       }
       System.out.println("applications=" + (long) applications(registry));
-      System.out.println(
-          "delayTimerCount="
-              + registry.get("chaos.injected.delay").tag("scenario", SCENARIO_ID).timer().count());
+      System.out.println("delayTimerCount=" + delayTimerCount(registry));
       System.out.println("hooksWoven=" + (long) registry.get("chaos.hooks.woven").gauge().value());
     } finally {
       executor.shutdownNow();
@@ -73,5 +74,10 @@ public final class AgentMeterProbeMain {
             .tag("effect", "delay")
             .counter();
     return counter == null ? 0 : counter.count();
+  }
+
+  private static long delayTimerCount(final SimpleMeterRegistry registry) {
+    final Timer timer = registry.find("chaos.injected.delay").tag("scenario", SCENARIO_ID).timer();
+    return timer == null ? 0 : timer.count();
   }
 }

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -57,10 +58,25 @@ class ChaosOpenTelemetryAgentTest {
     command.add("-cp");
     command.add(classpath);
     command.add(main.getName());
-    final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-    final String output =
-        new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertThat(process.waitFor(60, TimeUnit.SECONDS)).as(output).isTrue();
+    // The output goes to a file, so a child that hangs cannot block the read: it is waited for at
+    // most 60 s, and destroyed in any case.
+    final Path log = Files.createTempFile("chaos-agent-child", ".log");
+    final Process process =
+        new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile()).start();
+    final String output;
+    try {
+      final boolean finished = process.waitFor(60, TimeUnit.SECONDS);
+      if (!finished) {
+        process.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
+      }
+      output = Files.readString(log, StandardCharsets.UTF_8);
+      assertThat(finished).as("the child ended within 60 s: %s", output).isTrue();
+    } finally {
+      if (process.isAlive()) {
+        process.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
+      }
+      Files.deleteIfExists(log);
+    }
     assertThat(process.exitValue()).as(output).isZero();
     final Map<String, String> values = new HashMap<>();
     for (final String line : output.split("\n", -1)) {
