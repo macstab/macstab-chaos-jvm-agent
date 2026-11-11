@@ -9,4 +9,4 @@
 - [ ] A plan model change is recorded with `-PupdatePlanSchema`
 - [ ] A change to a law of `docs/semantics.md` comes with a test of the changed behaviour
 - [ ] A new hook is in `HookCoverageIntegrationTest` and its bridge slot in `docs/instrumentation.md` §7
-- [ ] `CHANGELOG.md` has an entry under "Unreleased"
+- [ ] The commit messages are conventional commits (`!` and a `BREAKING CHANGE:` footer for a breaking change); `CHANGELOG.md` is generated, never edited
