@@ -8,9 +8,11 @@ import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -24,6 +26,27 @@ class ProductionClassPathTest {
 
   private static final String TESTKIT_CLASS =
       "com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane";
+
+  @Test
+  @DisplayName("the module's runtime class path and its api variant leave the testkit out")
+  void publishedVariantsLeaveTheTestkitOut() {
+    final List<String> runtime = buildList("chaos.production.runtimeClasspath", File.pathSeparator);
+    final List<String> api = buildList("chaos.production.apiDependencies", ",");
+
+    assertThat(runtime)
+        .anyMatch(name -> name.startsWith("chaos-agent-api"))
+        .noneMatch(name -> name.startsWith("chaos-agent-testkit"));
+    assertThat(api)
+        .anyMatch(dependency -> dependency.endsWith(":chaos-agent-api"))
+        .noneMatch(dependency -> dependency.endsWith(":chaos-agent-testkit"));
+  }
+
+  /** The file names or coordinates the build hands the test in {@code property}. */
+  private static List<String> buildList(final String property, final String separator) {
+    final String value =
+        Objects.requireNonNull(System.getProperty(property), property + ", set by the build");
+    return Arrays.stream(value.split(separator, -1)).filter(entry -> !entry.isEmpty()).toList();
+  }
 
   @Test
   @DisplayName("an application context without the testkit starts and creates the chaos beans")

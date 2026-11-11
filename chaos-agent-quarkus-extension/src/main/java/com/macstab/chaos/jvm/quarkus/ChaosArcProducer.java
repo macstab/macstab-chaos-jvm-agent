@@ -35,9 +35,10 @@ import org.jspecify.annotations.Nullable;
  * ChaosQuarkusExtension}: what a test activates through an injected {@code ChaosControlPlane} is
  * stopped when the last running chaos test class ends, or when the application stops. The extension
  * runs in the class loader JUnit loaded it from, the producer in Quarkus's, so the producer reaches
- * it through the system class loader; the api is shared because it is a parent-first artifact.
- * Where the extension is not on the system class path, the bean is the untracked control plane and
- * one warning says so.
+ * it through the system class loader; the api is shared because it is a parent-first artifact. In a
+ * plain {@code @QuarkusTest} of a project without {@code chaos-agent-testkit} the bean is the
+ * untracked control plane, silently; where the testkit is there but the extension cannot be called,
+ * the bean is the untracked control plane and one warning says so.
  *
  * <h2>Usage</h2>
  *
@@ -63,6 +64,9 @@ public class ChaosArcProducer {
 
   /** The JUnit extension that tracks the bean in a test, loaded by the system class loader. */
   private static final String EXTENSION = "com.macstab.chaos.jvm.quarkus.ChaosQuarkusExtension";
+
+  /** A class of {@code chaos-agent-testkit}, which the test extension is built on. */
+  private static final String TESTKIT = "com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane";
 
   /** Default constructor required by CDI. */
   public ChaosArcProducer() {}
@@ -110,12 +114,33 @@ public class ChaosArcProducer {
 
   /**
    * Calls a static method of the system class loader's {@link ChaosQuarkusExtension} with {@code
-   * plane}; returns its result, or {@code null} with one warning when it cannot.
+   * plane}; returns its result, or {@code null} when it cannot.
    */
   private static @Nullable Object callExtension(
       final String method, final ChaosControlPlane plane) {
+    return callExtension(method, plane, ClassLoader.getSystemClassLoader());
+  }
+
+  /**
+   * Calls a static method of {@code loader}'s {@link ChaosQuarkusExtension} with {@code plane};
+   * returns its result, or {@code null} when it cannot. Without {@code chaos-agent-testkit} on
+   * {@code loader} (a plain {@code @QuarkusTest} of a project that does not declare it) there is no
+   * test extension to call: {@code null}, logged at {@code FINE} only; otherwise one warning says
+   * why the extension could not be called.
+   */
+  static @Nullable Object callExtension(
+      final String method, final ChaosControlPlane plane, final ClassLoader loader) {
     try {
-      final Class<?> extension = Class.forName(EXTENSION, true, ClassLoader.getSystemClassLoader());
+      Class.forName(TESTKIT, false, loader);
+    } catch (final ClassNotFoundException | LinkageError absent) {
+      LOGGER.fine(
+          () ->
+              "[chaos-agent] chaos-agent-testkit is not on the test class path; the injected"
+                  + " ChaosControlPlane is the untracked control plane");
+      return null;
+    }
+    try {
+      final Class<?> extension = Class.forName(EXTENSION, true, loader);
       return extension.getMethod(method, ChaosControlPlane.class).invoke(null, plane);
     } catch (final ClassNotFoundException
         | NoSuchMethodException

@@ -45,3 +45,24 @@ tasks.jar {
         attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.micronaut"
     }
 }
+
+// ProductionClassPathTest checks what a consumer of this module resolves: the file names of the
+// runtime class path and the coordinates of the api variant's dependencies, neither of which may
+// carry chaos-agent-testkit.
+tasks.test {
+    val runtimeClasspath = files(configurations.runtimeClasspath)
+    val apiDependencies =
+        configurations.apiElements.map { elements ->
+            elements.allDependencies.map { "${it.group}:${it.name}" }.sorted().joinToString(",")
+        }
+    inputs.files(runtimeClasspath).withNormalizer(ClasspathNormalizer::class).withPropertyName("productionRuntimeClasspath")
+    inputs.property("productionApiDependencies", apiDependencies)
+    jvmArgumentProviders.add(
+        CommandLineArgumentProvider {
+            listOf(
+                "-Dchaos.production.runtimeClasspath=" + runtimeClasspath.files.joinToString(File.pathSeparator) { it.name },
+                "-Dchaos.production.apiDependencies=" + apiDependencies.get(),
+            )
+        },
+    )
+}
