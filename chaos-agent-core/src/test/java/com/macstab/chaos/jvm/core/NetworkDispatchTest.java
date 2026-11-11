@@ -415,14 +415,14 @@ class NetworkDispatchTest {
     @Test
     @DisplayName("a reset on a connection that refuses SO_LINGER closes it normally")
     void resetOnABrokenConnectionClosesNormally() {
+      final java.util.List<Object> lingerRequests =
+          new java.util.concurrent.CopyOnWriteArrayList<>();
       activate(
           "reset",
           ChaosSelector.network(Set.of(OperationType.SOCKET_CLOSE)),
           ChaosEffect.connectionReset());
       // Whether the OS refuses SO_LINGER on a socket depends on its state and the platform; a
       // channel that always refuses reaches the same path on every OS.
-      final java.util.concurrent.atomic.AtomicInteger lingerAttempts =
-          new java.util.concurrent.atomic.AtomicInteger();
       final java.nio.channels.NetworkChannel broken =
           new java.nio.channels.NetworkChannel() {
             @Override
@@ -433,10 +433,7 @@ class NetworkDispatchTest {
             @Override
             public <T> java.nio.channels.NetworkChannel setOption(
                 final java.net.SocketOption<T> name, final T value) throws java.io.IOException {
-              if (name == java.net.StandardSocketOptions.SO_LINGER
-                  && Integer.valueOf(0).equals(value)) {
-                lingerAttempts.incrementAndGet();
-              }
+              lingerRequests.add(name + "=" + value);
               throw new java.io.IOException("Connection reset by peer");
             }
 
@@ -465,11 +462,11 @@ class NetworkDispatchTest {
           };
 
       assertThatCode(() -> runtime.beforeSocketClose(broken)).doesNotThrowAnyException();
-      assertThat(lingerAttempts)
-          .as("linger 0 was attempted, and its refusal swallowed")
-          .hasValue(1);
-      assertThat(runtime.diagnostics().scenario("reset").orElseThrow().appliedCount())
-          .isEqualTo(1L);
+      // The reset was attempted (linger 0) and its refusal left the close to proceed normally.
+      assertThat(lingerRequests).containsExactly("SO_LINGER=0");
+      assertThat(runtime.diagnostics().snapshot().scenarios())
+          .singleElement()
+          .satisfies(report -> assertThat(report.appliedCount()).isEqualTo(1L));
     }
 
     @Test

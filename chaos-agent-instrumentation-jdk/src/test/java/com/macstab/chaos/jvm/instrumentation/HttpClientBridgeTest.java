@@ -2,12 +2,21 @@ package com.macstab.chaos.jvm.instrumentation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
+import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosSession;
+import com.macstab.chaos.jvm.api.NamePattern;
+import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import java.net.URI;
 import java.net.http.HttpRequest;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,47 +41,58 @@ class HttpClientBridgeTest {
     runtime.close();
   }
 
-  @Nested
-  @DisplayName("beforeHttpSend passthrough")
-  class HttpSendPassthrough {
-
-    @Test
-    @DisplayName("passes through when no bridge is installed (fallback)")
-    void passesWithoutBridge() {
-      assertThatCode(() -> BootstrapDispatcher.beforeHttpSend("https://api.example.com/"))
-          .doesNotThrowAnyException();
-    }
-
-    @Test
-    @DisplayName("passes through when no scenario matches")
-    void passesWithoutScenarios() {
-      assertThatCode(() -> bridge.beforeHttpSend("https://api.example.com/"))
-          .doesNotThrowAnyException();
-    }
-
-    @Test
-    @DisplayName("accepts null URL without throwing")
-    void nullUrlIsSafe() {
-      assertThatCode(() -> bridge.beforeHttpSend(null)).doesNotThrowAnyException();
-    }
+  /** Activates a reject of {@code operation} for URLs matching {@code url}. */
+  private ChaosActivationHandle rejectOn(final OperationType operation, final NamePattern url) {
+    return runtime.activate(
+        ChaosScenario.builder("http-" + operation)
+            .selector(ChaosSelector.httpClient(Set.of(operation), url))
+            .effect(ChaosEffect.reject("http refused"))
+            .activationPolicy(ActivationPolicy.always())
+            .build());
   }
 
   @Nested
-  @DisplayName("beforeHttpSendAsync passthrough")
-  class HttpSendAsyncPassthrough {
+  @DisplayName("the HTTP entries")
+  class HttpSendEntries {
 
     @Test
-    @DisplayName("passes through when no bridge is installed (fallback)")
-    void passesWithoutBridge() {
-      assertThatCode(() -> BootstrapDispatcher.beforeHttpSendAsync("https://api.example.com/"))
-          .doesNotThrowAnyException();
+    @DisplayName("without a bridge return at once and leave no scope entered")
+    void withoutBridgeNothingHappens() throws Throwable {
+      BootstrapDispatcher.beforeHttpSend("https://api.example.com/");
+      BootstrapDispatcher.beforeHttpSendAsync("https://api.example.com/");
+
+      assertThat(BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_HTTP)).isFalse();
+      assertThat(BootstrapDispatcher.idle("HTTP_CLIENT_SEND")).isTrue();
     }
 
     @Test
-    @DisplayName("passes through when no scenario matches")
-    void passesWithoutScenarios() {
+    @DisplayName("a send reaches the runtime as HTTP_CLIENT_SEND, matched by its URL")
+    void sendReachesTheRuntime() {
+      final ChaosActivationHandle handle =
+          rejectOn(OperationType.HTTP_CLIENT_SEND, NamePattern.prefix("https://api.example.com"));
+
+      assertThatCode(() -> bridge.beforeHttpSend("https://other.example.com/"))
+          .doesNotThrowAnyException();
+      assertThatCode(() -> bridge.beforeHttpSend(null)).doesNotThrowAnyException();
       assertThatCode(() -> bridge.beforeHttpSendAsync("https://api.example.com/"))
           .doesNotThrowAnyException();
+      assertThatThrownBy(() -> bridge.beforeHttpSend("https://api.example.com/"))
+          .isInstanceOf(java.io.IOException.class)
+          .hasMessageContaining("http refused");
+      assertThat(handle.appliedCount()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("an asynchronous send reaches the runtime as HTTP_CLIENT_SEND_ASYNC")
+    void sendAsyncReachesTheRuntime() {
+      final ChaosActivationHandle handle =
+          rejectOn(OperationType.HTTP_CLIENT_SEND_ASYNC, NamePattern.any());
+
+      assertThatCode(() -> bridge.beforeHttpSend("https://api.example.com/"))
+          .doesNotThrowAnyException();
+      assertThatThrownBy(() -> bridge.beforeHttpSendAsync("https://api.example.com/"))
+          .isInstanceOf(java.io.IOException.class);
+      assertThat(handle.appliedCount()).isEqualTo(1L);
     }
   }
 

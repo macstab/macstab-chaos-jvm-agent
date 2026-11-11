@@ -3,9 +3,18 @@ package com.macstab.chaos.jvm.instrumentation;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
+import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
+import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.NamePattern;
+import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import java.net.URI;
 import java.net.URL;
+import java.time.Duration;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinTask;
@@ -58,50 +67,96 @@ class ChaosBridgeTest {
     }
   }
 
+  /** Activates a 1 ms delay on {@code selector} in the bridge's runtime. */
+  private ChaosActivationHandle delayOn(final ChaosSelector selector) {
+    return runtime.activate(
+        ChaosScenario.builder("bridge-reaches-runtime")
+            .selector(selector)
+            .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+            .activationPolicy(ActivationPolicy.always())
+            .build());
+  }
+
   @Nested
-  @DisplayName("void dispatch methods")
+  @DisplayName("void dispatch methods reach the runtime's scenarios")
   class VoidDispatchMethods {
 
     @Test
-    @DisplayName("beforeThreadStart completes without throwing when no scenarios are active")
-    void beforeThreadStartCompletes() {
-      assertThatCode(() -> bridge.beforeThreadStart(new Thread(() -> {}), false))
-          .doesNotThrowAnyException();
+    @DisplayName("beforeThreadStart is a THREAD_START")
+    void beforeThreadStartReachesTheRuntime() throws Throwable {
+      final ChaosActivationHandle handle =
+          delayOn(
+              ChaosSelector.thread(
+                  Set.of(OperationType.THREAD_START), ChaosSelector.ThreadKind.ANY));
+      bridge.beforeThreadStart(new Thread(() -> {}), false);
+      assertThat(handle.appliedCount()).isEqualTo(1L);
     }
 
     @Test
-    @DisplayName("beforeWorkerRun completes without throwing when no scenarios are active")
-    void beforeWorkerRunCompletes() {
-      assertThatCode(() -> bridge.beforeWorkerRun(new Object(), Thread.currentThread(), () -> {}))
-          .doesNotThrowAnyException();
+    @DisplayName("beforeWorkerRun is an EXECUTOR_WORKER_RUN")
+    void beforeWorkerRunReachesTheRuntime() throws Throwable {
+      final ChaosActivationHandle handle =
+          delayOn(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_WORKER_RUN)));
+      bridge.beforeWorkerRun(new Object(), Thread.currentThread(), () -> {});
+      assertThat(handle.appliedCount()).isEqualTo(1L);
     }
 
     @Test
-    @DisplayName("beforeForkJoinTaskRun completes without throwing when no scenarios are active")
-    void beforeForkJoinTaskRunCompletes() {
-      final ForkJoinTask<?> task = ForkJoinTask.adapt(() -> {});
-      assertThatCode(() -> bridge.beforeForkJoinTaskRun(task)).doesNotThrowAnyException();
+    @DisplayName("beforeForkJoinTaskRun is a FORK_JOIN_TASK_RUN")
+    void beforeForkJoinTaskRunReachesTheRuntime() throws Throwable {
+      final ChaosActivationHandle handle =
+          delayOn(ChaosSelector.executor(Set.of(OperationType.FORK_JOIN_TASK_RUN)));
+      bridge.beforeForkJoinTaskRun(ForkJoinTask.adapt(() -> {}));
+      assertThat(handle.appliedCount()).isEqualTo(1L);
     }
 
     @Test
-    @DisplayName("beforeQueueOperation completes without throwing when no scenarios are active")
-    void beforeQueueOperationCompletes() {
-      assertThatCode(() -> bridge.beforeQueueOperation("QUEUE_PUT", new Object()))
-          .doesNotThrowAnyException();
+    @DisplayName("beforeQueueOperation is the queue operation it names")
+    void beforeQueueOperationReachesTheRuntime() throws Throwable {
+      final ChaosActivationHandle handle =
+          delayOn(ChaosSelector.queue(Set.of(OperationType.QUEUE_PUT)));
+      bridge.beforeQueueOperation("QUEUE_TAKE", new Object());
+      assertThat(handle.matchedCount()).isZero();
+      bridge.beforeQueueOperation("QUEUE_PUT", new Object());
+      assertThat(handle.appliedCount()).isEqualTo(1L);
     }
 
     @Test
-    @DisplayName("beforeClassLoad completes without throwing when no scenarios are active")
-    void beforeClassLoadCompletes() {
-      assertThatCode(() -> bridge.beforeClassLoad(null, "com.example.Foo"))
-          .doesNotThrowAnyException();
+    @DisplayName("beforeClassLoad is a CLASS_LOAD of the class it names")
+    void beforeClassLoadReachesTheRuntime() throws Throwable {
+      final ChaosActivationHandle handle =
+          delayOn(
+              ChaosSelector.classLoading(
+                  Set.of(OperationType.CLASS_LOAD), NamePattern.exact("com.example.Foo")));
+      bridge.beforeClassLoad(null, "com.example.Other");
+      assertThat(handle.matchedCount()).isZero();
+      bridge.beforeClassLoad(null, "com.example.Foo");
+      assertThat(handle.appliedCount()).isEqualTo(1L);
     }
 
     @Test
-    @DisplayName("beforeExecutorShutdown completes without throwing when no scenarios are active")
-    void beforeExecutorShutdownCompletes() {
-      assertThatCode(() -> bridge.beforeExecutorShutdown("EXECUTOR_SHUTDOWN", new Object(), 0L))
+    @DisplayName("beforeExecutorShutdown is the shutdown operation it names")
+    void beforeExecutorShutdownReachesTheRuntime() throws Throwable {
+      final ChaosActivationHandle handle =
+          delayOn(ChaosSelector.shutdown(Set.of(OperationType.EXECUTOR_SHUTDOWN)));
+      bridge.beforeExecutorShutdown("EXECUTOR_SHUTDOWN", new Object(), 0L);
+      assertThat(handle.appliedCount()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("without a scenario every void dispatch returns at once")
+    void withoutAScenarioNothingIsEvaluated() {
+      assertThatCode(
+              () -> {
+                bridge.beforeThreadStart(new Thread(() -> {}), false);
+                bridge.beforeWorkerRun(new Object(), Thread.currentThread(), () -> {});
+                bridge.beforeForkJoinTaskRun(ForkJoinTask.adapt(() -> {}));
+                bridge.beforeQueueOperation("QUEUE_PUT", new Object());
+                bridge.beforeClassLoad(null, "com.example.Foo");
+                bridge.beforeExecutorShutdown("EXECUTOR_SHUTDOWN", new Object(), 0L);
+              })
           .doesNotThrowAnyException();
+      assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();
     }
   }
 

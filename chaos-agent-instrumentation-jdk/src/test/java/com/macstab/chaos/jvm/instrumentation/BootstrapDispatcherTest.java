@@ -1,7 +1,6 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
@@ -78,11 +77,12 @@ class BootstrapDispatcherTest {
     }
 
     @Test
-    @DisplayName("decorateShutdownHook without a delegate does nothing")
-    void decorateShutdownHookWithoutDelegate() {
-      final Thread hook = new Thread(() -> {});
-      assertThatCode(() -> BootstrapDispatcher.decorateShutdownHook(hook))
-          .doesNotThrowAnyException();
+    @DisplayName("decorateShutdownHook without a delegate neither starts nor changes the hook")
+    void decorateShutdownHookWithoutDelegate() throws Throwable {
+      final Thread hook = new Thread(() -> {}, "hook");
+      BootstrapDispatcher.decorateShutdownHook(hook);
+      assertThat(hook.getState()).isEqualTo(Thread.State.NEW);
+      assertThat(hook.getName()).isEqualTo("hook");
     }
 
     @Test
@@ -100,20 +100,18 @@ class BootstrapDispatcherTest {
     }
 
     @Test
-    @DisplayName("void dispatch methods complete without throwing")
-    void voidDispatchMethodsCompleteWithoutThrowing() {
+    @DisplayName("void dispatch methods return at once: nothing started, no depth left raised")
+    void voidDispatchMethodsCompleteWithoutThrowing() throws Throwable {
       final Thread thread = new Thread(() -> {});
-      assertThatCode(() -> BootstrapDispatcher.beforeThreadStart(thread))
-          .doesNotThrowAnyException();
-      assertThatCode(() -> BootstrapDispatcher.beforeWorkerRun(executor, thread, () -> {}))
-          .doesNotThrowAnyException();
-      assertThatCode(() -> BootstrapDispatcher.beforeQueueOperation("QUEUE_PUT", new Object()))
-          .doesNotThrowAnyException();
-      assertThatCode(
-              () -> BootstrapDispatcher.beforeExecutorShutdown("EXECUTOR_SHUTDOWN", executor, 0L))
-          .doesNotThrowAnyException();
-      assertThatCode(() -> BootstrapDispatcher.beforeClassLoad(null, "com.example.Foo"))
-          .doesNotThrowAnyException();
+      BootstrapDispatcher.beforeThreadStart(thread);
+      BootstrapDispatcher.beforeWorkerRun(executor, thread, () -> {});
+      BootstrapDispatcher.beforeQueueOperation("QUEUE_PUT", new Object());
+      BootstrapDispatcher.beforeExecutorShutdown("EXECUTOR_SHUTDOWN", executor, 0L);
+      BootstrapDispatcher.beforeClassLoad(null, "com.example.Foo");
+
+      assertThat(thread.getState()).isEqualTo(Thread.State.NEW);
+      assertThat(BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_QUEUE)).isFalse();
+      assertThat(BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_CLASS_LOAD)).isFalse();
     }
 
     @Test

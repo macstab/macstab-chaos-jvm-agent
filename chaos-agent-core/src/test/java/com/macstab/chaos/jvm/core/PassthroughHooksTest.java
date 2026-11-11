@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -36,12 +37,32 @@ class PassthroughHooksTest {
     void call(ChaosRuntime runtime) throws Throwable;
   }
 
+  /** A runtime entry point that hands a value back to the advice. */
+  @FunctionalInterface
+  private interface ReturningHook {
+    @Nullable Object call(ChaosRuntime runtime) throws Throwable;
+  }
+
   private static Arguments hook(
       final String name,
       final OperationType operation,
       final ChaosSelector selector,
       final Hook hook) {
-    return Arguments.of(name, operation, selector, hook);
+    final ReturningHook call =
+        runtime -> {
+          hook.call(runtime);
+          return null;
+        };
+    return Arguments.of(name, operation, selector, call, null);
+  }
+
+  private static Arguments returningHook(
+      final String name,
+      final OperationType operation,
+      final ChaosSelector selector,
+      final ReturningHook hook,
+      final @Nullable Object passthrough) {
+    return Arguments.of(name, operation, selector, hook, passthrough);
   }
 
   private static ChaosSelector runtimeOp(final OperationType operation) {
@@ -89,11 +110,12 @@ class PassthroughHooksTest {
             OperationType.REFLECTION_INVOKE,
             runtimeOp(OperationType.REFLECTION_INVOKE),
             runtime -> runtime.beforeReflectionInvoke(null, null)),
-        hook(
+        returningHook(
             "socket connect",
             OperationType.SOCKET_CONNECT,
             socketOp(OperationType.SOCKET_CONNECT),
-            runtime -> runtime.beforeSocketConnect(null, null, 0)),
+            runtime -> runtime.beforeSocketConnect(null, null, 0),
+            null),
         hook(
             "class define",
             OperationType.CLASS_DEFINE,
@@ -104,16 +126,18 @@ class PassthroughHooksTest {
             OperationType.SOCKET_ACCEPT,
             socketOp(OperationType.SOCKET_ACCEPT),
             runtime -> runtime.beforeSocketAccept(null)),
-        hook(
+        returningHook(
             "socket read",
             OperationType.SOCKET_READ,
             socketOp(OperationType.SOCKET_READ),
-            runtime -> runtime.beforeSocketRead(null, InvocationContext.UNKNOWN, null, 0, 0)),
-        hook(
+            runtime -> runtime.beforeSocketRead(null, 48, null, 0, 0),
+            48),
+        returningHook(
             "socket write",
             OperationType.SOCKET_WRITE,
             socketOp(OperationType.SOCKET_WRITE),
-            runtime -> runtime.beforeSocketWrite(null, 64, null, 0)),
+            runtime -> runtime.beforeSocketWrite(null, 64, null, 0),
+            64),
         hook(
             "socket close",
             OperationType.SOCKET_CLOSE,
@@ -148,16 +172,29 @@ class PassthroughHooksTest {
       final String name,
       final OperationType operation,
       final ChaosSelector selector,
-      final Hook hook)
+      final ReturningHook hook,
+      final @Nullable Object passthrough)
       throws Throwable {
     try (ChaosRuntime runtime = new ChaosRuntime()) {
+      // A scenario of another operation: the hook must not evaluate it.
+      runtime.activate(
+          ChaosScenario.builder("another-operation")
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(ChaosEffect.delay(DELAY))
+              .activationPolicy(ActivationPolicy.always())
+              .build());
       final List<ChaosEvent> events = new CopyOnWriteArrayList<>();
       runtime.addEventListener(events::add);
 
-      final long idle = timed(runtime, hook);
+      final long start = System.nanoTime();
+      final Object result = hook.call(runtime);
+      final long idle = System.nanoTime() - start;
 
+      assertThat(result).as("the pass-through value").isEqualTo(passthrough);
       assertThat(events).as("no event without a scenario").isEmpty();
-      assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();
+      assertThat(runtime.diagnostics().scenario("another-operation").orElseThrow().matchedCount())
+          .as("a scenario of another operation is not evaluated")
+          .isZero();
       assertThat(idle).as("no delay without a scenario").isLessThan(DELAY.toNanos());
 
       runtime.activate(
@@ -175,7 +212,7 @@ class PassthroughHooksTest {
     }
   }
 
-  private static long timed(final ChaosRuntime runtime, final Hook hook) throws Throwable {
+  private static long timed(final ChaosRuntime runtime, final ReturningHook hook) throws Throwable {
     final long start = System.nanoTime();
     hook.call(runtime);
     return System.nanoTime() - start;
