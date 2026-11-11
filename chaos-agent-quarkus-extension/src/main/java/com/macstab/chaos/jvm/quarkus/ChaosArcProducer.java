@@ -113,12 +113,43 @@ public class ChaosArcProducer {
   }
 
   /**
-   * Calls a static method of the system class loader's {@link ChaosQuarkusExtension} with {@code
-   * plane}; returns its result, or {@code null} when it cannot.
+   * Calls a static method of the test run's {@link ChaosQuarkusExtension} with {@code plane};
+   * returns its result, or {@code null} when it cannot.
    */
   private static @Nullable Object callExtension(
       final String method, final ChaosControlPlane plane) {
-    return callExtension(method, plane, ClassLoader.getSystemClassLoader());
+    return callExtension(
+        method,
+        plane,
+        testkitLoader(
+            ClassLoader.getSystemClassLoader(),
+            Thread.currentThread().getContextClassLoader(),
+            ChaosArcProducer.class.getClassLoader()));
+  }
+
+  /**
+   * The first of {@code candidates} that sees {@code chaos-agent-testkit}, or the first candidate
+   * when none does. The system class loader comes first: a test run started by Gradle or Maven
+   * loads the JUnit extension there. Under Quarkus continuous testing the testkit is only on a
+   * loader of Quarkus's own, which the context class loader or this class's loader reaches.
+   */
+  static ClassLoader testkitLoader(final @Nullable ClassLoader... candidates) {
+    ClassLoader first = null;
+    for (final ClassLoader candidate : candidates) {
+      if (candidate == null) {
+        continue;
+      }
+      if (first == null) {
+        first = candidate;
+      }
+      try {
+        Class.forName(TESTKIT, false, candidate);
+        return candidate;
+      } catch (final ClassNotFoundException | LinkageError absent) {
+        // not on this one
+      }
+    }
+    return first == null ? ClassLoader.getSystemClassLoader() : first;
   }
 
   /**
@@ -152,7 +183,7 @@ public class ChaosArcProducer {
           Level.WARNING,
           unreachable,
           () ->
-              "[chaos-agent] the test extension is not reachable from the system class loader;"
+              "[chaos-agent] the test extension is not reachable from the test run's class loader;"
                   + " what a test activates through the injected ChaosControlPlane is not stopped"
                   + " after the test class");
       return null;

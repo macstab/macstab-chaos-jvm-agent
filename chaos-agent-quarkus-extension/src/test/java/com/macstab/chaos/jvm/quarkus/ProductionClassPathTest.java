@@ -94,6 +94,18 @@ class ProductionClassPathTest {
     }
   }
 
+  @Test
+  @DisplayName("the testkit is looked up where the test run has it, not only on the system loader")
+  void testkitLoaderFindsTheTestRunsLoader() throws Exception {
+    final ClassLoader withTestkit = ProductionClassPathTest.class.getClassLoader();
+    try (URLClassLoader without = withoutTheTestkit()) {
+      // Under continuous testing the system loader lacks the testkit; Quarkus's own loader has it.
+      assertThat(ChaosArcProducer.testkitLoader(without, null, withTestkit)).isSameAs(withTestkit);
+      assertThat(ChaosArcProducer.testkitLoader(withTestkit, without)).isSameAs(withTestkit);
+      assertThat(ChaosArcProducer.testkitLoader(null, without)).as("none has it").isSameAs(without);
+    }
+  }
+
   /** The file names or coordinates the build hands the test in {@code property}. */
   private static List<String> buildList(final String property, final String separator) {
     final String value =
