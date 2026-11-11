@@ -177,11 +177,21 @@ When each extension activates and stops them:
 | Extension                                   | Class-level `@WithChaos`             | Method-level `@WithChaos`        | Test thread bound to the session |
 |---------------------------------------------|--------------------------------------|----------------------------------|----------------------------------|
 | testkit `ChaosAgentExtension`               | around each test method (session per test) | around each test method    | yes, while any `@WithChaos` applies |
-| Spring Boot 3/4 `ChaosAgentExtension`       | `beforeAll` → `afterAll`             | around the test method          | no (bind, or use `JVM` scope)    |
-| `ChaosMicronautExtension`                   | `beforeAll` → `afterAll`             | around the test method          | no (bind, or use `JVM` scope)    |
-| `ChaosQuarkusExtension`                     | `beforeAll` → `afterAll`             | around the test method          | no (bind, or use `JVM` scope)    |
+| Spring Boot 3/4 `ChaosAgentExtension`       | `beforeAll` → `afterAll`             | around the test method          | the class's `beforeAll` thread ¹ |
+| `ChaosMicronautExtension`                   | `beforeAll` → `afterAll`             | around the test method          | the class's `beforeAll` thread ¹ |
+| `ChaosQuarkusExtension`                     | `beforeAll` → `afterAll`             | around the test method          | the class's `beforeAll` thread ¹ |
 
 "Around the test method" means after the test's `@BeforeEach` methods and before its `@AfterEach` methods (`beforeTestExecution` → `afterTestExecution`): set-up and tear-down run without the method's chaos.
+
+¹ These extensions open the class's session in `beforeAll`, and opening a session binds the thread that opens it. A test method that runs on that thread (JUnit's default, also with classes running in parallel) runs in the session; a method on another thread (`junit.jupiter.execution.parallel.mode.default=concurrent`, `@Timeout(threadMode = SEPARATE_THREAD)`) binds it with `session.bind()`, or the scenario uses `JVM` scope.
+
+Test classes that run in parallel (`junit.jupiter.execution.parallel.mode.classes.default=concurrent`) each have a session of their own, also when they share an application context:
+- a class-level `SESSION` scenario reaches only the class's own thread and the work it hands off, not the other class's calls into the same beans;
+- a class's `afterAll` stops only its own class-level scenarios and its session: a class running beside it keeps its scenarios;
+- a class-level `JVM` scenario reaches every thread, the other class's included, and its id has one owner at a time: give parallel classes different ids;
+- what a class activates through the injected `ChaosControlPlane` bean belongs to the context, not to the class. Spring caches one context for classes with the same configuration, so the bean's activations stay until the last running chaos test class ends. Micronaut starts a context per test class, so they end when the class's context closes.
+
+Quarkus's test extension runs one test class at a time: it keeps the current test class in static state, and concurrent `@QuarkusTest` classes fail inside it ("Could not find method ... on test class"). `@QuarkusChaosTest` classes that share one application run one after the other, each with its own session; what the first activated through the bean is stopped when it ends, as the last running chaos test class.
 
 A `JVM`-scoped scenario id has one owner at a time. The testkit activates class-level `@WithChaos` for every test, so with concurrent test methods (`junit.jupiter.execution.parallel.mode.default=concurrent`) a class-level `JVM` scenario is activated again while it is still active and the second test fails with an activation conflict. Declare such scenarios with `SESSION` scope, or keep the class on one thread with `@Execution(ExecutionMode.SAME_THREAD)`.
 
