@@ -587,6 +587,37 @@ class StressorEdgeBehaviourTest {
     }
 
     @Test
+    @DisplayName("a value that cannot be allocated leaves no value planted on the workers")
+    void failedAllocationAbandonsPlantedEntries() {
+      // On JDK 21 a worker's stale entry keeps its value until the entry is expunged; JDK 25
+      // expunges it sooner, so only JDK 21 shows the leak without the abandon.
+      final List<java.lang.ref.WeakReference<byte[]>> made = new java.util.ArrayList<>();
+      assertThatThrownBy(
+              () ->
+                  new ThreadLocalLeakStressor(
+                      new ChaosEffect.ThreadLocalLeakEffect(3, 1024),
+                      1,
+                      TimeUnit.SECONDS.toNanos(10),
+                      valueSizeBytes -> {
+                        if (made.size() == 2) {
+                          throw new OutOfMemoryError("third value");
+                        }
+                        final byte[] value = new byte[valueSizeBytes];
+                        made.add(new java.lang.ref.WeakReference<>(value));
+                        return value;
+                      }))
+          .isInstanceOf(OutOfMemoryError.class);
+      ForkJoinPool.commonPool().awaitQuiescence(10, TimeUnit.SECONDS);
+      org.awaitility.Awaitility.await()
+          .atMost(java.time.Duration.ofSeconds(10))
+          .until(
+              () -> {
+                System.gc();
+                return made.stream().allMatch(reference -> reference.get() == null);
+              });
+    }
+
+    @Test
     @DisplayName("on a busy common pool the entries are planted by its workers, not the caller")
     void plantsOnPoolWorkersOnly() throws Exception {
       final ForkJoinPool pool = ForkJoinPool.commonPool();

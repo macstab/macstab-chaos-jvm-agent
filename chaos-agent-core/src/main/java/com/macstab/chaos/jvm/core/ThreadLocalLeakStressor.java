@@ -103,13 +103,20 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
     final List<ForkJoinTask<?>> tasks = new ArrayList<>(totalLocals);
     final Progress progress = new Progress(totalLocals, plantTimeoutNanos);
     final int valueSizeBytes = effect.valueSizeBytes();
-    for (int i = 0; i < totalLocals; i++) {
-      // One instance per entry is the leak this stressor produces.
-      @SuppressWarnings("ThreadLocalUsage")
-      final ThreadLocal<Planted> local = new ThreadLocal<>();
-      final Planted holder = new Planted(values.apply(valueSizeBytes));
-      holders.add(holder);
-      tasks.add(ForkJoinPool.commonPool().submit(new Planting(local, holder, progress)));
+    try {
+      for (int i = 0; i < totalLocals; i++) {
+        // One instance per entry is the leak this stressor produces.
+        @SuppressWarnings("ThreadLocalUsage")
+        final ThreadLocal<Planted> local = new ThreadLocal<>();
+        final Planted holder = new Planted(values.apply(valueSizeBytes));
+        holders.add(holder);
+        tasks.add(ForkJoinPool.commonPool().submit(new Planting(local, holder, progress)));
+      }
+    } catch (final RuntimeException | Error failed) {
+      // An allocation that ran out of memory or a submit the pool refused: the entries planted
+      // so far keep no value, and the tasks not yet run plant an empty holder.
+      abandon(tasks, holders);
+      throw failed;
     }
     // The timeout covers the planting only: allocating large values may take long by itself.
     progress.arm();
