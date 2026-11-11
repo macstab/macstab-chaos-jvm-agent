@@ -568,7 +568,7 @@ public final class NetworkDispatch {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeSocketClose(final Object socket) throws Throwable {
-    if (engine.idle(OperationType.SOCKET_CLOSE)) {
+    if (engine.idle(OperationType.SOCKET_CLOSE) || JdkOwnUse.isInterruptClose()) {
       return;
     }
     // Closing a closed socket closes nothing. Channels are guarded by isOpen() in

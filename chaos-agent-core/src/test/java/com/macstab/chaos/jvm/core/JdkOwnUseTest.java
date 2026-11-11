@@ -128,6 +128,116 @@ class JdkOwnUseTest {
     assertThat(JdkOwnUse.isSerializationHook(null)).isFalse();
   }
 
+  /** A call made inside a channel's close. */
+  @FunctionalInterface
+  private interface CloseAction {
+    boolean run() throws Throwable;
+  }
+
+  /** An interruptible channel that runs an action inside its close and keeps its result. */
+  private static final class RecordingChannel
+      extends java.nio.channels.spi.AbstractInterruptibleChannel {
+    private final CloseAction action;
+    final CompletableFuture<Boolean> result = new CompletableFuture<>();
+
+    RecordingChannel(final CloseAction action) {
+      this.action = action;
+    }
+
+    @Override
+    protected void implCloseChannel() {
+      try {
+        result.complete(action.run());
+      } catch (final Throwable failed) {
+        result.completeExceptionally(failed);
+      }
+    }
+
+    /** Blocks as an interruptible I/O operation does, until the channel is closed. */
+    void block() {
+      begin();
+      try {
+        result.get();
+      } catch (final InterruptedException | java.util.concurrent.ExecutionException interrupted) {
+        // the interrupt closed the channel
+      } finally {
+        try {
+          end(true);
+        } catch (final java.nio.channels.AsynchronousCloseException closed) {
+          // ClosedByInterruptException: expected
+        }
+      }
+    }
+  }
+
+  /** Runs {@code action} inside the close the JDK makes when it interrupts a blocked thread. */
+  private static boolean insideInterrupt(final CloseAction action) throws Exception {
+    final RecordingChannel channel = new RecordingChannel(action);
+    final Thread reader = new Thread(channel::block);
+    reader.start();
+    while (reader.getState() != Thread.State.WAITING) {
+      Thread.onSpinWait();
+    }
+    reader.interrupt();
+    reader.join(5_000L);
+    return channel.result.get(5, java.util.concurrent.TimeUnit.SECONDS);
+  }
+
+  @Test
+  @DisplayName("a channel close inside Thread.interrupt() is the JDK's, a close() call is not")
+  void interruptClose() throws Exception {
+    final RecordingChannel closedByCall = new RecordingChannel(JdkOwnUse::isInterruptClose);
+    closedByCall.close();
+    final CompletableFuture<Boolean> onThreadRun = new CompletableFuture<>();
+    final Thread plain = new Thread(() -> onThreadRun.complete(JdkOwnUse.isInterruptClose()));
+    plain.start();
+    plain.join(5_000L);
+
+    assertThat(insideInterrupt(JdkOwnUse::isInterruptClose)).isTrue();
+    assertThat(closedByCall.result.getNow(null)).isFalse();
+    assertThat(onThreadRun.getNow(null)).as("Thread.run on the stack").isFalse();
+  }
+
+  @Test
+  @DisplayName("a FILE_IO_CLOSE or SOCKET_CLOSE delay skips the close an interrupt makes")
+  void interruptCloseIsNotDelayed() throws Exception {
+    try (ChaosRuntime runtime = new ChaosRuntime();
+        ChaosActivationHandle file =
+            runtime.activate(
+                ChaosScenario.builder("file-close")
+                    .selector(
+                        ChaosSelector.fileIo(
+                            Set.of(OperationType.FILE_IO_CLOSE, OperationType.FILE_IO_READ)))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        ChaosActivationHandle socket =
+            runtime.activate(
+                ChaosScenario.builder("socket-close")
+                    .selector(ChaosSelector.network(Set.of(OperationType.SOCKET_CLOSE)))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build())) {
+      final Object channel = new Object();
+      insideInterrupt(
+          () -> {
+            runtime.beforeFileIo("FILE_IO_CLOSE", channel, "/data/f", -1);
+            runtime.beforeSocketClose(channel);
+            return true;
+          });
+      assertThat(file.appliedCount()).as("inside the interrupt").isZero();
+      assertThat(socket.appliedCount()).as("inside the interrupt").isZero();
+
+      runtime.beforeFileIo("FILE_IO_READ", channel, "/data/f", 1);
+      runtime.beforeFileIo("FILE_IO_CLOSE", channel, "/data/f", -1);
+      runtime.beforeSocketClose(channel);
+      assertThat(file.appliedCount()).as("a read and a close() call").isEqualTo(2L);
+      assertThat(socket.appliedCount()).as("a close() call").isEqualTo(1L);
+    } catch (final Throwable failed) {
+      throw new AssertionError(failed);
+    }
+  }
+
   @Test
   @DisplayName("the agent's MBean domain")
   void agentMBean() throws Exception {

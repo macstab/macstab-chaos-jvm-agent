@@ -41,7 +41,8 @@ public final class FileDispatch {
       final int byteCount)
       throws Throwable {
     final OperationType fileIoOpType = resolveFileIoOperationType(operation);
-    if (engine.idle(fileIoOpType)) {
+    if (engine.idle(fileIoOpType)
+        || (fileIoOpType == OperationType.FILE_IO_CLOSE && JdkOwnUse.isInterruptClose())) {
       return byteCount;
     }
     return engine.transferCount(

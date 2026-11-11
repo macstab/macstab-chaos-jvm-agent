@@ -60,6 +60,17 @@ final class JdkOwnUse {
           Set.of(
               StackWalker.Option.RETAIN_CLASS_REFERENCE, StackWalker.Option.SHOW_REFLECT_FRAMES));
 
+  /**
+   * Walks the frames between {@code Thread.interrupt()} and a channel's close: the JDK's
+   * interruptor ({@code postInterrupt} → {@code close} on JDK 25, {@code implCloseChannel} on JDK
+   * 21), the advice, the bridge and the dispatch.
+   */
+  private static final StackWalker INTERRUPT_CALLERS =
+      StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
+
+  /** How many frames {@link #INTERRUPT_CALLERS} looks at for {@code Thread.interrupt()}. */
+  private static final long INTERRUPT_CLOSE_FRAMES = 24L;
+
   /** The agent's own MBean domain (L3). */
   private static final String AGENT_MBEAN_DOMAIN = "com.macstab.chaos.jvm";
 
@@ -219,6 +230,26 @@ final class JdkOwnUse {
     final ClassLoader loader = type.getClassLoader();
     return (loader == null || loader == ClassLoader.getPlatformClassLoader())
         && type.getModule().isNamed();
+  }
+
+  /**
+   * Whether the current thread closes a channel from inside {@code Thread.interrupt()}: the JDK
+   * closes the interruptible channel a thread is blocked on from the interrupting thread, under the
+   * channel's {@code closeLock} (and on JDK 21 the target's {@code interruptLock}), and swallows
+   * any failure. A delay or gate there would block {@code interrupt()} and the interrupted thread.
+   * Walks the stack, so it runs only for a close a scenario may select.
+   *
+   * @return {@code true} when {@code Thread.interrupt()} is among the closest callers
+   */
+  static boolean isInterruptClose() {
+    return INTERRUPT_CALLERS.walk(
+        frames ->
+            frames
+                .limit(INTERRUPT_CLOSE_FRAMES)
+                .anyMatch(
+                    frame ->
+                        frame.getDeclaringClass() == Thread.class
+                            && "interrupt".equals(frame.getMethodName())));
   }
 
   /**
