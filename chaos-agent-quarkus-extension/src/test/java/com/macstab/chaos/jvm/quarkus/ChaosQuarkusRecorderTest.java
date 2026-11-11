@@ -43,6 +43,19 @@ class ChaosQuarkusRecorderTest {
   }
 
   @Test
+  @DisplayName(
+      "has one constructor, public and without parameters: Quarkus refuses a recorder whose"
+          + " constructor it cannot determine")
+  void singlePublicNoArgConstructor() {
+    final java.lang.reflect.Constructor<?>[] constructors =
+        ChaosQuarkusRecorder.class.getDeclaredConstructors();
+
+    assertThat(constructors).hasSize(1);
+    assertThat(constructors[0].getParameterCount()).isZero();
+    assertThat(java.lang.reflect.Modifier.isPublic(constructors[0].getModifiers())).isTrue();
+  }
+
+  @Test
   @DisplayName("without macstab.chaos.enabled the agent is not installed")
   void disabledByDefault() {
     assertThat(new ChaosQuarkusRecorder().installAgent().getValue()).isFalse();

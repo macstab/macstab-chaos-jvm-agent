@@ -16,6 +16,19 @@ import org.junit.jupiter.api.Test;
 class ChaosManagementRecorderTest {
 
   @Test
+  @DisplayName(
+      "has one constructor, public and without parameters: Quarkus refuses a recorder whose"
+          + " constructor it cannot determine")
+  void singlePublicNoArgConstructor() {
+    final java.lang.reflect.Constructor<?>[] constructors =
+        ChaosManagementRecorder.class.getDeclaredConstructors();
+
+    assertThat(constructors).hasSize(1);
+    assertThat(constructors[0].getParameterCount()).isZero();
+    assertThat(java.lang.reflect.Modifier.isPublic(constructors[0].getModifiers())).isTrue();
+  }
+
+  @Test
   @DisplayName("allow-anonymous from a remote source (consul) is ignored")
   void remoteAllowAnonymousIgnored() {
     final Config config =
