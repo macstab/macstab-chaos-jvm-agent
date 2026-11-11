@@ -6,6 +6,7 @@ import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServer;
 import io.vertx.ext.web.Router;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
@@ -17,8 +18,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * The handler behind a real Vert.x HTTP server, as Quarkus mounts it: a router without a body
- * handler, requests sent byte by byte over a socket.
+ * The handler behind a real Vert.x HTTP server, as Quarkus mounts it: each request paused before it
+ * is routed, a router without a body handler, requests sent byte by byte over a socket.
  */
 @DisplayName("ChaosManagementHandler over HTTP")
 class ChaosManagementHttpTest {
@@ -38,8 +39,21 @@ class ChaosManagementHttpTest {
     final HttpServer server =
         vertx
             .createHttpServer()
-            .requestHandler(router)
-            .listen(0)
+            .requestHandler(
+                request -> {
+                  // As Quarkus' root handler does, the request is paused on the event loop
+                  // before it is routed: the route runs on a worker thread, and a body byte
+                  // that arrived before that thread ran would be dropped, no data handler
+                  // being set yet.
+                  if (!request.isEnded()) {
+                    request.pause();
+                  }
+                  router.handle(request);
+                })
+            // Bound to the loopback address alone: a wildcard bind on a free port shares it with
+            // another process bound to that port on the loopback address, which then takes the
+            // test's connections.
+            .listen(0, InetAddress.getLoopbackAddress().getHostAddress())
             .toCompletionStage()
             .toCompletableFuture()
             .get(10, TimeUnit.SECONDS);

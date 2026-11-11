@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
@@ -22,7 +23,9 @@ final class RawHttp implements AutoCloseable {
   private final OutputStream out;
 
   RawHttp(final int port) throws IOException {
-    socket = new Socket("localhost", port);
+    // The address the test server is bound to, not "localhost": the name may resolve to another
+    // address, where another process can listen on the same port number.
+    socket = new Socket(InetAddress.getLoopbackAddress(), port);
     socket.setSoTimeout(10_000);
     in = socket.getInputStream();
     out = socket.getOutputStream();
