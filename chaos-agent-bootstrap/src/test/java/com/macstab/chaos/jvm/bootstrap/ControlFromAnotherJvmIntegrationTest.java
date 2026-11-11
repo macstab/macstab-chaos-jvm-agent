@@ -212,7 +212,14 @@ class ControlFromAnotherJvmIntegrationTest {
       command.add("-cp");
       command.add(System.getProperty("java.class.path"));
       command.add(InteractiveProbeMain.class.getName());
-      return new Child(new ProcessBuilder(command).redirectErrorStream(true).start());
+      final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+      try {
+        return new Child(process);
+      } catch (final Exception | Error failure) {
+        // The child never reported ready: no test closes it, so it is destroyed here.
+        process.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
+        throw failure;
+      }
     }
 
     long pid() {
@@ -253,7 +260,7 @@ class ControlFromAnotherJvmIntegrationTest {
         // the child ended already
       }
       if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-        process.destroyForcibly();
+        process.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
       }
     }
   }
