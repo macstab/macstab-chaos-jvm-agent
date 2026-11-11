@@ -35,9 +35,12 @@ final class NioAdvice {
       return BootstrapDispatcher.beforeNioSelect(selector, 0L);
     }
 
-    @Advice.OnMethodExit
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
     static void exit(
-        @Advice.Enter final boolean spurious, @Advice.Return(readOnly = false) int returned) {
+        @Advice.This final Object selector,
+        @Advice.Enter final boolean spurious,
+        @Advice.Return(readOnly = false) int returned) {
+      BootstrapDispatcher.afterNioSelect(selector);
       if (spurious) {
         returned = 0;
       }
@@ -60,9 +63,12 @@ final class NioAdvice {
       return BootstrapDispatcher.beforeNioSelect(selector, -1L);
     }
 
-    @Advice.OnMethodExit
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
     static void exit(
-        @Advice.Enter final boolean spurious, @Advice.Return(readOnly = false) int returned) {
+        @Advice.This final Object selector,
+        @Advice.Enter final boolean spurious,
+        @Advice.Return(readOnly = false) int returned) {
+      BootstrapDispatcher.afterNioSelect(selector);
       if (spurious) {
         returned = 0;
       }
@@ -86,9 +92,12 @@ final class NioAdvice {
       return BootstrapDispatcher.beforeNioSelect(selector, timeoutMillis);
     }
 
-    @Advice.OnMethodExit
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
     static void exit(
-        @Advice.Enter final boolean spurious, @Advice.Return(readOnly = false) int returned) {
+        @Advice.This final Object selector,
+        @Advice.Enter final boolean spurious,
+        @Advice.Return(readOnly = false) int returned) {
+      BootstrapDispatcher.afterNioSelect(selector);
       if (spurious) {
         returned = 0;
       }
@@ -107,9 +116,12 @@ final class NioAdvice {
       return BootstrapDispatcher.beforeNioSelect(selector, timeoutMillis);
     }
 
-    @Advice.OnMethodExit
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
     static void exit(
-        @Advice.Enter final boolean spurious, @Advice.Return(readOnly = false) int returned) {
+        @Advice.This final Object selector,
+        @Advice.Enter final boolean spurious,
+        @Advice.Return(readOnly = false) int returned) {
+      BootstrapDispatcher.afterNioSelect(selector);
       if (spurious) {
         returned = 0;
       }

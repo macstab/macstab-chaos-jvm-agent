@@ -1631,6 +1631,7 @@ public final class BootstrapDispatcher {
     if (depth[0] > 0) {
       return false;
     }
+    final long outcome;
     depth[0]++;
     try {
       final MethodHandle[] h = handles;
@@ -1638,20 +1639,41 @@ public final class BootstrapDispatcher {
       if (d == null || h == null) {
         return false;
       }
-      final long outcome = (long) h[BEFORE_NIO_SELECT].invoke(d, selector, timeoutMillis);
+      outcome = (long) h[BEFORE_NIO_SELECT].invoke(d, selector, timeoutMillis);
       if (outcome > 0L) {
         stallSelect(selector, outcome);
       } else if (!SELECT_WAKEUPS.isEmpty()) {
         SELECT_WAKEUPS.remove(selector); // this select returns at once on the JDK's own wakeup
       }
-      return outcome >= 0L;
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
       return false;
     } finally {
       depth[0]--;
     }
+    if (outcome < 0L && !idle(OperationTags.NIO_SELECTOR_SELECT)) {
+      // A real select follows: a wakeup made while it runs ends it, as on the JDK, and is not
+      // kept for a later stall (afterNioSelect ends this).
+      SELECT_REAL.put(selector, Boolean.TRUE);
+    }
+    return outcome >= 0L;
   }
+
+  /**
+   * Called after a selector's {@code select}, also one the agent skipped: a real select on the
+   * selector has ended.
+   *
+   * @param selector the selector
+   */
+  public static void afterNioSelect(final Object selector) {
+    if (!SELECT_REAL.isEmpty()) {
+      SELECT_REAL.remove(selector);
+    }
+  }
+
+  /** The selectors with a real (not stalled) select in progress (identity). */
+  private static final java.util.concurrent.ConcurrentHashMap<Object, Boolean> SELECT_REAL =
+      new java.util.concurrent.ConcurrentHashMap<>();
 
   /** The threads stalled in a selector's {@code timeout()}, by selector (identity). */
   private static final java.util.concurrent.ConcurrentHashMap<Object, Thread> SELECT_STALLS =
@@ -1701,7 +1723,8 @@ public final class BootstrapDispatcher {
    */
   public static void selectorWoken(final Object selector) {
     if (!idle(OperationTags.NIO_SELECTOR_SELECT)
-        && !(selector instanceof java.nio.channels.Selector closed && !closed.isOpen())) {
+        && !(selector instanceof java.nio.channels.Selector closed && !closed.isOpen())
+        && (SELECT_REAL.isEmpty() || !SELECT_REAL.containsKey(selector))) {
       // Recorded before the stall is looked up: a stall registering meanwhile sees it.
       SELECT_WAKEUPS.put(selector, Boolean.TRUE);
     } else if (!SELECT_WAKEUPS.isEmpty()) {

@@ -203,6 +203,30 @@ class BridgeEntryPointsTest {
     }
 
     @Test
+    @DisplayName("a wakeup that ends a real select is not kept: the next stall still stalls")
+    void wakeupDuringARealSelect() throws Throwable {
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("select-after-one")
+                  .selector(
+                      new ChaosSelector.NioSelector(
+                          Set.of(OperationType.NIO_SELECTOR_SELECT), NamePattern.any()))
+                  .effect(ChaosEffect.timeout())
+                  .activationPolicy(ActivationPolicy.builder().activateAfterMatches(1).build())
+                  .build());
+      try (java.nio.channels.Selector selector = java.nio.channels.Selector.open()) {
+        // The first match proceeds: the real select runs, and a wakeup made while it runs ends it.
+        assertThat(BootstrapDispatcher.beforeNioSelect(selector, 2_000L)).isFalse();
+        BootstrapDispatcher.selectorWoken(selector);
+        BootstrapDispatcher.afterNioSelect(selector);
+        assertThat(stalledMillis(selector)).as("the next select is stalled").isGreaterThan(1_500L);
+        assertThat(handle.appliedCount()).isEqualTo(1L);
+      } finally {
+        handle.close();
+      }
+    }
+
+    @Test
     @DisplayName("a closed selector's wakeup is not kept, and idle a wakeup clears a kept one")
     void closedOrIdle() throws Throwable {
       final ChaosActivationHandle timeout =
