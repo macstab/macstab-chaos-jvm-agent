@@ -704,6 +704,11 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       return handle;
     } catch (final ChaosUnsupportedFeatureException unsupported) {
       unregisterAndDestroyQuietly(controller, registeredInRegistry);
+      if (claimed) {
+        // Released before FAILED is published: a listener may activate the id again.
+        activating.remove(key);
+        claimed = false;
+      }
       recordFailure(
           scopeKey,
           scenario.id(),
@@ -715,6 +720,11 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       // woven, or by the registry for a duplicate id; only the last is an activation conflict.
       final boolean conflict = validated && !weavingFailed && !registeredInRegistry;
       unregisterAndDestroyQuietly(controller, registeredInRegistry);
+      if (claimed) {
+        // Released before FAILED is published: a listener may activate the id again.
+        activating.remove(key);
+        claimed = false;
+      }
       recordFailure(
           scopeKey,
           scenario.id(),
@@ -727,6 +737,11 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       throw activationFailure;
     } catch (final RuntimeException runtimeException) {
       unregisterAndDestroyQuietly(controller, registeredInRegistry);
+      if (claimed) {
+        // Released before FAILED is published: a listener may activate the id again.
+        activating.remove(key);
+        claimed = false;
+      }
       // A refusal because the plane closed is no failure of the scenario, and the bus is closing.
       if (!closed.get()) {
         recordFailure(
@@ -745,6 +760,11 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
         unregisterAndDestroyQuietly(controller, registeredInRegistry);
       } catch (final Error rollbackFailure) {
         error.addSuppressed(rollbackFailure);
+      }
+      if (claimed) {
+        // Released before FAILED is published: a listener may activate the id again.
+        activating.remove(key);
+        claimed = false;
       }
       if (!closed.get()) {
         recordFailure(

@@ -370,6 +370,53 @@ class ControlPlaneLifecycleTest {
     }
 
     @Test
+    @DisplayName("a FAILED listener may activate the id of the activation that just failed")
+    void failedListenerActivatesTheSameId() throws Exception {
+      final AtomicInteger builds = new AtomicInteger();
+      final AtomicReference<Throwable> again = new AtomicReference<>();
+      final AtomicReference<ChaosActivationHandle> reactivated = new AtomicReference<>();
+      try (ChaosControlPlaneImpl plane =
+          new ChaosControlPlaneImpl(
+              Clock.systemUTC(),
+              com.macstab.chaos.jvm.api.ChaosMetricsSink.NOOP,
+              new StressorFactory(java.util.Optional::empty) {
+                @Override
+                ManagedStressor createIfNeeded(
+                    final ChaosEffect effect,
+                    final boolean allowDestructiveEffects,
+                    final java.util.function.Consumer<String> onEnd) {
+                  if (builds.incrementAndGet() == 1) {
+                    throw new IllegalStateException("first build fails");
+                  }
+                  return super.createIfNeeded(effect, allowDestructiveEffects, onEnd);
+                }
+              })) {
+        final ChaosScenario scenario =
+            ChaosScenario.builder("retried")
+                .selector(ChaosSelector.stress(ChaosSelector.StressTarget.THREAD_LOCAL_LEAK))
+                .effect(new ChaosEffect.ThreadLocalLeakEffect(1, 1))
+                .build();
+        plane.addEventListener(
+            event -> {
+              if (event.type() == ChaosEvent.Type.FAILED && reactivated.get() == null) {
+                try {
+                  reactivated.set(plane.activate(scenario));
+                } catch (final RuntimeException failure) {
+                  again.set(failure);
+                }
+              }
+            });
+
+        assertThatThrownBy(() -> plane.activate(scenario))
+            .isInstanceOf(IllegalStateException.class);
+        assertThat(again.get()).as("the listener's activation").isNull();
+        assertThat(reactivated.get()).isNotNull();
+        reactivated.get().stop();
+        assertThat(builds).hasValue(2);
+      }
+    }
+
+    @Test
     @DisplayName("a session-scoped scenario activated outside a session is recorded as invalid")
     void sessionScopeOutsideASession() {
       assertThatThrownBy(
