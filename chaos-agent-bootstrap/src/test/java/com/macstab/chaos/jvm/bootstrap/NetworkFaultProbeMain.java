@@ -408,6 +408,7 @@ public final class NetworkFaultProbeMain {
           thread,
           frame ->
               frame.isNativeMethod()
+                  && frame.getClassName().startsWith("sun.nio.ch.")
                   && (frame.getMethodName().startsWith("read")
                       || frame.getMethodName().startsWith("poll")));
       return new Reader(thread, ended);

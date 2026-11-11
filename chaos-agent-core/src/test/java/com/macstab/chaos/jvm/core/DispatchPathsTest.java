@@ -316,6 +316,9 @@ class DispatchPathsTest {
           .isInstanceOf(java.io.IOException.class);
       assertThat(delay.appliedCount()).isEqualTo(1L);
       assertThat(reject.appliedCount()).isEqualTo(2L);
+      // A scenario filtered out at one of the two hook points is not even matched there.
+      assertThat(delay.matchedCount()).isEqualTo(1L);
+      assertThat(reject.matchedCount()).isEqualTo(2L);
     }
 
     @Test
