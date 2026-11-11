@@ -77,6 +77,33 @@ class ChaosQuarkusBuildStepTest {
   static final class ChaosGrandchild extends AbstractChaosMiddle {}
 
   @Test
+  @DisplayName(
+      "makes the concrete implementations of a @QuarkusChaosTest interface test-class beans")
+  void implementingTestClassesAreBeans() throws Exception {
+    final org.jboss.jandex.Index index =
+        org.jboss.jandex.Index.of(
+            ChaosContract.class,
+            ChaosImplementation.class,
+            AbstractChaosImplementation.class,
+            PlainFixture.class,
+            com.macstab.chaos.jvm.quarkus.QuarkusChaosTest.class);
+    final java.util.List<String> beans = new java.util.ArrayList<>();
+
+    step.chaosTestClassBeans(
+        new io.quarkus.deployment.builditem.CombinedIndexBuildItem(index, index),
+        item -> beans.add(item.getTestClassName()));
+
+    assertThat(beans).containsExactly(ChaosImplementation.class.getName());
+  }
+
+  @com.macstab.chaos.jvm.quarkus.QuarkusChaosTest
+  interface ChaosContract {}
+
+  static final class ChaosImplementation implements ChaosContract {}
+
+  abstract static class AbstractChaosImplementation implements ChaosContract {}
+
+  @Test
   @DisplayName("records the agent install for runtime init")
   void installsAtRuntimeInit() {
     final AtomicInteger installs = new AtomicInteger();

@@ -94,11 +94,18 @@ public final class ChaosQuarkusBuildStep {
       if (annotation.target().kind() == AnnotationTarget.Kind.CLASS
           && !annotation.target().asClass().isAnnotation()) {
         final ClassInfo annotated = annotation.target().asClass();
-        testClassBeans.produce(new TestClassBeanBuildItem(annotated.name().toString()));
-        // The annotation is @Inherited: JUnit runs a subclass as a chaos test too, and Jandex
-        // lists only the class that declares it.
-        for (final ClassInfo subclass : index.getIndex().getAllKnownSubclasses(annotated.name())) {
-          if (!Modifier.isAbstract(subclass.flags())) {
+        // The annotation is @Inherited, and JUnit also finds it on an implemented interface: it
+        // runs a subclass or an implementing class as a chaos test too, and Jandex lists only the
+        // type that declares it.
+        final java.util.Collection<ClassInfo> inheriting =
+            annotated.isInterface()
+                ? index.getIndex().getAllKnownImplementations(annotated.name())
+                : index.getIndex().getAllKnownSubclasses(annotated.name());
+        if (!annotated.isInterface()) {
+          testClassBeans.produce(new TestClassBeanBuildItem(annotated.name().toString()));
+        }
+        for (final ClassInfo subclass : inheriting) {
+          if (!Modifier.isAbstract(subclass.flags()) && !subclass.isInterface()) {
             testClassBeans.produce(new TestClassBeanBuildItem(subclass.name().toString()));
           }
         }
