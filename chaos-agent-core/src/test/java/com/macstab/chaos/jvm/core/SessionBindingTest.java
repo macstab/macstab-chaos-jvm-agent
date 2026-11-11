@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ChaosSession;
-import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.Map;
@@ -64,19 +63,20 @@ class SessionBindingTest {
     final ScopeContext scopes = new ScopeContext();
     Object carrier = new Object();
     handoff.capture(carrier, "s1");
-    final WeakReference<Object> collected = new WeakReference<>(carrier);
     carrier = null;
+    final Object next = new Object();
+    // The collector clears the carrier's key at once but the Reference Handler enqueues it later,
+    // so one capture can run in between and still find nothing to drop: capture until one has.
     await()
         .atMost(Duration.ofSeconds(10))
         .pollInterval(Duration.ofMillis(20))
         .until(
             () -> {
               System.gc();
-              return collected.get() == null;
+              handoff.capture(next, "s2");
+              return captured(handoff).size() == 1;
             });
 
-    final Object next = new Object();
-    handoff.capture(next, "s2");
     handoff.enter(next, scopes);
     assertThat(scopes.currentSessionId()).isEqualTo("s2");
     handoff.exit(next);
