@@ -60,6 +60,75 @@ class HookCoverageTest {
     assertThat(HookCoverage.matched()).contains("HookCoverageTest on " + methods);
   }
 
+  /** A third stand-in, for the hooks of {@code advisable}. */
+  static final class BodilessAdvice {}
+
+  @Test
+  @DisplayName("a hook that matches only abstract or native methods is reported inactive")
+  void abstractOrNativeOnlyIsUnmatched() {
+    final ElementMatcher<MethodDescription> hook =
+        JdkInstrumentationInstaller.advisable(
+            BodilessAdvice.class,
+            ElementMatchers.named("read").or(ElementMatchers.named("hashCode")));
+    final MethodDescription abstractRead =
+        TypeDescription.ForLoadedType.of(java.io.InputStream.class)
+            .getDeclaredMethods()
+            .filter(ElementMatchers.named("read").and(ElementMatchers.takesArguments(0)))
+            .getOnly();
+    final MethodDescription nativeHashCode =
+        TypeDescription.ForLoadedType.of(Object.class)
+            .getDeclaredMethods()
+            .filter(ElementMatchers.named("hashCode"))
+            .getOnly();
+
+    assertThat(hook.matches(abstractRead)).isFalse();
+    assertThat(hook.matches(nativeHashCode)).isFalse();
+    assertThat(HookCoverage.unmatched())
+        .anyMatch(id -> id.startsWith("HookCoverageTest.BodilessAdvice on "));
+    assertThat(HookCoverage.matched())
+        .noneMatch(id -> id.startsWith("HookCoverageTest.BodilessAdvice on "));
+  }
+
+  @Test
+  @DisplayName("a failure is recorded with its causes: the refused class and the reason")
+  void failureKeepsItsCauses() {
+    HookCoverage.reset();
+    try {
+      HookCoverage.failed(
+          "NIO",
+          new IllegalStateException(
+              "Could not install class file transformer",
+              new java.lang.instrument.UnmodifiableClassException("probe.Refused")));
+      assertThat(HookCoverage.failures())
+          .containsExactly(
+              "NIO: java.lang.IllegalStateException: Could not install class file transformer"
+                  + " <- java.lang.instrument.UnmodifiableClassException: probe.Refused");
+    } finally {
+      HookCoverage.reset();
+    }
+  }
+
+  @Test
+  @DisplayName("a failure description is capped, also for a cause chain that loops")
+  void failureDescriptionIsCapped() {
+    final IllegalStateException outer = new IllegalStateException("x".repeat(600));
+    final IllegalStateException inner = new IllegalStateException("y".repeat(600), outer);
+    outer.initCause(inner);
+
+    assertThat(HookCoverage.describe(outer)).hasSize(HookCoverage.MAX_DESCRIPTION);
+    assertThat(
+            HookCoverage.describe(
+                new IllegalStateException(
+                    "a".repeat(600),
+                    new IllegalStateException(
+                        "b".repeat(600), new IllegalStateException("never reached")))))
+        .as("a long chain stops at the cap")
+        .hasSize(HookCoverage.MAX_DESCRIPTION)
+        .doesNotContain("never reached");
+    assertThat(HookCoverage.describe(new IllegalStateException("short")))
+        .isEqualTo("java.lang.IllegalStateException: short");
+  }
+
   @Test
   @DisplayName("failures beyond the bound are dropped: a type refused over and over grows nothing")
   void failuresAreBounded() {

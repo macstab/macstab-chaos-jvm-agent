@@ -184,7 +184,13 @@ public final class JdkInstrumentationInstaller {
             }
           });
       if (eager) {
-        weave(instrumentation, EnumSet.allOf(OperationType.class));
+        final Set<OperationType> all = EnumSet.allOf(OperationType.class);
+        if (clockPackages.isEmpty()) {
+          // Without clockCallSites the call-site group weaves nothing; it is woven (and warns)
+          // when a SYSTEM_CLOCK_* scenario is activated.
+          all.removeAll(HookGroup.CLOCK_CALL_SITES.operations());
+        }
+        weave(instrumentation, all);
       }
     } catch (final RuntimeException | Error failure) {
       // Leave nothing bound to this runtime: a later install attempt must start from a clean
@@ -241,7 +247,13 @@ public final class JdkInstrumentationInstaller {
             // LinkageError (a type of a module the runtime lacks) fails the group, not the JVM.
             HookCoverage.failed(group.name(), failure);
             throw new IllegalStateException(
-                "failed to instrument " + group + " for " + group.operations(), failure);
+                "failed to instrument "
+                    + group
+                    + " for "
+                    + group.operations()
+                    + ": "
+                    + HookCoverage.describe(failure),
+                failure);
           }
           WOVEN_GROUPS.put(group, transformer);
           wovenNow = true;
@@ -957,14 +969,24 @@ public final class JdkInstrumentationInstaller {
    * ({@link HookCoverage}): a hook whose JDK method changed is reported instead of going inert.
    *
    * <p>Bridge methods are never advised: a bridge only calls the method it bridges to, which is the
-   * one call to evaluate. A hook that would match a bridge alone is reported as unmatched.
+   * one call to evaluate. Abstract and native methods have no body, so ByteBuddy's {@link Advice}
+   * leaves them as they are. A hook that would match only such methods is reported as unmatched.
    */
   static AsmVisitorWrapper advise(
       final Class<?> advice, final ElementMatcher<? super MethodDescription> methods) {
-    return Advice.to(advice)
-        .on(
-            ElementMatchers.not(ElementMatchers.isBridge())
-                .and(HookCoverage.track(advice, methods)));
+    return Advice.to(advice).on(advisable(advice, methods));
+  }
+
+  /**
+   * The methods {@link #advise} applies {@code advice} to: those {@code methods} matches that have
+   * a body and are no bridge, recorded by {@link HookCoverage}. Package-private as a test seam.
+   */
+  static ElementMatcher<MethodDescription> advisable(
+      final Class<?> advice, final ElementMatcher<? super MethodDescription> methods) {
+    return ElementMatchers.not(ElementMatchers.isBridge())
+        .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+        .and(ElementMatchers.not(ElementMatchers.isNative()))
+        .and(HookCoverage.track(advice, methods));
   }
 
   /**

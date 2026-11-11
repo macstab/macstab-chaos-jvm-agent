@@ -77,7 +77,33 @@ final class HookCoverage {
    * @param failure why
    */
   static void failed(final String typeName, final Throwable failure) {
-    failed(typeName, failure.toString());
+    failed(typeName, describe(failure));
+  }
+
+  /** The most characters {@link #describe} returns. */
+  static final int MAX_DESCRIPTION = 1_000;
+
+  /**
+   * Describes {@code failure} with its causes, joined by {@code " <- "}: ByteBuddy wraps a refused
+   * retransformation in {@code IllegalStateException: Could not install class file transformer},
+   * and the refused class and the reason are in the cause. Capped at {@link #MAX_DESCRIPTION}
+   * characters.
+   *
+   * @param failure the failure
+   * @return the failure and its causes
+   */
+  static String describe(final Throwable failure) {
+    final StringBuilder description = new StringBuilder(failure.toString());
+    final Set<Throwable> seen = Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+    seen.add(failure);
+    for (Throwable cause = failure.getCause();
+        cause != null && seen.add(cause) && description.length() < MAX_DESCRIPTION;
+        cause = cause.getCause()) {
+      description.append(" <- ").append(cause);
+    }
+    return description.length() <= MAX_DESCRIPTION
+        ? description.toString()
+        : description.substring(0, MAX_DESCRIPTION);
   }
 
   /**
