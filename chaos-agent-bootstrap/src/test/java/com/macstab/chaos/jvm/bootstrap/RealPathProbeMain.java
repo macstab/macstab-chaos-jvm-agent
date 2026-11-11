@@ -227,7 +227,8 @@ public final class RealPathProbeMain {
     final Instant now = Instant.now();
     switch (policy) {
       case "rate-limit" -> builder.rateLimit(5L, Duration.ofSeconds(1));
-      case "active-from" -> builder.activeFrom(now.plusMillis(1_000));
+      // Wide enough for the activation's weaving and the calls before the window.
+      case "active-from" -> builder.activeFrom(now.plusMillis(3_000));
       case "active-for" -> {
         builder.activeFor(Duration.ofMillis(300));
         effect = ChaosEffect.delay(Duration.ofMillis(200));
@@ -250,7 +251,8 @@ public final class RealPathProbeMain {
                 .build());
     switch (policy) {
       case "rate-limit" -> {
-        sleepCalls(100);
+        // 20 one-millisecond sleeps fit the first 1 s window even on a slow runner.
+        sleepCalls(20);
         extra.add("appliedFirstWindow=" + handle.appliedCount());
         pause(1_100L);
         sleepCalls(10);
@@ -259,7 +261,8 @@ public final class RealPathProbeMain {
         sleepCalls(10);
         extra.add("matchedBeforeFrom=" + handle.matchedCount());
         extra.add("appliedBeforeFrom=" + handle.appliedCount());
-        pause(1_500L);
+        pause(
+            Math.max(0L, Duration.between(Instant.now(), now.plusMillis(3_000)).toMillis()) + 300L);
         sleepCalls(10);
       }
       case "active-for", "active-until" -> {
