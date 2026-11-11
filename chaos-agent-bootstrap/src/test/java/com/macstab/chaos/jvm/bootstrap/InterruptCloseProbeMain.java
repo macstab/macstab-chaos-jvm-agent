@@ -38,9 +38,10 @@ public final class InterruptCloseProbeMain {
   /**
    * A reader blocked on a file channel (a FIFO, opened read-write so the open does not wait for a
    * writer) under a {@code FILE_IO_CLOSE} delay, and one blocked on a socket channel under a {@code
-   * SOCKET_CLOSE} delay; each is interrupted. Prints, per {@code file} and {@code socket}, how long
-   * {@code interrupt()} took in milliseconds, what the reader saw, and the scenario's applied
-   * count.
+   * SOCKET_CLOSE} delay; each is interrupted, on a platform thread and on a virtual one ({@code
+   * VirtualThread} overrides {@code interrupt()}). Prints, per {@code file}, {@code fileVirtual}
+   * (JDK 21), {@code socket} and {@code socketVirtual}, how long {@code interrupt()} took in
+   * milliseconds and what the reader saw, and per scenario its applied count.
    */
   private static void interruptClose() throws Exception {
     final Path fifo = Files.createTempDirectory("interrupt-close").resolve("fifo");
@@ -55,7 +56,14 @@ public final class InterruptCloseProbeMain {
             ChaosEffect.delay(CLOSE_DELAY))) {
       final FileChannel channel =
           FileChannel.open(fifo, StandardOpenOption.READ, StandardOpenOption.WRITE);
-      interruptReader("file", () -> channel.read(ByteBuffer.allocate(4)));
+      interruptReader("file", false, () -> channel.read(ByteBuffer.allocate(4)));
+      // JDK 25 keeps a virtual thread blocked on a FIFO until its read ends, also without the
+      // agent: there the virtual row is the socket's only.
+      if (Runtime.version().feature() == 21) {
+        final FileChannel virtual =
+            FileChannel.open(fifo, StandardOpenOption.READ, StandardOpenOption.WRITE);
+        interruptReader("fileVirtual", true, () -> virtual.read(ByteBuffer.allocate(4)));
+      }
       System.out.println("file.applied=" + delay.appliedCount());
     }
     try (ServerSocketChannel server =
@@ -63,22 +71,31 @@ public final class InterruptCloseProbeMain {
                 .bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
         SocketChannel client = SocketChannel.open(server.getLocalAddress());
         SocketChannel peer = server.accept();
+        SocketChannel virtual = SocketChannel.open(server.getLocalAddress());
+        SocketChannel virtualPeer = server.accept();
         ChaosActivationHandle delay =
             RealCallRows.activate(
                 "socket-close-delay",
                 ChaosSelector.network(Set.of(OperationType.SOCKET_CLOSE)),
                 ChaosEffect.delay(CLOSE_DELAY))) {
-      interruptReader("socket", () -> client.read(ByteBuffer.allocate(4)));
+      interruptReader("socket", false, () -> client.read(ByteBuffer.allocate(4)));
+      interruptReader("socketVirtual", true, () -> virtual.read(ByteBuffer.allocate(4)));
       System.out.println("socket.applied=" + delay.appliedCount());
     }
   }
 
-  /** Starts {@code read} on a thread, interrupts it once it blocks, and prints what happened. */
-  private static void interruptReader(final String row, final RealCallRows.Call read)
-      throws Exception {
+  /**
+   * Starts {@code read} on a platform or virtual thread, interrupts it once it blocks, and prints
+   * what happened.
+   */
+  private static void interruptReader(
+      final String row, final boolean virtual, final RealCallRows.Call read) throws Exception {
     final AtomicReference<String> outcome = new AtomicReference<>("none");
+    final Runnable reading = () -> outcome.set(RealCallRows.outcome(read));
     final Thread reader =
-        new Thread(() -> outcome.set(RealCallRows.outcome(read)), "interrupt-close-" + row);
+        virtual
+            ? Thread.ofVirtual().name("interrupt-close-" + row).unstarted(reading)
+            : Thread.ofPlatform().name("interrupt-close-" + row).unstarted(reading);
     reader.start();
     // A blocked native read stays RUNNABLE, so there is no state to wait for: give it time.
     Thread.sleep(300);

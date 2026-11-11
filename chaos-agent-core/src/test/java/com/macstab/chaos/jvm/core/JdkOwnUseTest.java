@@ -172,8 +172,15 @@ class JdkOwnUseTest {
 
   /** Runs {@code action} inside the close the JDK makes when it interrupts a blocked thread. */
   private static boolean insideInterrupt(final CloseAction action) throws Exception {
+    return insideInterrupt(action, false);
+  }
+
+  /** As {@link #insideInterrupt(CloseAction)}, the blocked thread virtual when asked. */
+  private static boolean insideInterrupt(final CloseAction action, final boolean virtual)
+      throws Exception {
     final RecordingChannel channel = new RecordingChannel(action);
-    final Thread reader = new Thread(channel::block);
+    final Thread reader =
+        virtual ? Thread.ofVirtual().unstarted(channel::block) : new Thread(channel::block);
     reader.start();
     while (reader.getState() != Thread.State.WAITING) {
       Thread.onSpinWait();
@@ -194,6 +201,8 @@ class JdkOwnUseTest {
     plain.join(5_000L);
 
     assertThat(insideInterrupt(JdkOwnUse::isInterruptClose)).isTrue();
+    // VirtualThread.interrupt() overrides Thread.interrupt() without calling it.
+    assertThat(insideInterrupt(JdkOwnUse::isInterruptClose, true)).as("virtual").isTrue();
     assertThat(closedByCall.result.getNow(null)).isFalse();
     assertThat(onThreadRun.getNow(null)).as("Thread.run on the stack").isFalse();
   }

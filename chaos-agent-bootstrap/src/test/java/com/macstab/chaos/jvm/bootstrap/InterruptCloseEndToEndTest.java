@@ -34,6 +34,17 @@ class InterruptCloseEndToEndTest {
               .assertThat(result.value("socket.reader"))
               .isEqualTo("java.nio.channels.ClosedByInterruptException");
           softly.assertThat(result.longValue("socket.applied")).isZero();
+          // A virtual thread's interrupt runs VirtualThread.interrupt, not Thread.interrupt.
+          softly.assertThat(result.longValue("socketVirtual.interruptMillis")).isLessThan(1_000L);
+          softly
+              .assertThat(result.value("socketVirtual.reader"))
+              .isEqualTo("java.nio.channels.ClosedByInterruptException");
+          if (Runtime.version().feature() == 21) {
+            softly.assertThat(result.longValue("fileVirtual.interruptMillis")).isLessThan(1_000L);
+            softly
+                .assertThat(result.value("fileVirtual.reader"))
+                .isEqualTo("java.nio.channels.ClosedByInterruptException");
+          }
         });
   }
 }
