@@ -60,6 +60,13 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   private final Object lifecycleLock = new Object();
 
   /**
+   * The keys ({@code <scopeKey>::<id>}) of the scenarios being activated, claimed before a stressor
+   * is built and released once the scenario is registered or its activation failed: of two
+   * concurrent activations of one id, the second is refused before it builds anything.
+   */
+  private final Set<String> activating = ConcurrentHashMap.newKeySet();
+
+  /**
    * Which plan's observability settings a scenario carries, by {@code <scopeKey>::<id>}: only that
    * owner may clear them, so a rejected or later plan with the same ids cannot strip the settings
    * of the running one, and a plan in one scope never changes the same id in another.
@@ -612,6 +619,8 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     boolean validated = false;
     boolean weavingFailed = false;
     boolean registeredInRegistry = false;
+    final String key = scopeKey + "::" + scenario.id();
+    boolean claimed = false;
     try {
       // The scope check first: a session-scoped scenario outside a session, or a JVM-scoped one in
       // a session, is refused and recorded like every other invalid scenario.
@@ -633,6 +642,12 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
         weavingFailed = true;
         throw weavingFailed("scenario " + scenario.id(), weavingFailure);
       }
+      // Claimed until the scenario is registered or its activation failed: a concurrent one of the
+      // same id is refused here, before it builds a second stressor.
+      if (!activating.add(key)) {
+        throw new ChaosActivationConflictException("scenario key already being activated: " + key);
+      }
+      claimed = true;
       controller =
           new ScenarioController(
               scenario, scopeKey, sessionId, clock, observabilityBus, stressorFactory);
@@ -645,7 +660,6 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
           scenario.activationPolicy().startMode() == ActivationPolicy.StartMode.AUTOMATIC;
       if (automatic) {
         // An id taken by a running scenario is refused before its stressor is built.
-        final String key = scopeKey + "::" + scenario.id();
         if (registry.isLive(key)) {
           throw new ChaosActivationConflictException("scenario key already active: " + key);
         }
@@ -667,6 +681,10 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
         replaced = registry.register(controller);
       }
       registeredInRegistry = true;
+      // The registry holds the key from here; a listener of the events below may activate the id
+      // again, which the registry then refuses or, once this one has ended, accepts.
+      activating.remove(key);
+      claimed = false;
       // The finished controller this one replaces reports its end before the new one begins.
       if (replaced != null) {
         destroyQuietly(replaced);
@@ -736,6 +754,10 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
             error.toString());
       }
       throw error;
+    } finally {
+      if (claimed) {
+        activating.remove(key);
+      }
     }
   }
 

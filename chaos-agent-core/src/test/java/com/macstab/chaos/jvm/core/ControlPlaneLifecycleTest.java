@@ -311,6 +311,65 @@ class ControlPlaneLifecycleTest {
   class Activations {
 
     @Test
+    @DisplayName("of one id at once build one stressor; the other is refused as a conflict")
+    void concurrentActivationsBuildOneStressor() throws Exception {
+      final AtomicInteger builds = new AtomicInteger();
+      final CountDownLatch building = new CountDownLatch(1);
+      final CountDownLatch release = new CountDownLatch(1);
+      final java.util.concurrent.ExecutorService activators =
+          java.util.concurrent.Executors.newFixedThreadPool(2);
+      try (ChaosControlPlaneImpl plane =
+          new ChaosControlPlaneImpl(
+              Clock.systemUTC(),
+              com.macstab.chaos.jvm.api.ChaosMetricsSink.NOOP,
+              new StressorFactory(java.util.Optional::empty) {
+                @Override
+                ManagedStressor createIfNeeded(
+                    final ChaosEffect effect,
+                    final boolean allowDestructiveEffects,
+                    final java.util.function.Consumer<String> onEnd) {
+                  builds.incrementAndGet();
+                  building.countDown();
+                  try {
+                    release.await(10, TimeUnit.SECONDS);
+                  } catch (final InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                  }
+                  return super.createIfNeeded(effect, allowDestructiveEffects, onEnd);
+                }
+              })) {
+        final ChaosScenario scenario =
+            ChaosScenario.builder("twice")
+                .selector(ChaosSelector.stress(ChaosSelector.StressTarget.THREAD_LOCAL_LEAK))
+                .effect(new ChaosEffect.ThreadLocalLeakEffect(1, 1))
+                .build();
+        final java.util.concurrent.Future<ChaosActivationHandle> first =
+            activators.submit(() -> plane.activate(scenario));
+        assertThat(building.await(10, TimeUnit.SECONDS)).isTrue();
+        final java.util.concurrent.Future<ChaosActivationHandle> second =
+            activators.submit(() -> plane.activate(scenario));
+        try {
+          // Refused while the first still builds, or building a second stressor.
+          org.awaitility.Awaitility.await()
+              .atMost(Duration.ofSeconds(10))
+              .until(() -> second.isDone() || builds.get() == 2);
+        } finally {
+          release.countDown();
+        }
+
+        assertThatThrownBy(() -> second.get(10, TimeUnit.SECONDS))
+            .hasCauseInstanceOf(com.macstab.chaos.jvm.api.ChaosActivationConflictException.class);
+        first.get(10, TimeUnit.SECONDS).stop();
+        assertThat(builds).as("stressors built").hasValue(1);
+        assertThat(plane.diagnostics().snapshot().failures())
+            .extracting(ChaosDiagnostics.ActivationFailure::category)
+            .containsExactly(ChaosDiagnostics.FailureCategory.ACTIVATION_CONFLICT);
+      } finally {
+        activators.shutdownNow();
+      }
+    }
+
+    @Test
     @DisplayName("a session-scoped scenario activated outside a session is recorded as invalid")
     void sessionScopeOutsideASession() {
       assertThatThrownBy(
