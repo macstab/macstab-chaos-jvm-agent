@@ -66,7 +66,18 @@ final class ClientLibraryHooks {
                         ClientCallAdvice.GrpcNewStream.class,
                         ElementMatchers.named("newStream")
                             .and(ElementMatchers.takesArguments(4))
-                            .and(ElementMatchers.not(ElementMatchers.isAbstract())))));
+                            .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
+        // A call on a channel with retries: each attempt, so the retry policy sees a reject.
+        .type(
+            ElementMatchers.named(
+                "io.grpc.internal.ManagedChannelImpl$ChannelStreamProvider$1RetryStream"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    advise(
+                        ClientCallAdvice.GrpcNewSubstream.class,
+                        ElementMatchers.named("newSubstream")
+                            .and(ElementMatchers.takesArguments(5)))));
   }
 
   /** Jedis and Lettuce command dispatch. */

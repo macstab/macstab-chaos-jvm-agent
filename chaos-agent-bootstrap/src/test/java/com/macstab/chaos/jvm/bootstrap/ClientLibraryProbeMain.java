@@ -287,7 +287,7 @@ public final class ClientLibraryProbeMain {
     }
   }
 
-  private static io.grpc.MethodDescriptor<String, String> echoSay() {
+  static io.grpc.MethodDescriptor<String, String> echoSay() {
     final io.grpc.MethodDescriptor.Marshaller<String> marshaller =
         new io.grpc.MethodDescriptor.Marshaller<>() {
           @Override
@@ -312,7 +312,7 @@ public final class ClientLibraryProbeMain {
         .build();
   }
 
-  private static io.grpc.ServerServiceDefinition echoService(
+  static io.grpc.ServerServiceDefinition echoService(
       final io.grpc.MethodDescriptor<String, String> say) {
     return io.grpc.ServerServiceDefinition.builder("probe.Echo")
         .addMethod(

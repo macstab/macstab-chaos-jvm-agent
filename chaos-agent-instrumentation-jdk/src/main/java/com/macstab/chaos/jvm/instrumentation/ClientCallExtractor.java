@@ -185,6 +185,37 @@ public final class ClientCallExtractor {
     return stringOf(methodDescriptor, "getFullMethodName");
   }
 
+  /** The channel stream provider of a managed channel, whose channel may retry. */
+  private static final String GRPC_CHANNEL_PROVIDER =
+      "io.grpc.internal.ManagedChannelImpl$ChannelStreamProvider";
+
+  /**
+   * Whether {@code provider} is a managed channel's stream provider with retries enabled (gRPC's
+   * default): it opens a {@code RetriableStream}, whose attempts the retry policy repeats. Those
+   * attempts are evaluated one by one ({@code GrpcNewSubstream}), so the policy sees a rejected
+   * attempt as it sees a real {@code UNAVAILABLE}.
+   *
+   * @param provider the {@code ClientStreamProvider}
+   * @return {@code true} when the call's attempts are evaluated instead of the call
+   */
+  public static boolean grpcRetries(final Object provider) {
+    if (!GRPC_CHANNEL_PROVIDER.equals(provider.getClass().getName())) {
+      return false;
+    }
+    try {
+      final java.lang.reflect.Field outer = provider.getClass().getDeclaredField("this$0");
+      outer.setAccessible(true);
+      final Object channel = outer.get(provider);
+      final java.lang.reflect.Field retryEnabled =
+          channel.getClass().getDeclaredField("retryEnabled");
+      retryEnabled.setAccessible(true);
+      return retryEnabled.getBoolean(channel);
+    } catch (final ReflectiveOperationException | RuntimeException unreadable) {
+      // Evaluated per call, as before.
+      return false;
+    }
+  }
+
   /**
    * Builds the stream gRPC itself returns for a call that fails before it reaches a transport: an
    * {@code io.grpc.internal.FailingClientStream} for the status of {@code rejected} (a {@code

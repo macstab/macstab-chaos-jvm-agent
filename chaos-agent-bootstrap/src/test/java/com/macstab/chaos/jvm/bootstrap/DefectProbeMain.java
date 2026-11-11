@@ -1837,6 +1837,7 @@ public final class DefectProbeMain {
       "com.zaxxer.hikari.pool.HikariPool",
       "com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool",
       "io.grpc.internal.ManagedChannelImpl$ChannelStreamProvider",
+      "io.grpc.internal.ManagedChannelImpl$ChannelStreamProvider$1RetryStream",
       "io.lettuce.core.RedisChannelHandler",
       "io.netty.channel.nio.AbstractNioByteChannel",
       "io.netty.channel.nio.AbstractNioByteChannel$NioByteUnsafe",

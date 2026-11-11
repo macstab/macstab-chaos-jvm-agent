@@ -89,6 +89,9 @@ final class ClientCallAdvice {
       final String fullMethodName;
       BootstrapDispatcher.beginInternalCall();
       try {
+        if (ClientCallExtractor.grpcRetries(provider)) {
+          return null; // each attempt is evaluated (GrpcNewSubstream)
+        }
         fullMethodName = ClientCallExtractor.grpcMethod(method);
       } finally {
         BootstrapDispatcher.endInternalCall();
@@ -96,6 +99,58 @@ final class ClientCallAdvice {
       try {
         BootstrapDispatcher.beforeClientCall(
             OperationTags.RPC_CALL, provider, fullMethodName, null, null);
+        return null;
+      } catch (final Throwable rejected) {
+        return rejected;
+      }
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final @Nullable Throwable rejected,
+        @Advice.Return(readOnly = false, typing = Assigner.Typing.DYNAMIC) Object stream)
+        throws Throwable {
+      if (rejected != null) {
+        final Object failing;
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          failing = ClientCallExtractor.grpcFailingStream(rejected);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        if (failing == null) {
+          throw rejected;
+        }
+        stream = failing;
+      }
+    }
+  }
+
+  /**
+   * {@code newSubstream} of a managed channel's {@code RetriableStream} ({@code
+   * ManagedChannelImpl.ChannelStreamProvider.RetryStream}): once per attempt of a call on a channel
+   * with retries enabled. A reject skips the attempt's real stream and returns gRPC's {@code
+   * FailingClientStream}, so the retry policy sees the {@code UNAVAILABLE} as it sees a real one
+   * and retries it when the policy says so.
+   */
+  static final class GrpcNewSubstream {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static @Nullable Throwable enter(
+        @Advice.This final Object retryStream,
+        @Advice.FieldValue("val$method") final Object method) {
+      if (BootstrapDispatcher.idle(OperationTags.RPC_CALL)) {
+        return null;
+      }
+      final String fullMethodName;
+      BootstrapDispatcher.beginInternalCall();
+      try {
+        fullMethodName = ClientCallExtractor.grpcMethod(method);
+      } finally {
+        BootstrapDispatcher.endInternalCall();
+      }
+      try {
+        BootstrapDispatcher.beforeClientCall(
+            OperationTags.RPC_CALL, retryStream, fullMethodName, null, null);
         return null;
       } catch (final Throwable rejected) {
         return rejected;
