@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -556,6 +558,54 @@ class StressorEdgeBehaviourTest {
                 message ->
                     message.startsWith("[chaos-agent] chaos thread-local-leak planted entry on "))
             .hasSize(stressor.plantedCount());
+      }
+    }
+
+    @Test
+    @DisplayName("on a busy common pool the entries are planted by its workers, not the caller")
+    void plantsOnPoolWorkersOnly() throws Exception {
+      final ForkJoinPool pool = ForkJoinPool.commonPool();
+      final CountDownLatch release = new CountDownLatch(1);
+      final CountDownLatch busy = new CountDownLatch(pool.getParallelism());
+      final AtomicReference<@Nullable ThreadLocalLeakStressor> built = new AtomicReference<>();
+      final Thread activating =
+          new Thread(
+              () ->
+                  built.set(
+                      new ThreadLocalLeakStressor(new ChaosEffect.ThreadLocalLeakEffect(1, 1))),
+              "activating-application-thread");
+      try (LogCapture log = LogCapture.agent()) {
+        try {
+          for (int i = 0; i < pool.getParallelism(); i++) {
+            pool.execute(
+                () -> {
+                  busy.countDown();
+                  try {
+                    release.await();
+                  } catch (final InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                  }
+                });
+          }
+          assertThat(busy.await(5, TimeUnit.SECONDS)).isTrue();
+          // Every worker is busy: the planting tasks wait in the activating thread's queue.
+          activating.start();
+          activating.join(300);
+        } finally {
+          release.countDown();
+        }
+        activating.join(TimeUnit.SECONDS.toMillis(ThreadLocalLeakStressor.PLANT_TIMEOUT_SECONDS));
+
+        final ThreadLocalLeakStressor stressor = built.get();
+        assertThat(stressor).as("the stressor was built").isNotNull();
+        stressor.close();
+        assertThat(log.messages())
+            .filteredOn(
+                message ->
+                    message.startsWith("[chaos-agent] chaos thread-local-leak planted entry on "))
+            .hasSize(stressor.plantedCount())
+            .noneMatch(message -> message.endsWith("activating-application-thread"))
+            .allMatch(message -> message.contains("ForkJoinPool.commonPool-worker-"));
       }
     }
   }

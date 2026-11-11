@@ -4,12 +4,12 @@ import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.RecursiveAction;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -24,7 +24,10 @@ import org.jspecify.annotations.Nullable;
  * workers; which worker holds which entry is up to the pool. The constructor returns once every
  * entry is planted, and fails with {@link ChaosUnsupportedFeatureException} when the pool has not
  * planted them all within {@value #PLANT_TIMEOUT_SECONDS} s (its workers are busy or blocked); the
- * entries are then emptied and the remaining tasks cancelled.
+ * entries are then emptied and the remaining tasks cancelled. Only the pool's workers plant: the
+ * constructor waits for the entries without joining the tasks, since a join or {@code get()} from a
+ * thread outside the pool may run a task still queued on that thread (JDK 25 does), which would
+ * plant the entry on the activating application thread.
  *
  * <p>The planting is the agent's own work (L3): its tasks are {@link AgentOwned}, so no
  * FORK_JOIN_TASK_RUN scenario holds them, and they run with the dispatch depth raised, so no
@@ -80,6 +83,7 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
     }
     final List<Planted> holders = new ArrayList<>(totalLocals);
     final List<ForkJoinTask<?>> tasks = new ArrayList<>(totalLocals);
+    final Progress progress = new Progress(totalLocals);
     final int valueSizeBytes = effect.valueSizeBytes();
     for (int i = 0; i < totalLocals; i++) {
       // One instance per entry is the leak this stressor produces.
@@ -87,25 +91,36 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
       final ThreadLocal<Planted> local = new ThreadLocal<>();
       final Planted holder = new Planted(new byte[valueSizeBytes]);
       holders.add(holder);
-      tasks.add(ForkJoinPool.commonPool().submit(new Planting(local, holder)));
+      tasks.add(ForkJoinPool.commonPool().submit(new Planting(local, holder, progress)));
     }
-    awaitPlanting(tasks, holders);
+    awaitPlanting(progress, tasks, holders);
     this.planted = List.copyOf(holders);
   }
 
   /**
-   * Waits for every planting task; on a timeout, an interrupt or a failed task, empties every
-   * holder and cancels the remaining tasks before it throws, so a task that runs late plants an
-   * empty holder.
+   * Waits until the workers have planted every entry; on a timeout, an interrupt or a failed task,
+   * empties every holder and cancels the remaining tasks before it throws, so a task that runs late
+   * plants an empty holder. It blocks through {@link ForkJoinPool#managedBlock}, so an activation
+   * from a common-pool worker lets the pool add a worker for the tasks it waits on.
    */
   private static void awaitPlanting(
-      final List<ForkJoinTask<?>> tasks, final List<Planted> holders) {
-    final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(PLANT_TIMEOUT_SECONDS);
+      final Progress progress, final List<ForkJoinTask<?>> tasks, final List<Planted> holders) {
     try {
-      for (final ForkJoinTask<?> task : tasks) {
-        task.get(Math.max(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+      ForkJoinPool.managedBlock(progress);
+    } catch (final InterruptedException interrupted) {
+      abandon(tasks, holders);
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("thread-local-leak: interrupted while planting", interrupted);
+    }
+    final Throwable failure = progress.failure.get();
+    if (failure != null) {
+      abandon(tasks, holders);
+      if (failure instanceof RuntimeException runtime) {
+        throw runtime;
       }
-    } catch (final TimeoutException timedOut) {
+      throw (Error) failure;
+    }
+    if (!progress.planted()) {
       abandon(tasks, holders);
       throw new ChaosUnsupportedFeatureException(
           "thread-local-leak: the common ForkJoinPool did not plant the "
@@ -113,20 +128,44 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
               + " entries within "
               + PLANT_TIMEOUT_SECONDS
               + " s; its workers are busy or blocked");
-    } catch (final InterruptedException interrupted) {
-      abandon(tasks, holders);
-      Thread.currentThread().interrupt();
-      throw new IllegalStateException("thread-local-leak: interrupted while planting", interrupted);
-    } catch (final ExecutionException failed) {
-      abandon(tasks, holders);
-      final Throwable cause = failed.getCause();
-      if (cause instanceof RuntimeException runtime) {
-        throw runtime;
+    }
+  }
+
+  /**
+   * Counts the entries still to plant and keeps the first planting failure, until {@value
+   * #PLANT_TIMEOUT_SECONDS} s from its creation.
+   */
+  private static final class Progress implements ForkJoinPool.ManagedBlocker {
+    private final CountDownLatch remaining;
+    private final long deadline;
+    final AtomicReference<@Nullable Throwable> failure = new AtomicReference<>();
+
+    Progress(final int entries) {
+      this.remaining = new CountDownLatch(entries);
+      this.deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(PLANT_TIMEOUT_SECONDS);
+    }
+
+    /** Records one planting task as ended, {@code failed} or not. */
+    void ended(final @Nullable Throwable failed) {
+      if (failed != null) {
+        failure.compareAndSet(null, failed);
       }
-      if (cause instanceof Error error) {
-        throw error;
-      }
-      throw new IllegalStateException("thread-local-leak: planting failed", cause);
+      remaining.countDown();
+    }
+
+    boolean planted() {
+      return remaining.getCount() == 0L;
+    }
+
+    @Override
+    public boolean block() throws InterruptedException {
+      remaining.await(Math.max(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+      return true;
+    }
+
+    @Override
+    public boolean isReleasable() {
+      return planted() || failure.get() != null || deadline - System.nanoTime() <= 0L;
     }
   }
 
@@ -145,14 +184,17 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
 
     private final transient ThreadLocal<Planted> local;
     private final transient Planted holder;
+    private final transient Progress progress;
 
-    Planting(final ThreadLocal<Planted> local, final Planted holder) {
+    Planting(final ThreadLocal<Planted> local, final Planted holder, final Progress progress) {
       this.local = local;
       this.holder = holder;
+      this.progress = progress;
     }
 
     @Override
     protected void compute() {
+      @Nullable Throwable failed = null;
       DispatchDepth.increment();
       try {
         local.set(holder);
@@ -160,8 +202,12 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
             () ->
                 "[chaos-agent] chaos thread-local-leak planted entry on "
                     + Thread.currentThread().getName());
+      } catch (final RuntimeException | Error failure) {
+        failed = failure;
+        throw failure;
       } finally {
         DispatchDepth.decrement();
+        progress.ended(failed);
       }
     }
   }
