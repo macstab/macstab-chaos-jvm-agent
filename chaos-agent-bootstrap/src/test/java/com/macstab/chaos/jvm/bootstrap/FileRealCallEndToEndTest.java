@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.bootstrap;
 
 import static org.assertj.core.api.SoftAssertions.assertSoftly;
 
+import java.io.File;
 import java.nio.file.Path;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -25,11 +26,13 @@ class FileRealCallEndToEndTest {
           softly.assertThat(result.value("read.message")).isEqualTo("chaos");
           softly.assertThat(result.value("sync.type")).isEqualTo("java.io.SyncFailedException");
           softly.assertThat(result.value("truncate.type")).isEqualTo("java.io.IOException");
+          softly.assertThat(result.value("truncate.size")).as("not truncated").isEqualTo("4");
           softly.assertThat(result.value("map.type")).isEqualTo("java.io.IOException");
           softly.assertThat(result.value("readEio.type")).isEqualTo("java.io.IOException");
           softly.assertThat(result.value("readEio.message")).isEqualTo("Input/output error");
           softly.assertThat(result.value("writeEdquot.type")).isEqualTo("java.io.IOException");
           softly.assertThat(result.value("writeEdquot.message")).isEqualTo("Disk quota exceeded");
+          softly.assertThat(result.value("writeEdquot.firstByte")).as("not written").isEqualTo("1");
           softly.assertThat(result.value("close.type")).isEqualTo("java.io.IOException");
           softly.assertThat(result.value("close.closed")).isEqualTo("java.io.IOException");
           softly
@@ -51,13 +54,13 @@ class FileRealCallEndToEndTest {
               .isEqualTo("java.nio.file.FileSystemException");
           softly
               .assertThat(result.value("openEnfile.message"))
-              .endsWith("/data: Too many open files in system");
+              .endsWith(File.separator + "data: Too many open files in system");
           softly
               .assertThat(result.value("openEdquot.message"))
-              .endsWith("/new: Disk quota exceeded");
+              .endsWith(File.separator + "new: Disk quota exceeded");
           softly
               .assertThat(result.value("deleteEio.message"))
-              .endsWith("/data: Input/output error");
+              .endsWith(File.separator + "data: Input/output error");
           // FileDescriptor.sync() has no path, so a selector with a path pattern never matches it.
           softly.assertThat(result.value("streamSync.type")).isEqualTo("none");
         });

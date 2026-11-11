@@ -68,6 +68,7 @@ public final class FileRealCallProbeMain {
           () -> channel.read(ByteBuffer.allocate(4), 0));
       row("sync", dir, OperationType.FILE_IO_SYNC, reject, () -> channel.force(true));
       row("truncate", dir, OperationType.FILE_IO_TRUNCATE, reject, () -> channel.truncate(2));
+      System.out.println("truncate.size=" + channel.size());
       row(
           "map",
           dir,
@@ -86,6 +87,9 @@ public final class FileRealCallProbeMain {
           OperationType.FILE_IO_WRITE,
           ChaosEffect.errno(ChaosEffect.Errno.EDQUOT),
           () -> channel.write(ByteBuffer.allocate(1), 0));
+      final ByteBuffer first = ByteBuffer.allocate(1);
+      channel.read(first, 0);
+      System.out.println("writeEdquot.firstByte=" + first.get(0));
     }
     try (FileOutputStream out = new FileOutputStream(data.toFile(), true)) {
       row("streamSync", dir, OperationType.FILE_IO_SYNC, reject, () -> out.getFD().sync());
