@@ -1389,7 +1389,7 @@ public final class JdkInstrumentationInstaller {
                 TypeMatchers.subTypeOf(javax.management.MBeanServer.class)
                     .and(ElementMatchers.not(ElementMatchers.isInterface()))
                     .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
-                "com.sun.jmx."))
+                TypeMatchers.JDK_JMX))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder

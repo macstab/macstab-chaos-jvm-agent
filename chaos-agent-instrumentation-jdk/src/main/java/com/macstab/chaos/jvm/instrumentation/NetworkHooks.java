@@ -71,7 +71,7 @@ final class NetworkHooks {
                     .and(ElementMatchers.not(ElementMatchers.isAbstract()))
                     .and(ElementMatchers.not(ElementMatchers.isInterface()))
                     .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
-                "sun.nio.ch."))
+                TypeMatchers.JDK_CHANNELS))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
@@ -104,7 +104,7 @@ final class NetworkHooks {
                     .and(ElementMatchers.not(ElementMatchers.isAbstract()))
                     .and(ElementMatchers.not(ElementMatchers.isInterface()))
                     .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
-                "sun.nio.ch."))
+                TypeMatchers.JDK_CHANNELS))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
@@ -144,7 +144,7 @@ final class NetworkHooks {
                     .and(ElementMatchers.not(ElementMatchers.isAbstract()))
                     .and(ElementMatchers.not(ElementMatchers.isInterface()))
                     .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
-                "sun.nio.ch."))
+                TypeMatchers.JDK_CHANNELS))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
@@ -247,7 +247,7 @@ final class NetworkHooks {
                     .and(ElementMatchers.not(ElementMatchers.isAbstract()))
                     .and(ElementMatchers.not(ElementMatchers.isInterface()))
                     .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
-                "sun.nio.ch."))
+                TypeMatchers.JDK_CHANNELS))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
@@ -313,7 +313,7 @@ final class NetworkHooks {
                     .and(ElementMatchers.not(ElementMatchers.isAbstract()))
                     .and(ElementMatchers.not(ElementMatchers.isInterface()))
                     .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
-                "sun.nio.ch."))
+                TypeMatchers.JDK_CHANNELS))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
@@ -401,7 +401,7 @@ final class NetworkHooks {
                         .and(ElementMatchers.not(ElementMatchers.isAbstract()))
                         .and(ElementMatchers.not(ElementMatchers.isInterface()))
                         .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
-                    "sun.security.ssl."))
+                    TypeMatchers.JDK_TLS))
             .transform(
                 (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                     typeBuilder.visit(
@@ -424,7 +424,7 @@ final class NetworkHooks {
                         .and(ElementMatchers.not(ElementMatchers.isAbstract()))
                         .and(ElementMatchers.not(ElementMatchers.isInterface()))
                         .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
-                    "sun.security.ssl."))
+                    TypeMatchers.JDK_TLS))
             .transform(
                 (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                     typeBuilder.visit(

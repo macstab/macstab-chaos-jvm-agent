@@ -272,7 +272,7 @@ final class ConcurrencyHooks {
                 TypeMatchers.subTypeOf(java.util.concurrent.BlockingQueue.class)
                     .and(ElementMatchers.not(ElementMatchers.isInterface()))
                     .and(ElementMatchers.not(ElementMatchers.isSynthetic())),
-                "java.util.concurrent."))
+                TypeMatchers.JDK_CONCURRENT))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder

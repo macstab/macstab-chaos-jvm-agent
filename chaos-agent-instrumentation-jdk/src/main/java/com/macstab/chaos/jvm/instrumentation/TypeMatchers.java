@@ -58,6 +58,18 @@ final class TypeMatchers {
     return new Resolvable<>(ElementMatchers.hasSuperClass(matcher));
   }
 
+  /** The JDK's socket channels, server socket channels and selectors ({@code jdkNamedOr}). */
+  static final String JDK_CHANNELS = "sun.nio.ch.";
+
+  /** The JDK's {@code SSLSocket} and {@code SSLEngine} implementations. */
+  static final String JDK_TLS = "sun.security.ssl.";
+
+  /** The JDK's {@code MBeanServer} implementations. */
+  static final String JDK_JMX = "com.sun.jmx.";
+
+  /** The JDK's {@code BlockingQueue} implementations. */
+  static final String JDK_CONCURRENT = "java.util.concurrent.";
+
   /**
    * Restricts {@code types}, a matcher that walks a hierarchy the JDK implements, to the JDK
    * classes named with one of {@code jdkPrefixes}: a JDK class (one of a named module of the
