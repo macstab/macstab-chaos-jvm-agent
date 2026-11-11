@@ -35,8 +35,6 @@ awsSdk = "2.57.7"
 micrometer = "1.17.2"
 opentelemetry = "1.67.0"
 grpc = "1.85.1"
-# Test only: the gRPC retry probe's older shape (RetryStream.newSubstream with 2 arguments).
-grpcLegacy = "1.39.0"
 jedis = "8.0.2"
 kafka = "4.4.0"
 lettuce = "7.9.0.RELEASE"
@@ -60,8 +58,6 @@ aws-sdk-url-connection-client = { module = "software.amazon.awssdk:url-connectio
 grpc-core = { module = "io.grpc:grpc-core", version.ref = "grpc" }
 grpc-inprocess = { module = "io.grpc:grpc-inprocess", version.ref = "grpc" }
 grpc-stub = { module = "io.grpc:grpc-stub", version.ref = "grpc" }
-grpc-legacy-core = { module = "io.grpc:grpc-core", version.ref = "grpcLegacy" }
-grpc-legacy-stub = { module = "io.grpc:grpc-stub", version.ref = "grpcLegacy" }
 jedis = { module = "redis.clients:jedis", version.ref = "jedis" }
 kafka-clients = { module = "org.apache.kafka:kafka-clients", version.ref = "kafka" }
 lettuce-core = { module = "io.lettuce:lettuce-core", version.ref = "lettuce" }

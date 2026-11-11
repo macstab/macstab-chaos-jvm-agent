@@ -16,6 +16,11 @@ val clientLibraryProbe: Configuration by configurations.creating
 // An older gRPC (1.39, whose per-attempt RetryStream.newSubstream takes 2 arguments) for the retry
 // probe, exposed as chaos.test.legacyGrpcClasspath; the probe checks it still has that shape.
 val legacyGrpcProbe: Configuration by configurations.creating
+// Deliberately old and pinned here, not in the version catalog: Dependabot reads the catalog and
+// "group:name:version" strings and would propose bumping it, and its ignore rules match the
+// artifact name, which the catalog's current gRPC shares. A strict version in a dependency block is
+// not read, so only this pin is left alone.
+val legacyGrpcVersion = "1.39.0"
 // Libraries only the hook-coverage probe loads: the hooks for them are verified, nothing else
 // uses them.
 val coverageProbe: Configuration by configurations.creating
@@ -66,8 +71,9 @@ dependencies {
         testCompileOnly(client)
         clientLibraryProbe(client)
     }
-    legacyGrpcProbe(libs.grpc.legacy.core)
-    legacyGrpcProbe(libs.grpc.legacy.stub)
+    for (legacyGrpc in listOf("io.grpc:grpc-core", "io.grpc:grpc-stub")) {
+        legacyGrpcProbe(legacyGrpc) { version { strictly(legacyGrpcVersion) } }
+    }
 }
 
 val agentManifest = mapOf(
