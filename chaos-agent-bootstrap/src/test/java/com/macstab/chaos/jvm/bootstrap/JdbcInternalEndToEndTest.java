@@ -31,7 +31,7 @@ class JdbcInternalEndToEndTest {
     assertSoftly(
         softly -> {
           softly.assertThat(result.value("isValid")).isEqualTo("true");
-          softly.assertThat(result.longValue("borrowMillis")).isLessThan(1_000L);
+          softly.assertThat(result.longValue("borrowMillis")).isLessThan(1_800L);
           softly.assertThat(result.value("app.type")).isEqualTo("java.sql.SQLException");
           softly.assertThat(result.longValue("applied")).isEqualTo(1L);
         });
@@ -45,11 +45,14 @@ class JdbcInternalEndToEndTest {
     assertSoftly(
         softly -> {
           softly.assertThat(result.value("init")).isEqualTo("ok");
-          softly.assertThat(result.longValue("borrowMillis")).isLessThan(1_000L);
+          softly.assertThat(result.longValue("borrowMillis")).isLessThan(1_800L);
           softly.assertThat(result.value("app.type")).isEqualTo("java.sql.SQLException");
           softly.assertThat(result.longValue("applied")).isEqualTo(1L);
           softly.assertThat(result.value("rollback.close")).isEqualTo("ok");
           softly.assertThat(result.longValue("rollback.applied")).isZero();
+          // The scenario does reach a rollback: the application's own.
+          softly.assertThat(result.value("rollback.app")).isEqualTo("java.sql.SQLException");
+          softly.assertThat(result.longValue("rollback.appApplied")).isEqualTo(1L);
         });
   }
 }

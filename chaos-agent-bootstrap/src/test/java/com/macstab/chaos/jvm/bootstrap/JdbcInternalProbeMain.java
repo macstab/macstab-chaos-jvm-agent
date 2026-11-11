@@ -61,7 +61,8 @@ public final class JdbcInternalProbeMain {
    * JDBC_STATEMENT_EXECUTE} reject, then its rollback of a dirty connection it takes back under a
    * {@code JDBC_TRANSACTION_ROLLBACK} reject. Prints {@code init} (the pool's start), {@code
    * borrowMillis}, {@code app.type}, {@code applied}, {@code rollback.close} (the application's
-   * close of a dirty connection) and {@code rollback.applied}.
+   * close of a dirty connection), {@code rollback.applied}, then {@code rollback.app} and {@code
+   * rollback.appApplied} (the application's own rollback under the same scenario).
    */
   private static void poolQueries() throws Exception {
     final HikariConfig config = config();
@@ -95,6 +96,12 @@ public final class JdbcInternalProbeMain {
           // The pool rolls the open transaction back when it takes the connection back.
           System.out.println("rollback.close=" + RealCallRows.outcome(dirty::close));
           System.out.println("rollback.applied=" + rollback.appliedCount());
+          // The application's own rollback, through the same pool and scenario, is a target.
+          try (Connection app = pool.getConnection()) {
+            app.setAutoCommit(false);
+            System.out.println("rollback.app=" + RealCallRows.outcome(app::rollback));
+            System.out.println("rollback.appApplied=" + rollback.appliedCount());
+          }
         }
       }
     }

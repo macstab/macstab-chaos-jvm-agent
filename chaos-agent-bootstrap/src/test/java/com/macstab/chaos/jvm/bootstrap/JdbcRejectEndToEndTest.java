@@ -40,6 +40,9 @@ class JdbcRejectEndToEndTest {
               .isEqualTo("java.sql.SQLException");
           softly.assertThat(result.value("pooled.rollback.message")).isEqualTo("chaos");
           softly.assertThat(result.value("pooled.borrowAfter")).isEqualTo("ok");
+          // The rejected rollback rolled nothing back: the uncommitted row is still there.
+          softly.assertThat(result.value("plain.rowsAfterRollback")).isEqualTo("1");
+          softly.assertThat(result.value("pooled.rowsAfterRollback")).isEqualTo("1");
         });
   }
 }
