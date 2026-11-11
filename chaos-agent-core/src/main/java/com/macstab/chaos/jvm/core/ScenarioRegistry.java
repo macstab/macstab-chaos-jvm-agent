@@ -254,7 +254,8 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    * Hands exactly the method selectors of the registered scenarios to the weaver when they differ
    * from the ones it has, dropping selectors woven beforehand for scenarios that were never
    * registered. Runs after a removal and after a failed registration, on the thread that made the
-   * change, outside the index lock.
+   * change, outside the index lock. A failing weaver leaves the woven set unknown, so the next
+   * reconcile weaves again; its exception is swallowed (the weaver reported it), its error thrown.
    */
   void reconcileMethodSelectors() {
     reconcileMethodSelectors(true);
@@ -277,6 +278,10 @@ final class ScenarioRegistry implements ChaosDiagnostics {
           // The weaver keeps no hooks after a failure (its listener reported it): unknown, so the
           // next reconcile weaves the registered selectors again instead of finding them equal.
           wovenMethodSelectors = null;
+        } catch (final Error error) {
+          // A linkage or internal error from the retransformation: unknown as well, then thrown.
+          wovenMethodSelectors = null;
+          throw error;
         }
       }
     }
@@ -288,9 +293,9 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    * of the registered scenarios and {@code added}; nothing when that adds none. Pre-weaves add up
    * (a plan weaves all its selectors in one call, the plan-file reloader one per checked scenario)
    * until the next removal or failed registration trims them ({@link #reconcileMethodSelectors()}).
-   * A failure of {@code weaver} propagates and leaves the woven set unknown: a weaver that fails
-   * keeps no method hooks, so the next {@link #reconcileMethodSelectors()} weaves the registered
-   * scenarios' selectors again.
+   * A failure of {@code weaver}, an exception or an error, propagates and leaves the woven set
+   * unknown: a weaver that fails keeps no method hooks, so the next {@link
+   * #reconcileMethodSelectors()} weaves the registered scenarios' selectors again.
    *
    * @param added the method selectors of the scenarios about to be registered
    * @param weaver weaves the given selectors
@@ -303,7 +308,7 @@ final class ScenarioRegistry implements ChaosDiagnostics {
       if (!next.equals(wovenMethodSelectors)) {
         try {
           weaver.accept(next);
-        } catch (final RuntimeException failure) {
+        } catch (final RuntimeException | Error failure) {
           wovenMethodSelectors = null;
           throw failure;
         }

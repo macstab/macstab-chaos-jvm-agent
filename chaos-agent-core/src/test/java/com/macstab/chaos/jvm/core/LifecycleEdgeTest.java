@@ -549,12 +549,16 @@ class LifecycleEdgeTest {
         implements java.util.function.Consumer<Set<ChaosSelector.MethodSelector>> {
       Set<ChaosSelector.MethodSelector> woven = Set.of();
       boolean failNext;
+      boolean failWithError;
 
       @Override
       public void accept(final Set<ChaosSelector.MethodSelector> selectors) {
         if (failNext) {
           failNext = false;
           woven = Set.of();
+          if (failWithError) {
+            throw new LinkageError("retransformation failed to link");
+          }
           throw new IllegalStateException("refused retransformation");
         }
         woven = selectors;
@@ -617,6 +621,47 @@ class LifecycleEdgeTest {
       registry.reconcileMethodSelectors();
 
       assertThat(weaver.woven).containsExactly(kept);
+    }
+
+    @Test
+    @DisplayName("of an activation failing with an Error weaves the active selectors again")
+    void activationErrorRestoresTheActiveHooks() {
+      final ScenarioRegistry registry = new ScenarioRegistry(Clock.systemUTC(), Map::of);
+      final FailingWeaver weaver = new FailingWeaver();
+      registry.onMethodSelectorsChanged(weaver);
+      final ChaosSelector.MethodSelector active = selector("com.example.A");
+      registry.register(controller("a", active));
+      weaver.failNext = true;
+      weaver.failWithError = true;
+
+      assertThatThrownBy(
+              () -> registry.weaveBeforeRegistering(Set.of(selector("com.example.B")), weaver))
+          .isInstanceOf(LinkageError.class);
+      registry.reconcileMethodSelectors();
+
+      assertThat(weaver.woven).containsExactly(active);
+    }
+
+    @Test
+    @DisplayName("after a removal failing with an Error rethrows it and weaves again later")
+    void removalErrorIsRethrownAndWovenAgain() {
+      final ScenarioRegistry registry = new ScenarioRegistry(Clock.systemUTC(), Map::of);
+      final FailingWeaver weaver = new FailingWeaver();
+      registry.onMethodSelectorsChanged(weaver);
+      final ChaosSelector.MethodSelector kept = selector("com.example.A");
+      final ChaosSelector.MethodSelector readded = selector("com.example.B");
+      registry.register(controller("a", kept));
+      final ScenarioController removed = controller("b", readded);
+      registry.register(removed);
+      weaver.failNext = true;
+      weaver.failWithError = true;
+
+      assertThatThrownBy(() -> registry.unregister(removed)).isInstanceOf(LinkageError.class);
+      assertThat(weaver.woven).isEmpty();
+      // The same selectors as were woven before the failure: only a reset woven set weaves them.
+      registry.register(controller("b", readded));
+
+      assertThat(weaver.woven).containsExactlyInAnyOrder(kept, readded);
     }
   }
 
