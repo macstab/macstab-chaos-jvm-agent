@@ -16,10 +16,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The agent on a runtime without {@code java.sql} (a jlink image, {@code --limit-modules}): the
- * JDBC hooks, which only need that module, must not take the JVM down at start.
+ * The agent on a runtime without {@code java.sql} or {@code java.management} (a jlink image, {@code
+ * --limit-modules}): the hooks and the MBean that need such a module must not take the JVM down at
+ * start.
  */
-@DisplayName("A runtime without java.sql")
+@DisplayName("A runtime without optional modules")
 class LimitedRuntimeTest {
 
   /** What the agent needs, without java.sql. */
@@ -27,7 +28,44 @@ class LimitedRuntimeTest {
       "java.base,java.instrument,java.logging,java.management,jdk.unsupported,java.net.http,"
           + "java.naming,jdk.attach";
 
+  /** The fewest modules the agent starts with: no java.management either. */
+  private static final String MINIMAL_MODULES = "java.base,java.instrument,java.logging";
+
   @TempDir Path tempDir;
+
+  @Test
+  @DisplayName("starts without java.management, its diagnostics MBean left out")
+  void startWithoutJavaManagement() throws Exception {
+    final ChildJvmProbe.ProbeResult result =
+        new ChildJvmProbe(tempDir)
+            .runWithoutPlan(
+                LimitedRuntimeProbeMain.class, "minimal", "--limit-modules", MINIMAL_MODULES);
+
+    assertSoftly(
+        softly -> {
+          softly.assertThat(result.value("javaSql")).isEqualTo("false");
+          softly.assertThat(result.value("done")).isEqualTo("true");
+        });
+  }
+
+  @Test
+  @DisplayName("starts eager without java.management: the JMX hooks fail, not the JVM")
+  void eagerStartWithoutJavaManagement() throws Exception {
+    final ChildJvmProbe.ProbeResult result =
+        new ChildJvmProbe(tempDir)
+            .runWithoutPlan(
+                LimitedRuntimeProbeMain.class,
+                "minimal-eager",
+                "--limit-modules",
+                MINIMAL_MODULES,
+                "-Dmacstab.chaos.instrumentation=eager");
+
+    assertSoftly(
+        softly -> {
+          softly.assertThat(result.value("done")).isEqualTo("true");
+          softly.assertThat(result.value("hookFailures")).contains("JNDI_JMX");
+        });
+  }
 
   @Test
   @DisplayName("starts with every hook group woven (instrumentation=eager)")

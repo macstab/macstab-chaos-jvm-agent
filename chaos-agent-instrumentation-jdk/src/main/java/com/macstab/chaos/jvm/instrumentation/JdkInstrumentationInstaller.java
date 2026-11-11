@@ -190,7 +190,7 @@ public final class JdkInstrumentationInstaller {
           // when a SYSTEM_CLOCK_* scenario is activated.
           all.removeAll(HookGroup.CLOCK_CALL_SITES.operations());
         }
-        weave(instrumentation, all);
+        weave(instrumentation, all, true);
       }
     } catch (final RuntimeException | Error failure) {
       // Leave nothing bound to this runtime: a later install attempt must start from a clean
@@ -220,18 +220,32 @@ public final class JdkInstrumentationInstaller {
    *     retransform one of its classes
    */
   static void weave(final Instrumentation instrumentation, final Set<OperationType> operations) {
+    weave(instrumentation, operations, false);
+  }
+
+  /**
+   * As {@link #weave(Instrumentation, Set)}; at an eager start ({@code startup}) a group that fails
+   * with a {@link LinkageError} (a type of a module the runtime lacks) is left out, listed in the
+   * hook failures and logged, and the other groups are woven: the JVM starts.
+   */
+  private static void weave(
+      final Instrumentation instrumentation,
+      final Set<OperationType> operations,
+      final boolean startup) {
     // The agent's own work (L3): ByteBuddy's reflection while it installs and retransforms is no
     // application call, so a REFLECTION_INVOKE reject cannot fail the weaving.
     BootstrapDispatcher.beginInternalCall();
     try {
-      weaveGroups(instrumentation, operations);
+      weaveGroups(instrumentation, operations, startup);
     } finally {
       BootstrapDispatcher.endInternalCall();
     }
   }
 
   private static void weaveGroups(
-      final Instrumentation instrumentation, final Set<OperationType> operations) {
+      final Instrumentation instrumentation,
+      final Set<OperationType> operations,
+      final boolean startup) {
     synchronized (WOVEN_GROUPS) {
       boolean wovenNow = false;
       try {
@@ -244,8 +258,19 @@ public final class JdkInstrumentationInstaller {
             transformer = group.apply(buildBaseAgentBuilder()).installOn(instrumentation);
           } catch (final RuntimeException | LinkageError failure) {
             // Not recorded as woven: the next activation that needs the group tries again. A
-            // LinkageError (a type of a module the runtime lacks) fails the group, not the JVM.
+            // LinkageError (a type of a module the runtime lacks) fails the group, not the JVM:
+            // at an eager start the other groups are woven, and an activation that needs this
+            // one is refused.
             HookCoverage.failed(group.name(), failure);
+            if (startup && failure instanceof LinkageError) {
+              LOGGER.warning(
+                  () ->
+                      "[chaos-agent] chaos hooks not woven: "
+                          + group
+                          + ": "
+                          + HookCoverage.describe(failure));
+              continue;
+            }
             throw new IllegalStateException(
                 "failed to instrument "
                     + group

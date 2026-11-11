@@ -569,7 +569,7 @@ An intercepted call with no scenario for its operation costs 7–12 ns and alloc
 ./gradlew :chaos-agent-benchmarks:run  # run JMH benchmarks
 ```
 
-Requires JDK 21+ at runtime. Build toolchain targets JDK 25; `--release 21` is enforced.
+Requires JDK 21+ at runtime. Build toolchain targets JDK 25; `--release 21` is enforced. On a reduced runtime (a jlink image, `--limit-modules`) the agent needs only `java.base`, `java.instrument` and `java.logging`; without `java.management` it runs without its diagnostics MBean (and the JMX hooks), without `java.sql` without the JDBC hooks.
 
 ---
 

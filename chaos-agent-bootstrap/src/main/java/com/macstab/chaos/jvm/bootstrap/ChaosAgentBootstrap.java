@@ -17,7 +17,6 @@ import com.macstab.chaos.jvm.startup.DirectoryTrust;
 import com.macstab.chaos.jvm.startup.LogText;
 import com.macstab.chaos.jvm.startup.StartupConfigLoader;
 import java.lang.instrument.Instrumentation;
-import java.lang.management.ManagementFactory;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -25,7 +24,6 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.management.ObjectName;
 import net.bytebuddy.agent.ByteBuddyAgent;
 import org.jspecify.annotations.Nullable;
 
@@ -644,7 +642,7 @@ public final class ChaosAgentBootstrap {
     // The safepoint storm retransforms classes through it; set before any plan activates.
     runtime.setInstrumentation(instrumentation);
     boolean instrumentationInstalled = false;
-    ObjectName registeredMBean = null;
+    Object registeredMBean = null;
     Optional<ChaosReports> reports = Optional.empty();
     try {
       JdkInstrumentationInstaller.install(
@@ -788,7 +786,7 @@ public final class ChaosAgentBootstrap {
       final Instrumentation instrumentation,
       final ChaosRuntime runtime,
       final boolean instrumentationInstalled,
-      final @Nullable ObjectName registeredMBean,
+      final @Nullable Object registeredMBean,
       final Throwable installFailure) {
     if (instrumentationInstalled) {
       try {
@@ -799,7 +797,7 @@ public final class ChaosAgentBootstrap {
     }
     if (registeredMBean != null) {
       try {
-        ManagementFactory.getPlatformMBeanServer().unregisterMBean(registeredMBean);
+        DiagnosticsMBeanRegistration.unregister(registeredMBean);
       } catch (final Exception rollbackFailure) {
         installFailure.addSuppressed(rollbackFailure);
       }
@@ -890,26 +888,17 @@ public final class ChaosAgentBootstrap {
   private static final String JMX_CONTROL_ENV = "MACSTAB_CHAOS_JMX_CONTROL";
 
   /**
-   * Registers the diagnostics MBean.
+   * Registers the diagnostics MBean; on a runtime without {@code java.management} (a jlink image,
+   * {@code --limit-modules}) there is no MBean server, and the agent runs without the MBean.
    *
-   * @return the registered name, or {@code null} when nothing was registered
+   * @return the registered {@code ObjectName}, or {@code null} when nothing was registered
    */
-  private static @Nullable ObjectName registerMBean(
-      final ChaosRuntime runtime, final boolean control) {
-    try {
-      final ObjectName objectName = new ObjectName(MBEAN_NAME);
-      ManagementFactory.getPlatformMBeanServer()
-          .registerMBean(new ChaosDiagnosticsMBean(runtime, control), objectName);
-      return objectName;
-    } catch (final javax.management.InstanceAlreadyExistsException alreadyRegistered) {
+  private static @Nullable Object registerMBean(final ChaosRuntime runtime, final boolean control) {
+    if (ModuleLayer.boot().findModule("java.management").isEmpty()) {
       System.err.println(
-          "[chaos-agent] MBean registration skipped: "
-              + MBEAN_NAME
-              + " is already registered in this JVM");
-      return null;
-    } catch (final Exception exception) {
-      System.err.println("[chaos-agent] MBean registration skipped: " + exception.getMessage());
+          "[chaos-agent] MBean registration skipped: java.management is not in the runtime");
       return null;
     }
+    return DiagnosticsMBeanRegistration.register(MBEAN_NAME, runtime, control);
   }
 }
