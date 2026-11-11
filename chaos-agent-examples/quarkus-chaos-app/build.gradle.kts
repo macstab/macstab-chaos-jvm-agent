@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.util.zip.ZipFile
+import org.gradle.api.artifacts.result.ResolvedArtifactResult
 
 // A Quarkus application with the chaos extension and the /q/chaos route, booted by @QuarkusTest:
 // the extension's build steps run in a real augmentation, the agent attaches at runtime-init, and
@@ -64,23 +65,27 @@ val quarkusModelInputs =
         // must come from the application's class loaders, not from the system class loader.
         val runtime = configurations.testRuntimeClasspath
         val deployment = quarkusDeployment
+        val runtimeArtifacts = runtime.flatMap { it.incoming.artifacts.resolvedArtifacts }
+        val deploymentArtifacts = deployment.incoming.artifacts.resolvedArtifacts
+        // Read now: a task action must not reach the project when it runs.
+        val projectGroup = project.group.toString()
+        val projectVersion = project.version.toString()
         inputs.files(runtime)
         inputs.files(deployment)
         outputs.file(output)
         doLast {
-            fun lines(kind: String, configuration: Configuration): List<String> =
-                configuration.incoming.artifacts.artifacts.map { artifact ->
+            fun lines(kind: String, artifacts: Set<ResolvedArtifactResult>): List<String> =
+                artifacts.map { artifact ->
                     val coordinates =
                         when (val id = artifact.id.componentIdentifier) {
                             is ModuleComponentIdentifier -> "${id.group}:${id.module}:${id.version}"
-                            is ProjectComponentIdentifier ->
-                                "${project.group}:${id.projectName}:${project.version}"
+                            is ProjectComponentIdentifier -> "$projectGroup:${id.projectName}:$projectVersion"
                             else -> "unknown:${artifact.file.name}:0"
                         }
                     "$kind $coordinates ${artifact.file.absolutePath}"
                 }
             output.get().asFile.writeText(
-                (lines("R", runtime.get()) + lines("D", deployment)).joinToString("\n"),
+                (lines("R", runtimeArtifacts.get()) + lines("D", deploymentArtifacts.get())).joinToString("\n"),
             )
         }
     }
@@ -88,12 +93,18 @@ val quarkusModelInputs =
 tasks.test {
     dependsOn(quarkusModelInputs)
     val modelInputs = layout.buildDirectory.file("quarkus-model-inputs.txt")
-    inputs.file(modelInputs).withPropertyName("quarkusModelInputs")
+    // The model file holds absolute paths, so it is no input of its own; what it is made of is, as a
+    // class path, so the cache key is the same on every machine and in every checkout.
+    inputs.files(configurations.testRuntimeClasspath, quarkusDeployment)
+        .withNormalizer(ClasspathNormalizer::class)
+        .withPropertyName("quarkusModelClasspath")
+    val appCoordinates = "${project.group}:${project.name}:${project.version}"
+    inputs.property("quarkusAppCoordinates", appCoordinates)
     jvmArgumentProviders.add(
         CommandLineArgumentProvider {
             listOf(
                 "-Dchaos.quarkus.modelInputs=${modelInputs.get().asFile.absolutePath}",
-                "-Dchaos.quarkus.appCoordinates=${project.group}:${project.name}:${project.version}",
+                "-Dchaos.quarkus.appCoordinates=$appCoordinates",
             )
         },
     )
