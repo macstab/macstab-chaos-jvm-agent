@@ -61,6 +61,15 @@ public final class NetworkFaultProbeMain {
         System.out.println("socket.peerRead=" + read(peer.getInputStream()));
       }
     }
+    try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+      final CountingSocket client = new CountingSocket();
+      client.connect(server.getLocalSocketAddress());
+      try (Socket peer = server.accept()) {
+        System.out.println("subclass.close=" + closeRejected(client::close));
+        System.out.println("subclass.closed=" + client.isClosed());
+        System.out.println("subclass.closes=" + client.closes);
+      }
+    }
     try (ServerSocketChannel server = loopbackServer()) {
       final SocketChannel client = SocketChannel.open(server.getLocalAddress());
       try (SocketChannel peer = server.accept()) {
@@ -110,12 +119,25 @@ public final class NetworkFaultProbeMain {
   // ── a rejected connect ───────────────────────────────────────────────────
 
   /**
-   * A rejected connect of a socket, a socket channel, a channel's adaptor, and a channel under a
-   * {@code NIO_CHANNEL_CONNECT} reject; and a {@code timeout()} on a socket's connect. Prints, per
-   * row, the failure, whether the endpoint is still open, and what a second connect of the same
-   * endpoint (with no scenario active) does.
+   * A real refused connect of a socket subclass that counts its {@code close()} calls, as the
+   * baseline; a rejected connect of a socket, of that subclass, a socket channel, a channel's
+   * adaptor, and a channel under a {@code NIO_CHANNEL_CONNECT} reject; and a {@code timeout()} on a
+   * socket's connect. Prints, per row, the failure, whether the endpoint is still open, what a
+   * second connect of the same endpoint (with no scenario active) does, and for the subclass rows
+   * how often its {@code close()} ran.
    */
   private static void connectReject() throws Exception {
+    final InetSocketAddress refused;
+    try (ServerSocket unused = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+      refused = (InetSocketAddress) unused.getLocalSocketAddress();
+    }
+    final CountingSocket real = new CountingSocket();
+    System.out.println("real.type=" + RealCallRows.outcome(() -> real.connect(refused, 1_000)));
+    System.out.println("real.open=" + !real.isClosed());
+    System.out.println("real.closes=" + real.closes);
+    System.out.println("real.retry=" + RealCallRows.outcome(() -> real.connect(refused)));
+    real.close();
+
     try (ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
       final InetSocketAddress address = (InetSocketAddress) server.getLocalSocketAddress();
       final ChaosSelector socketConnect =
@@ -132,6 +154,18 @@ public final class NetworkFaultProbeMain {
       System.out.println("socket.open=" + !socket.isClosed());
       System.out.println("socket.retry=" + RealCallRows.outcome(() -> socket.connect(address)));
       socket.close();
+
+      final CountingSocket subclass = new CountingSocket();
+      RealCallRows.print(
+          "subclass",
+          RealCallRows.during(
+              "subclass",
+              socketConnect,
+              ChaosEffect.reject("chaos connect"),
+              () -> subclass.connect(address, 1_000)));
+      System.out.println("subclass.open=" + !subclass.isClosed());
+      System.out.println("subclass.closes=" + subclass.closes);
+      subclass.close();
 
       final SocketChannel channel = SocketChannel.open();
       RealCallRows.print(
@@ -285,10 +319,7 @@ public final class NetworkFaultProbeMain {
                       System.out.println(row + ".ender=" + failed);
                     }
                   });
-      final long start = System.nanoTime();
-      final String outcome = RealCallRows.outcome(call);
-      System.out.println(row + ".millis=" + (System.nanoTime() - start) / 1_000_000L);
-      System.out.println(row + ".outcome=" + outcome);
+      timed(row, call);
       System.out.println(row + ".applied=" + timeout.appliedCount());
       ender.join();
     }
@@ -319,6 +350,25 @@ public final class NetworkFaultProbeMain {
     }
     throw new IllegalStateException(
         thread.getName() + " did not reach the frame: " + Arrays.toString(thread.getStackTrace()));
+  }
+
+  /** Runs {@code call}; prints {@code <row>.millis} and {@code <row>.outcome}. */
+  private static void timed(final String row, final RealCallRows.Call call) {
+    final long start = System.nanoTime();
+    final String outcome = RealCallRows.outcome(call);
+    System.out.println(row + ".millis=" + (System.nanoTime() - start) / 1_000_000L);
+    System.out.println(row + ".outcome=" + outcome);
+  }
+
+  /** A socket whose {@code close()} counts how often it runs, as a pooling subclass would. */
+  private static final class CountingSocket extends Socket {
+    private int closes;
+
+    @Override
+    public void close() throws IOException {
+      closes++;
+      super.close();
+    }
   }
 
   private static ServerSocketChannel loopbackServer() throws IOException {

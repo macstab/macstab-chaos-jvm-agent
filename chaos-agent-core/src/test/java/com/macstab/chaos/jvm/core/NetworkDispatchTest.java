@@ -384,7 +384,7 @@ class NetworkDispatchTest {
     }
 
     @Test
-    @DisplayName("a failed connect, handshake or close leaves the endpoint closed, as the JDK does")
+    @DisplayName("a failed channel connect or handshake closes the endpoint, as the JDK does")
     void failureClosesTheEndpoint() throws Exception {
       activate(
           "connect",
@@ -392,24 +392,30 @@ class NetworkDispatchTest {
           ChaosEffect.reject("refused"));
       activate(
           "tls", ChaosSelector.ssl(Set.of(OperationType.SSL_HANDSHAKE)), ChaosEffect.reject("tls"));
+      final java.nio.channels.SocketChannel channel = java.nio.channels.SocketChannel.open();
       final Socket connecting = new Socket();
       final Socket closing = new Socket();
       final javax.net.ssl.SSLEngine engine =
           javax.net.ssl.SSLContext.getDefault().createSSLEngine();
+      final InetSocketAddress peer = new InetSocketAddress(InetAddress.getLoopbackAddress(), 9);
 
-      assertThatThrownBy(
-              () ->
-                  runtime.beforeSocketConnect(
-                      connecting, new InetSocketAddress(InetAddress.getLoopbackAddress(), 9), 0))
+      assertThatThrownBy(() -> runtime.beforeSocketConnect(channel, peer, 0))
+          .isInstanceOf(java.net.ConnectException.class);
+      assertThatThrownBy(() -> runtime.beforeSocketConnect(connecting, peer, 0))
           .isInstanceOf(java.net.ConnectException.class);
       assertThatThrownBy(() -> runtime.beforeSocketClose(closing)).isInstanceOf(IOException.class);
       assertThatThrownBy(() -> runtime.beforeSslHandshake(engine))
           .isInstanceOf(javax.net.ssl.SSLHandshakeException.class);
 
-      assertThat(connecting.isClosed()).isTrue();
-      assertThat(closing.isClosed()).isTrue();
+      assertThat(channel.isOpen()).isFalse();
       assertThat(engine.isOutboundDone()).isTrue();
       assertThat(engine.isInboundDone()).isTrue();
+      // A java.net.Socket's connect advice closes it as this JDK does, and the close advice throws
+      // after the real close: the dispatch closes neither (no second close() of a subclass).
+      assertThat(connecting.isClosed()).isFalse();
+      assertThat(closing.isClosed()).isFalse();
+      connecting.close();
+      closing.close();
     }
 
     @Test

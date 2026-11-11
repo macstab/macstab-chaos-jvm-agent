@@ -273,31 +273,72 @@ final class SocketAdvice {
 
   /**
    * Intercepts {@code AbstractInterruptibleChannel.close()} of a socket channel (SOCKET_CLOSE),
-   * while it is still open, so a {@code connectionReset()} can set linger 0 before it closes.
+   * while it is still open, so a {@code connectionReset()} can set linger 0 before it closes. A
+   * failure is thrown after the real close, as for {@link SocketCloseAdvice}.
    */
   static final class SocketChannelCloseAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object channel) throws Throwable {
+    static @Nullable Throwable enter(@Advice.This final Object channel) {
       if (channel instanceof java.nio.channels.SocketChannel
           && ((java.nio.channels.Channel) channel).isOpen()) {
-        BootstrapDispatcher.beforeSocketClose(channel);
+        try {
+          BootstrapDispatcher.beforeSocketClose(channel);
+        } catch (final Throwable failure) {
+          return failure;
+        }
+      }
+      return null;
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(
+        @Advice.Enter final @Nullable Throwable failure,
+        @Advice.Thrown final @Nullable Throwable thrown)
+        throws Throwable {
+      if (failure != null && thrown == null) {
+        throw failure;
       }
     }
   }
 
   // ── B2: Socket / Network ──────────────────────────────────────────────────
 
-  /** Intercepts {@code Socket.connect(SocketAddress, int)}. */
+  /**
+   * Intercepts {@code Socket.connect(SocketAddress, int)}. An injected failure closes the socket as
+   * a real failed connect does: through {@code close()} where {@code Socket.connect} closes it (JDK
+   * 25), its implementation only where it does not (JDK 21: the socket is not {@code isClosed()}, a
+   * second connect fails as closed). Inlined into {@code Socket}, which may call its
+   * implementation's protected {@code close()} (same package).
+   */
   static final class SocketConnectAdvice {
     @Advice.OnMethodEnter
     static void enter(
         @Advice.This final Object socket,
         @Advice.Argument(value = 0, readOnly = false, typing = Assigner.Typing.DYNAMIC)
             Object socketAddress,
-        @Advice.Argument(1) final int timeoutMillis)
+        @Advice.Argument(1) final int timeoutMillis,
+        @Advice.FieldValue("impl") final Object impl)
         throws Throwable {
-      // A RedirectEffect returns another endpoint to connect to.
-      socketAddress = BootstrapDispatcher.beforeSocketConnect(socket, socketAddress, timeoutMillis);
+      try {
+        // A RedirectEffect returns another endpoint to connect to.
+        socketAddress =
+            BootstrapDispatcher.beforeSocketConnect(socket, socketAddress, timeoutMillis);
+      } catch (final Throwable failure) {
+        // The agent's own close: no scenario applies to it.
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          if (BootstrapDispatcher.failedConnectClosesSocket()) {
+            ((java.net.Socket) socket).close();
+          } else {
+            java.net.SocketImpl.class.getDeclaredMethod("close").invoke(impl);
+          }
+        } catch (final Throwable alreadyBroken) {
+          // released as far as the socket allows; the injected failure is what the caller sees
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        throw failure;
+      }
     }
   }
 
@@ -404,11 +445,30 @@ final class SocketAdvice {
     }
   }
 
-  /** Intercepts {@code Socket.close()}. */
+  /**
+   * Intercepts {@code Socket.close()}. A failure is held and thrown after the real close: the JDK
+   * releases a socket before it can report a close error, and a subclass's own {@code close()}
+   * (which calls this one) must not run a second time.
+   */
   static final class SocketCloseAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object socket) throws Throwable {
-      BootstrapDispatcher.beforeSocketClose(socket);
+    static @Nullable Throwable enter(@Advice.This final Object socket) {
+      try {
+        BootstrapDispatcher.beforeSocketClose(socket);
+        return null;
+      } catch (final Throwable failure) {
+        return failure;
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(
+        @Advice.Enter final @Nullable Throwable failure,
+        @Advice.Thrown final @Nullable Throwable thrown)
+        throws Throwable {
+      if (failure != null && thrown == null) {
+        throw failure;
+      }
     }
   }
 

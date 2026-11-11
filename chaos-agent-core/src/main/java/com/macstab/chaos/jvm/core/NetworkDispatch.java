@@ -252,11 +252,20 @@ public final class NetworkDispatch {
       // a close from another thread ends the wait.
       engine.applyDelayAndGate(decision);
       final Throwable failure = stalled(socket, timeout);
-      release(socket);
+      release(connectReleased(socket));
       throw failure;
     }
-    applyClosingOnFailure(decision, socket);
+    applyClosingOnFailure(decision, connectReleased(socket));
     return null;
+  }
+
+  /**
+   * What a failed connect of {@code endpoint} closes here: a channel. A {@code java.net.Socket}'s
+   * connect advice closes it, inside the socket, as the JDK does: JDK 21 closes only its
+   * implementation (the socket is not {@code isClosed()}), JDK 25 calls {@code close()}.
+   */
+  private static @Nullable Object connectReleased(final Object endpoint) {
+    return endpoint instanceof java.net.Socket ? null : endpoint;
   }
 
   /**
@@ -562,7 +571,8 @@ public final class NetworkDispatch {
   }
 
   /**
-   * Called before {@link java.net.Socket#close()} to apply socket-close scenarios.
+   * Called before {@link java.net.Socket#close()} to apply socket-close scenarios. A failure it
+   * throws is the close's: the advice holds it, lets the real close run and throws it after.
    *
    * @param socket the socket being closed
    * @throws Throwable if an active scenario throws to simulate a failure
@@ -591,8 +601,9 @@ public final class NetworkDispatch {
       return;
     }
     // A failing close still closes: the JDK marks the socket or channel closed and releases it
-    // before it can report a close error.
-    applyClosingOnFailure(decision, socket);
+    // before it can report a close error. The close advice throws the failure after the real
+    // close, so a subclass's own close() runs once, as without the agent.
+    engine.applyPreDecision(decision);
   }
 
   /**

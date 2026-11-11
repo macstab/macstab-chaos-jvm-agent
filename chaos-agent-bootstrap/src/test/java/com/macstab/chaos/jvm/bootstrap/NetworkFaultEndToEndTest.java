@@ -37,6 +37,10 @@ class NetworkFaultEndToEndTest {
             softly.assertThat(result.value("socket.readerEnded")).isEqualTo("true");
             softly.assertThat(result.value("socket.reader")).isEqualTo("java.net.SocketException");
             softly.assertThat(result.value("socket.peerRead")).isEqualTo("-1");
+            // A subclass's own close() runs once, as without the agent.
+            softly.assertThat(result.value("subclass.close")).isEqualTo("java.io.IOException");
+            softly.assertThat(result.value("subclass.closed")).isEqualTo("true");
+            softly.assertThat(result.longValue("subclass.closes")).isEqualTo(1L);
             softly.assertThat(result.value("channel.close")).isEqualTo("java.io.IOException");
             softly.assertThat(result.value("channel.closed")).isEqualTo("true");
             softly.assertThat(result.value("channel.readerEnded")).isEqualTo("true");
@@ -65,9 +69,18 @@ class NetworkFaultEndToEndTest {
 
       assertSoftly(
           softly -> {
+            softly.assertThat(result.value("real.type")).isEqualTo("java.net.ConnectException");
             softly.assertThat(result.value("socket.type")).isEqualTo("java.net.ConnectException");
-            softly.assertThat(result.value("socket.open")).isEqualTo("false");
+            // As a real failed connect leaves the socket: JDK 21 closes only its implementation,
+            // later JDKs close the socket through close().
+            softly.assertThat(result.value("socket.open")).isEqualTo(result.value("real.open"));
             softly.assertThat(result.value("socket.retry")).isEqualTo("java.net.SocketException");
+            softly.assertThat(result.value("real.retry")).isEqualTo("java.net.SocketException");
+            softly.assertThat(result.value("subclass.type")).isEqualTo("java.net.ConnectException");
+            softly.assertThat(result.value("subclass.open")).isEqualTo(result.value("real.open"));
+            softly
+                .assertThat(result.longValue("subclass.closes"))
+                .isEqualTo(result.longValue("real.closes"));
             softly.assertThat(result.value("channel.type")).isEqualTo("java.net.ConnectException");
             softly.assertThat(result.value("channel.open")).isEqualTo("false");
             // What the JDK throws for a connect of a closed channel: JDK 21 reports it as an
@@ -84,7 +97,7 @@ class NetworkFaultEndToEndTest {
             softly
                 .assertThat(result.value("timeout.type"))
                 .isEqualTo("java.net.SocketTimeoutException");
-            softly.assertThat(result.value("timeout.open")).isEqualTo("false");
+            softly.assertThat(result.value("timeout.open")).isEqualTo(result.value("real.open"));
           });
     }
 

@@ -74,6 +74,8 @@ class BridgeGuardsTest {
           "corruptBuffer",
           "corruptionSeed",
           "isArchive",
+          // What this JDK's Socket.connect closes on a failure; a constant of the JDK.
+          "failedConnectClosesSocket",
           // Ends a stall the bridge itself runs; it calls no delegate.
           "selectorWoken",
           "currentTimeMillis",

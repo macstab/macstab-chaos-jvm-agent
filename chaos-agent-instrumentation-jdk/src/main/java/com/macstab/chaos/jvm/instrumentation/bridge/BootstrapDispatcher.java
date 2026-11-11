@@ -2022,7 +2022,35 @@ public final class BootstrapDispatcher {
   }
 
   /**
-   * Called before {@link java.net.Socket#close()}.
+   * Whether this JDK's {@code Socket.connect} closes the socket when the connect fails: it does
+   * where {@code Socket} has {@code closeSuppressingExceptions} (JDK 25); JDK 21 closes only the
+   * socket's implementation, so {@code isClosed()} stays {@code false}.
+   */
+  private static final boolean FAILED_CONNECT_CLOSES_SOCKET = failedConnectClosesSocketLookup();
+
+  private static boolean failedConnectClosesSocketLookup() {
+    for (final java.lang.reflect.Method method : java.net.Socket.class.getDeclaredMethods()) {
+      if (method.getName().equals("closeSuppressingExceptions")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Whether a failed connect of a {@code java.net.Socket} closes the socket through {@code close()}
+   * on this JDK; when not, only its implementation is closed. The connect advice closes a socket
+   * whose connect an injected failure ends the same way.
+   *
+   * @return {@code true} on JDK 25, {@code false} on JDK 21
+   */
+  public static boolean failedConnectClosesSocket() {
+    return FAILED_CONNECT_CLOSES_SOCKET;
+  }
+
+  /**
+   * Called before {@link java.net.Socket#close()}. The close advice holds a failure thrown here and
+   * throws it after the real close.
    *
    * @param socket the socket being closed; never {@code null}
    * @throws Throwable if an active scenario injects a failure to simulate a close error
