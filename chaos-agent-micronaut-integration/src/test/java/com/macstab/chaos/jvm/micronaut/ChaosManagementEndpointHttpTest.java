@@ -113,6 +113,8 @@ class ChaosManagementEndpointHttpTest {
     final Map<String, Object> all = new HashMap<>(properties);
     all.put("macstab.chaos.management.enabled", "true");
     all.put("micronaut.server.port", "-1");
+    // Loopback only: a wildcard bind can collide with another process on the same port.
+    all.put("micronaut.server.host", "127.0.0.1");
     return ApplicationContext.run(EmbeddedServer.class, all);
   }
 
