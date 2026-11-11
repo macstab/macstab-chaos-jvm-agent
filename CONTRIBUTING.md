@@ -111,24 +111,26 @@ A new entry point needs a handle slot of its own (ADR 0001). Every step is requi
 1. Append a `public static final int BEFORE_XXX = <next index>;` slot constant to `BootstrapDispatcher`, after the last one. Slot numbers are hand-written and contiguous: never reuse or renumber an index.
 2. Raise `BootstrapDispatcher.HANDLE_COUNT` by one, and update the slot count in ADR 0001 and the table in `docs/instrumentation.md` §7.
 3. Add the method to `BridgeDelegate`, named after the slot (`BEFORE_XXX` → `beforeXxx`), and implement it in `ChaosBridge`, which forwards to `ChaosRuntime`.
-4. Add the `public static` method to `BootstrapDispatcher`. Its body is the pattern of every existing entry point:
+4. Add the `public static` method to `BootstrapDispatcher`. Its body is the pattern of every existing entry point (here `beforeSocketClose`'s, with the slot and the arguments renamed): the depth is raised before the handles are read, so a bridge that is not installed yet is a raised-and-lowered no-op:
 
 ```java
 public static void beforeXxx(final Object target, final int arg) throws Throwable {
-    final int[] depth = DEPTH.get();
+  final int[] depth = DEPTH.get();
+  if (depth[0] > 0) {
+    return;
+  }
+  depth[0]++;
+  try {
     final MethodHandle[] h = handles;
     final Object d = delegate;
-    if (depth[0] > 0 || d == null || h == null) {
-        return; // agent-internal call, or the bridge is not installed
+    if (d != null && h != null) {
+      h[BEFORE_XXX].invoke(d, target, arg);
     }
-    depth[0]++;
-    try {
-        h[BEFORE_XXX].invoke(d, target, arg);
-    } catch (final Throwable throwable) {
-        sneakyThrow(throwable);
-    } finally {
-        depth[0]--;
-    }
+  } catch (final Throwable throwable) {
+    sneakyThrow(throwable);
+  } finally {
+    depth[0]--;
+  }
 }
 ```
 
