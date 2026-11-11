@@ -1807,6 +1807,8 @@ The rate is held over time, not rounded per batch: every 50 ms the stressor allo
 | `objectCount`    | int      | > 0, ≤ 50,000,000 | Number of finalizable objects to allocate        |
 | `finalizerDelay` | Duration | ≥ 0               | How long each finalizer sleeps before completing |
 
+Stopping the scenario ends the delays: the finalizer sleeping returns at once and the queued ones return without sleeping, so the JVM's Finalizer thread runs other finalizers again, however long `finalizerDelay` is.
+
 **Refused** with `ChaosUnsupportedFeatureException` (`UNSUPPORTED_RUNTIME`; HTTP/JMX `rejected`) on a JVM started with `--finalization=disabled`, where no finalizer runs.
 
 ---
