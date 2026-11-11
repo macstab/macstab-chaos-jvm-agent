@@ -99,11 +99,13 @@ jobs:
             25
           cache: 'gradle'
 
-      # testBoot4 is the Spring Boot 4 pass of chaos-agent-spring-boot-common; it hangs off check,
-      # not test, so it is named here to run on this JDK and architecture too.
+      # testBoot4 (the Spring Boot 4 pass of chaos-agent-spring-boot-common) and testSharedApplication
+      # (the Quarkus example's test in a JVM of its own) hang off check, not test, so they are named
+      # here to run on this JDK and architecture too.
       - name: Test on JDK ${{ matrix.java }}
         run: >
-          ./gradlew test :chaos-agent-spring-boot-common:testBoot4 --no-daemon --stacktrace
+          ./gradlew test :chaos-agent-spring-boot-common:testBoot4
+          :chaos-agent-examples:quarkus-chaos-app:testSharedApplication --no-daemon --stacktrace
           -PtestJavaVersion=${{ matrix.java }}
           -Porg.gradle.java.installations.auto-download=false
           -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64,JAVA_HOME_25_X64,JAVA_HOME_21_ARM64,JAVA_HOME_25_ARM64
