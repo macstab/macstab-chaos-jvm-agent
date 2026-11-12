@@ -165,7 +165,8 @@ class RealPathIntegrationTest {
       final ChildJvmProbe.ProbeResult result = selfAttached("policy:" + policy);
 
       assertThat(result.longValue("firstCallMillis")).isGreaterThanOrEqualTo(200L);
-      assertThat(result.longValue("lateCallMillis")).isLessThan(100L);
+      // Not delayed: a delayed call takes at least the whole 200 ms delay.
+      assertThat(result.longValue("lateCallMillis")).isLessThan(200L);
       assertThat(result.value("state")).isEqualTo("INACTIVE");
       assertThat(result.longValue("applied")).isEqualTo(1L);
     }
@@ -469,7 +470,7 @@ class RealPathIntegrationTest {
       assertThat(result.longValue("beforeMillis")).isGreaterThanOrEqualTo(DELAY.toMillis());
       assertThat(result.value("removedState")).isIn("STOPPED", "ABSENT");
       assertThat(result.value("unrelatedState")).isEqualTo("ACTIVE");
-      assertThat(result.longValue("afterMillis")).isLessThan(100L);
+      assertThat(result.longValue("afterMillis")).isLessThan(DELAY.toMillis());
     }
   }
 }

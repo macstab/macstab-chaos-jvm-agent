@@ -29,7 +29,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 @DisplayName("A runtime hook without a scenario")
 class PassthroughHooksTest {
 
-  private static final Duration DELAY = Duration.ofMillis(30);
+  private static final Duration DELAY = Duration.ofMillis(500);
 
   /** One runtime entry point: the call, and the operation and selector that reach it. */
   @FunctionalInterface
@@ -195,7 +195,7 @@ class PassthroughHooksTest {
       assertThat(runtime.diagnostics().scenario("another-operation").orElseThrow().matchedCount())
           .as("a scenario of another operation is not evaluated")
           .isZero();
-      assertThat(idle).as("no delay without a scenario").isLessThan(DELAY.toNanos());
+      assertThat(idle).as("no delay without a scenario").isLessThan(DELAY.toNanos() / 2);
 
       runtime.activate(
           ChaosScenario.builder(name)

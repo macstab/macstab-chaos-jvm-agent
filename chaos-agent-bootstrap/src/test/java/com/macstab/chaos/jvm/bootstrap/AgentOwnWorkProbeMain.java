@@ -38,18 +38,20 @@ public final class AgentOwnWorkProbeMain {
   }
 
   /**
-   * A 200 ms delay on every file write, then a scenario activated and stopped: the agent's STARTED
+   * A 2 s delay on the first file write, then a scenario activated and stopped: the agent's STARTED
    * and STOPPED lines go through JUL's console handler to {@code System.err}.
    */
   private static void logLines() {
     // The application's JUL, initialised first, so the agent's lines are written at once.
     Logger.getLogger("probe").info("probe start");
     final ChaosControlPlane plane = ChaosPlatform.installLocally();
+    // Woven before the timed region: the first scenario of its hook group weaves it.
+    plane.activate(gcSuppress("warm")).close();
     final ChaosActivationHandle writes =
         plane.activate(
             ChaosScenario.builder("file-writes")
                 .selector(ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_WRITE)))
-                .effect(ChaosEffect.delay(Duration.ofMillis(200)))
+                .effect(ChaosEffect.delay(WRITE_DELAY))
                 .activationPolicy(ActivationPolicy.count(1))
                 .build());
     final long started = System.nanoTime();
@@ -61,6 +63,12 @@ public final class AgentOwnWorkProbeMain {
     System.out.println("elapsedMillis=" + elapsed);
     System.out.println("matched=" + matched);
   }
+
+  /**
+   * The delay of a file write of a scenario: a call it applied to takes at least this long, far
+   * above what the agent's own work takes (the tests' bound is half of it).
+   */
+  private static final Duration WRITE_DELAY = Duration.ofSeconds(2);
 
   /**
    * A reject of every queue offer and an asynchronous listener, then a scenario activated and
@@ -95,14 +103,15 @@ public final class AgentOwnWorkProbeMain {
     offers.close();
   }
 
-  /** A delay on every file write, then a plan that prints its debug dump on start. */
+  /** A delay on the first file write, then a plan that prints its debug dump on start. */
   private static void debugDump() {
     final ChaosControlPlane plane = ChaosPlatform.installLocally();
+    plane.activate(gcSuppress("warm")).close();
     final ChaosActivationHandle writes =
         plane.activate(
             ChaosScenario.builder("file-writes")
                 .selector(ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_WRITE)))
-                .effect(ChaosEffect.delay(Duration.ofMillis(200)))
+                .effect(ChaosEffect.delay(WRITE_DELAY))
                 .activationPolicy(ActivationPolicy.count(1))
                 .build());
     final long started = System.nanoTime();

@@ -120,15 +120,15 @@ class InstrumentationIntegrationTest {
           singleScenarioPlan(
               "filewrite-isolation",
               ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_READ)),
-              ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
+              ChaosEffect.delay(Duration.ofSeconds(2)));
 
       final ChildJvmProbe.ProbeResult result =
           runProbe(plan, "filewrite-delay", "-Dprobe.file=" + probeFile.toAbsolutePath());
       // The scenario applies to the JVM's own file reads, so its count is not 0; the write is
-      // not delayed: a delayed call takes at least the whole delay.
+      // not delayed: a delayed call takes at least the whole 2 s delay.
       assertThat(result.longValue("elapsedMillis"))
           .as("READ-only selector must NOT delay write")
-          .isLessThan(DELAY_MS);
+          .isLessThan(1_000L);
     }
   }
 

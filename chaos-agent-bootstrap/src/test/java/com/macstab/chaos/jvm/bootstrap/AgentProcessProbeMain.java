@@ -333,6 +333,10 @@ public final class AgentProcessProbeMain {
 
   private static void fileWriteDelay() throws Exception {
     final String targetFile = System.getProperty("probe.file");
+    // The write path loaded and woven before the timed write.
+    try (final FileOutputStream warm = new FileOutputStream(targetFile + ".warm")) {
+      warm.write(0);
+    }
     final long start = System.nanoTime();
     try (final FileOutputStream fos = new FileOutputStream(targetFile, true)) {
       fos.write(0);
@@ -886,7 +890,7 @@ public final class AgentProcessProbeMain {
   // ── Sockets ───────────────────────────────────────────────────────────────────
 
   private static void socketConnectDelay() throws Exception {
-    try (final ServerSocket server = new ServerSocket(0)) {
+    try (final ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
       final Thread acceptor =
           new Thread(
               () -> {
@@ -908,7 +912,7 @@ public final class AgentProcessProbeMain {
   }
 
   private static void socketAcceptDelay() throws Exception {
-    try (final ServerSocket server = new ServerSocket(0)) {
+    try (final ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
       final Thread connector =
           new Thread(
               () -> {
@@ -930,7 +934,7 @@ public final class AgentProcessProbeMain {
   }
 
   private static void socketReadDelay() throws Exception {
-    try (final ServerSocket server = new ServerSocket(0)) {
+    try (final ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
       final Thread sender =
           new Thread(
               () -> {
@@ -956,7 +960,7 @@ public final class AgentProcessProbeMain {
   }
 
   private static void socketWriteDelay() throws Exception {
-    try (final ServerSocket server = new ServerSocket(0)) {
+    try (final ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
       final Thread acceptor =
           new Thread(
               () -> {
@@ -980,7 +984,7 @@ public final class AgentProcessProbeMain {
   }
 
   private static void socketCloseDelay() throws Exception {
-    try (final ServerSocket server = new ServerSocket(0)) {
+    try (final ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
       final Thread acceptor =
           new Thread(
               () -> {

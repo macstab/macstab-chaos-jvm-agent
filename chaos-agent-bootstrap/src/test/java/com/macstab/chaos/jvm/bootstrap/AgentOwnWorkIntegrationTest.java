@@ -39,7 +39,9 @@ class AgentOwnWorkIntegrationTest {
 
       assertThat(result.output()).contains("type=STARTED scenarioId=\"other\"");
       assertThat(result.longValue("matched")).as("file writes matched").isZero();
-      assertThat(result.longValue("elapsedMillis")).isLessThan(200L);
+      assertThat(result.longValue("elapsedMillis"))
+          .as("not the 2 s write delay")
+          .isLessThan(1_000L);
     }
 
     @Test
@@ -60,7 +62,9 @@ class AgentOwnWorkIntegrationTest {
           probe.runWithoutAgent(AgentOwnWorkProbeMain.class, "debug-dump");
 
       assertThat(result.longValue("matched")).as("file writes matched").isZero();
-      assertThat(result.longValue("elapsedMillis")).isLessThan(200L);
+      assertThat(result.longValue("elapsedMillis"))
+          .as("not the 2 s write delay")
+          .isLessThan(1_000L);
     }
   }
 

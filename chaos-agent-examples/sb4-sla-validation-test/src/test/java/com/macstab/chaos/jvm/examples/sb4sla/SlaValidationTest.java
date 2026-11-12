@@ -78,9 +78,12 @@ class SlaValidationTest {
       return;
     }
     // Free ports, not fixed ones: modules run in parallel and may run this test at once.
-    wireMockA = new WireMockServer(WireMockConfiguration.options().dynamicPort());
-    wireMockB = new WireMockServer(WireMockConfiguration.options().dynamicPort());
-    wireMockC = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+    wireMockA =
+        new WireMockServer(WireMockConfiguration.options().bindAddress("127.0.0.1").dynamicPort());
+    wireMockB =
+        new WireMockServer(WireMockConfiguration.options().bindAddress("127.0.0.1").dynamicPort());
+    wireMockC =
+        new WireMockServer(WireMockConfiguration.options().bindAddress("127.0.0.1").dynamicPort());
 
     wireMockA.start();
     wireMockB.start();
@@ -96,9 +99,9 @@ class SlaValidationTest {
     if (wireMockA == null) {
       startWireMocks();
     }
-    registry.add("downstream.a.url", () -> "http://localhost:" + wireMockA.port() + "/a");
-    registry.add("downstream.b.url", () -> "http://localhost:" + wireMockB.port() + "/b");
-    registry.add("downstream.c.url", () -> "http://localhost:" + wireMockC.port() + "/c");
+    registry.add("downstream.a.url", () -> "http://127.0.0.1:" + wireMockA.port() + "/a");
+    registry.add("downstream.b.url", () -> "http://127.0.0.1:" + wireMockB.port() + "/b");
+    registry.add("downstream.c.url", () -> "http://127.0.0.1:" + wireMockC.port() + "/c");
   }
 
   @AfterAll

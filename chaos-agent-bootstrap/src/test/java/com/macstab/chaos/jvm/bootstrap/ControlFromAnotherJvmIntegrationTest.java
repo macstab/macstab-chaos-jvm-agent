@@ -40,16 +40,16 @@ class ControlFromAnotherJvmIntegrationTest {
 
   private static final String MBEAN = "com.macstab.chaos.jvm:type=ChaosDiagnostics";
   private static final String SCENARIO_ID = "slow-main-sleep";
-  private static final long DELAYED_MILLIS = 280;
-  private static final long UNDELAYED_MILLIS = 150;
+  private static final long DELAYED_MILLIS = 950;
+  private static final long UNDELAYED_MILLIS = 500;
 
-  /** A JVM-scoped 300 ms delay on {@code Thread.sleep} of the thread named {@code main} only. */
+  /** A JVM-scoped 1 s delay on {@code Thread.sleep} of the thread named {@code main} only. */
   private static final String PLAN =
       """
       {"metadata": {"name": "remote"}, "scenarios": [{"id": "%s", "scope": "JVM",
         "selector": {"type": "thread", "operations": ["THREAD_SLEEP"],
                      "threadNamePattern": {"mode": "EXACT", "value": "main"}},
-        "effect": {"type": "delay", "minDelay": "PT0.3S", "maxDelay": "PT0.3S"}}]}
+        "effect": {"type": "delay", "minDelay": "PT1S", "maxDelay": "PT1S"}}]}
       """
           .formatted(SCENARIO_ID);
 

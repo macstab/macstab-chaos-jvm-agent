@@ -23,3 +23,9 @@ tasks.jar {
         attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.instrumentation.jdk"
     }
 }
+
+// JdkImplementationPrefixesTest describes every class of the runtime image through one caching
+// type pool; the default 512 MB test heap leaves it little room as the image grows.
+tasks.test {
+    maxHeapSize = "1g"
+}

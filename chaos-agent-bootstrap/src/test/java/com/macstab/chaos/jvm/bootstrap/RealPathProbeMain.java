@@ -230,7 +230,8 @@ public final class RealPathProbeMain {
       // Wide enough for the activation's weaving and the calls before the window.
       case "active-from" -> builder.activeFrom(now.plusMillis(3_000));
       case "active-for" -> {
-        builder.activeFor(Duration.ofMillis(300));
+        // Wide enough for the activation's weaving and the first (delayed) call.
+        builder.activeFor(Duration.ofSeconds(1));
         effect = ChaosEffect.delay(Duration.ofMillis(200));
       }
       case "active-until" -> {
@@ -274,7 +275,7 @@ public final class RealPathProbeMain {
                         0L,
                         java.time.Duration.between(Instant.now(), bounds.activeUntil()).toMillis())
                     + 300L
-                : 600L);
+                : 1_300L);
         extra.add("lateCallMillis=" + timedSleep());
         extra.add("state=" + handle.state());
       }
