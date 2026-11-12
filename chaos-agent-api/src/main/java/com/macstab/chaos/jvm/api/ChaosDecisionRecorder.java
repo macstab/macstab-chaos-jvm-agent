@@ -133,7 +133,8 @@ public final class ChaosDecisionRecorder implements ChaosEventListener {
    * Returns the JVM-scoped {@code scenario} with its policy replaying the decisions recorded for it
    * in the JVM scope: probability 1.0, no rate limit, {@code replayMatches} set; every other policy
    * field is kept. The decisions of sessions are not included; see {@link #replay(ChaosScenario,
-   * String)}.
+   * String)}. A stressor ({@link ChaosSelector.StressSelector}) or a clock skew ({@link
+   * ChaosEffect.ClockSkewEffect}) decides nothing per call, so it is returned unchanged.
    *
    * @param scenario the scenario as it was recorded
    * @return the replaying scenario
@@ -144,7 +145,8 @@ public final class ChaosDecisionRecorder implements ChaosEventListener {
   }
 
   /**
-   * Returns {@code scenario} replaying the decisions recorded for it in one session.
+   * Returns {@code scenario} replaying the decisions recorded for it in one session; a stressor or
+   * a clock skew unchanged, as {@link #replay(ChaosScenario)}.
    *
    * @param scenario the scenario as it was recorded
    * @param sessionId the session it ran in
@@ -156,6 +158,11 @@ public final class ChaosDecisionRecorder implements ChaosEventListener {
   }
 
   private ChaosScenario replayFrom(final ChaosScenario scenario, final String scope) {
+    if (scenario.selector() instanceof ChaosSelector.StressSelector
+        || scenario.effect() instanceof ChaosEffect.ClockSkewEffect) {
+      // No APPLIED events, nothing to replay; replayMatches would be refused on them.
+      return scenario;
+    }
     final Log log = log(scenario.id(), scope);
     final long dropped = log == null ? 0L : log.dropped.sum();
     if (dropped > 0L) {

@@ -157,4 +157,25 @@ class ChaosDecisionRecorderTest {
     assertThat(ChaosEffect.Errno.EAGAIN.family()).isEqualTo(ChaosEffect.Errno.Family.PROCESS);
     assertThat(ChaosEffect.Errno.ENOENT.linuxCode()).isEqualTo(2);
   }
+
+  @Test
+  @DisplayName("replays a stressor or a clock skew unchanged: they decide nothing per call")
+  void replaysWithoutDecisionsUnchanged() {
+    final ChaosDecisionRecorder recorder = new ChaosDecisionRecorder();
+    final ChaosScenario stressor =
+        ChaosScenario.builder("heap")
+            .selector(ChaosSelector.stress(ChaosSelector.StressTarget.HEAP))
+            .effect(ChaosEffect.heapPressure(1024, 1))
+            .build();
+    final ChaosScenario skew =
+        ChaosScenario.builder("skew")
+            .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_MILLIS)))
+            .effect(
+                ChaosEffect.skewClock(
+                    java.time.Duration.ofMinutes(1), ChaosEffect.ClockSkewMode.FIXED))
+            .build();
+
+    assertThat(recorder.replay(stressor)).isSameAs(stressor);
+    assertThat(recorder.replay(skew, "s1")).isSameAs(skew);
+  }
 }
