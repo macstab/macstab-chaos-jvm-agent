@@ -3,24 +3,35 @@ package com.macstab.chaos.jvm.api;
 import java.util.concurrent.Callable;
 
 /**
- * A named session scope that restricts chaos effects to threads explicitly bound to it.
+ * A named session scope that restricts chaos effects to the threads bound to it.
  *
  * <p>Sessions enable per-test isolation when multiple tests share a single JVM: each test opens its
  * own session, activates scenarios scoped to that session, and only threads bound to that session
  * observe chaos. Threads without a binding are unaffected.
+ *
+ * <p>The thread that opens a session ({@link ChaosControlPlane#openSession(String)}) is bound to it
+ * from then until {@link #close()}; other threads join it with {@link #bind()}, and work handed off
+ * from a bound thread carries it (executor tasks, fork-join tasks, started threads).
  *
  * <p><b>Basic usage:</b>
  *
  * <pre>{@code
  * try (ChaosSession session = controlPlane.openSession("my-test")) {
  *     session.activate(scenario);
- *     try (ChaosSession.ScopeBinding binding = session.bind()) {
- *         // operations on this thread are intercepted by the session scenario
- *         myService.call();
- *     }
- *     // thread is unbound; no more chaos on this thread
+ *     // the opening thread is bound: operations on it are intercepted by the session scenario
+ *     myService.call();
  * }
- * // session is closed; all session scenarios are stopped
+ * // session is closed: its scenarios are stopped and the opening thread is unbound
+ * }</pre>
+ *
+ * <p>A thread the session did not hand work to (a server's request thread, a callback thread) joins
+ * it for a block:
+ *
+ * <pre>{@code
+ * try (ChaosSession.ScopeBinding binding = session.bind()) {
+ *     myService.call(); // intercepted by the session scenario
+ * }
+ * // this thread is unbound again
  * }</pre>
  *
  * <p><b>Cross-thread propagation:</b> use {@link #wrap(Runnable)} or {@link #wrap(Callable)} to
@@ -63,7 +74,8 @@ public interface ChaosSession extends AutoCloseable {
 
   /**
    * Activates a {@link ChaosScenario.ScenarioScope#SESSION SESSION}-scoped scenario within this
-   * session. Only threads bound to this session via {@link #bind()} will be affected.
+   * session. Only threads bound to this session are affected: the thread that opened it, until
+   * {@link #close()}, and threads bound with {@link #bind()}.
    *
    * @param scenario must have {@link ChaosScenario.ScenarioScope#SESSION} scope; JVM-scoped
    *     scenarios cannot be activated on a session
@@ -94,7 +106,8 @@ public interface ChaosSession extends AutoCloseable {
   ChaosActivationHandle activate(ChaosPlan plan);
 
   /**
-   * Binds the calling thread to this session, making it eligible for session-scoped chaos.
+   * Binds the calling thread to this session, making it eligible for session-scoped chaos. The
+   * thread that opened the session is bound already; use this on other threads.
    *
    * <p>The binding is stored in a thread-local and remains active until {@link ScopeBinding#close}
    * is called. Nested bind() calls on the same thread stack: the innermost binding applies until it
@@ -135,8 +148,9 @@ public interface ChaosSession extends AutoCloseable {
   <T> Callable<T> wrap(Callable<T> callable);
 
   /**
-   * Stops all session-scoped scenarios and releases the session. After this call, threads
-   * previously bound to this session will no longer observe session-scoped chaos.
+   * Stops all session-scoped scenarios and releases the session, ending the binding of the thread
+   * that opened it. After this call, threads previously bound to this session will no longer
+   * observe session-scoped chaos.
    */
   @Override
   void close();

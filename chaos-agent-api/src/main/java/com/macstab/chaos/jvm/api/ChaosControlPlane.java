@@ -75,9 +75,10 @@ public interface ChaosControlPlane extends AutoCloseable {
   /**
    * Opens a named session scope for per-test chaos isolation.
    *
-   * <p>Scenarios activated on the returned session affect only threads explicitly bound to it via
-   * {@link ChaosSession#bind()}. Multiple sessions may be active simultaneously without interfering
-   * with each other.
+   * <p>Scenarios activated on the returned session affect only threads bound to it: the calling
+   * thread, which is bound from this call until {@link ChaosSession#close()}, and threads bound
+   * with {@link ChaosSession#bind()}. Multiple sessions may be active simultaneously without
+   * interfering with each other.
    *
    * <p>Always close the session when the test completes to stop all session scenarios and release
    * the session scope:
