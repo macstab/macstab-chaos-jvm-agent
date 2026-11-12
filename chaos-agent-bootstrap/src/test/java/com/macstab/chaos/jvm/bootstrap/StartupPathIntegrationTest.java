@@ -410,7 +410,7 @@ class StartupPathIntegrationTest {
                 });
     final boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
     if (!finished) {
-      process.destroyForcibly();
+      ChildJvmProbe.stop(process);
     }
     reader.join(TimeUnit.SECONDS.toMillis(5));
     final String output = String.join("\n", lines);

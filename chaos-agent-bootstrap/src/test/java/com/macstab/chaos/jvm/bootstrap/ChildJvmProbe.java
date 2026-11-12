@@ -297,7 +297,7 @@ final class ChildJvmProbe {
     final boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
     final String threads = finished ? "" : threadDump(process);
     if (!finished) {
-      process.destroyForcibly();
+      stop(process);
     }
     reader.join(TimeUnit.SECONDS.toMillis(5));
     final String output = String.join("\n", lines);
@@ -327,7 +327,7 @@ final class ChildJvmProbe {
       final boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
       final String threads = finished ? "" : threadDump(process);
       if (!finished) {
-        process.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
+        stop(process);
       }
       final List<String> lines = Files.readAllLines(log);
       return new BoundedRun(
@@ -341,6 +341,22 @@ final class ChildJvmProbe {
       if (process.isAlive()) {
         process.destroyForcibly();
       }
+    }
+  }
+
+  /**
+   * Stops a child that outlived its timeout as a shutdown would ({@code SIGTERM}), so its shutdown
+   * hooks run and its JaCoCo agent writes the coverage the child recorded, and forcibly when it has
+   * not ended 10 s later. A forcibly stopped child writes no coverage; its test fails on the
+   * timeout either way.
+   *
+   * @param process the child
+   * @throws InterruptedException when interrupted while waiting for the child to end
+   */
+  static void stop(final Process process) throws InterruptedException {
+    process.destroy();
+    if (!process.waitFor(10, TimeUnit.SECONDS)) {
+      process.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
     }
   }
 

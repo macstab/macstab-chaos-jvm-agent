@@ -213,7 +213,7 @@ class ControlFromAnotherJvmIntegrationTest {
         return new Child(process);
       } catch (final Exception | Error failure) {
         // The child never reported ready: no test closes it, so it is destroyed here.
-        process.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
+        ChildJvmProbe.stop(process);
         throw failure;
       }
     }
@@ -263,7 +263,7 @@ class ControlFromAnotherJvmIntegrationTest {
         // the child ended already
       }
       if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-        process.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
+        ChildJvmProbe.stop(process);
       }
     }
   }

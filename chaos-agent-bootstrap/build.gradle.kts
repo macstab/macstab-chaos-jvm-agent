@@ -198,6 +198,11 @@ tasks.test {
     // the test JVM does not have; keep them out of test discovery, which would have to load and
     // verify them.
     exclude("**/*ProbeMain*")
+    // Most of these tests wait on a child JVM of their own: two test JVMs halve the suite's wall
+    // time. The classes share no state across JVMs (temp directories, loopback port 0, a private
+    // java.io.tmpdir per child), and the child JVMs' JaCoCo agent locks the shared exec file while
+    // it appends.
+    maxParallelForks = 2
     // PlanFuzzTest replays a run with -PfuzzSeed=<seed> -PfuzzIterations=<n>.
     providers.gradleProperty("fuzzSeed").orNull?.let { systemProperty("chaos.fuzz.seed", it) }
     providers.gradleProperty("fuzzIterations").orNull?.let { systemProperty("chaos.fuzz.iterations", it) }

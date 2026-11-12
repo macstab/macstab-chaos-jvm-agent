@@ -388,7 +388,7 @@ class RealPathIntegrationTest {
         return new ChildJvmProbe.ProbeResult(output, ChildJvmProbe.parse(lines));
       } finally {
         if (process.isAlive()) {
-          process.destroyForcibly();
+          ChildJvmProbe.stop(process);
         }
       }
     }
