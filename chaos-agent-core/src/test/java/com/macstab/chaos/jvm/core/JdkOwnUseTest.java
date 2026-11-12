@@ -162,8 +162,18 @@ class JdkOwnUseTest {
       blocking.countDown();
       try {
         result.get();
-      } catch (final InterruptedException | java.util.concurrent.ExecutionException interrupted) {
-        // the interrupt closed the channel
+      } catch (final InterruptedException interrupted) {
+        // From JDK 23 the interrupting thread closes the channel after it delivered the interrupt;
+        // end() before that close would take the pending close away, so wait for it first.
+        // The interrupt flag stays set, so wait without parking: the caller's get reports a
+        // close that never comes.
+        final long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        while (!result.isDone() && System.nanoTime() - deadline < 0) {
+          Thread.onSpinWait();
+        }
+        Thread.currentThread().interrupt();
+      } catch (final java.util.concurrent.ExecutionException failed) {
+        // the close action failed; the caller's get reports it
       } finally {
         try {
           end(true);
@@ -194,7 +204,18 @@ class JdkOwnUseTest {
     }
     reader.interrupt();
     reader.join(5_000L);
-    return channel.result.get(5, java.util.concurrent.TimeUnit.SECONDS);
+    try {
+      return channel.result.get(5, java.util.concurrent.TimeUnit.SECONDS);
+    } catch (final java.util.concurrent.TimeoutException notClosed) {
+      throw new AssertionError(
+          "the interrupt did not close the channel: reader "
+              + reader.getState()
+              + ", open "
+              + channel.isOpen()
+              + ", at "
+              + java.util.Arrays.toString(reader.getStackTrace()),
+          notClosed);
+    }
   }
 
   @Test

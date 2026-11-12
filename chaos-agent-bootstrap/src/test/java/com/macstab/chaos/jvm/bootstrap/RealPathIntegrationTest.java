@@ -183,8 +183,8 @@ class RealPathIntegrationTest {
 
       assertThat(result.longValue("read2")).isEqualTo(result.longValue("read1"));
       assertThat(result.longValue("read3")).isEqualTo(result.longValue("read1"));
-      assertThat(result.longValue("offset3")).isLessThanOrEqualTo(-300L);
-      assertThat(result.longValue("offsetAfterStop")).isBetween(-50L, 50L);
+      assertThat(result.longValue("offset3Max")).isLessThanOrEqualTo(-300L);
+      assertSkew(result, "offsetAfterStop", 0L);
     }
 
     @Test
@@ -192,9 +192,9 @@ class RealPathIntegrationTest {
     void drift() throws Exception {
       final ChildJvmProbe.ProbeResult result = selfAttached("clock-mode:DRIFT");
 
-      assertThat(result.longValue("offset1")).isBetween(9_950L, 10_050L);
-      assertThat(result.longValue("offset2")).isBetween(19_950L, 20_050L);
-      assertThat(result.longValue("offset3")).isBetween(29_950L, 30_050L);
+      assertSkew(result, "offset1", 10_000L);
+      assertSkew(result, "offset2", 20_000L);
+      assertSkew(result, "offset3", 30_000L);
     }
 
     @Test
@@ -202,12 +202,24 @@ class RealPathIntegrationTest {
     void regress() throws Exception {
       final ChildJvmProbe.ProbeResult result = selfAttached("clock-mode:REGRESS");
 
-      assertThat(result.longValue("offset1")).isBetween(-50L, 50L);
+      assertSkew(result, "offset1", 0L);
       assertThat(result.longValue("read2"))
           .as("time ran backwards")
           .isLessThan(result.longValue("read1"));
-      assertThat(result.longValue("offset2")).isBetween(-10_050L, -9_950L);
-      assertThat(result.longValue("offset3")).isBetween(-10_050L, -9_950L);
+      assertSkew(result, "offset2", -10_000L);
+      assertSkew(result, "offset3", -10_000L);
+    }
+
+    /**
+     * The skew {@code name} reports lies in {@code <name>Min} to {@code <name>Max} (the real time
+     * around the read); {@code expected} must lie in that range, within the 50 ms of clock
+     * granularity.
+     */
+    private void assertSkew(
+        final ChildJvmProbe.ProbeResult result, final String name, final long expected) {
+      assertThat(expected)
+          .as(name)
+          .isBetween(result.longValue(name + "Min") - 50L, result.longValue(name + "Max") + 50L);
     }
   }
 

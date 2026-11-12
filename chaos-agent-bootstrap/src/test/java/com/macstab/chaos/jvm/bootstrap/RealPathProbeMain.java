@@ -325,21 +325,25 @@ public final class RealPathProbeMain {
       final long skewed = Instant.now().toEpochMilli();
       final long after = System.currentTimeMillis();
       System.out.println("read" + read + "=" + skewed);
-      System.out.println("offset" + read + "=" + offset(skewed, before, after));
+      printOffset("offset" + read, skewed, before, after);
       pause(200L);
     }
     skew.close();
     final long before = System.currentTimeMillis();
     final long unskewed = Instant.now().toEpochMilli();
-    System.out.println("offsetAfterStop=" + offset(unskewed, before, System.currentTimeMillis()));
+    printOffset("offsetAfterStop", unskewed, before, System.currentTimeMillis());
   }
 
   /**
-   * How far {@code read} lies outside the real time {@code before} to {@code after} around it: a
-   * pause of the thread between the reads is no skew.
+   * Prints the range the skew of {@code read} lies in: the real time was {@code before} to {@code
+   * after} around it, so the skew is between {@code read - after} ({@code <name>Min}) and {@code
+   * read - before} ({@code <name>Max}); a pause of the thread between the reads widens the range
+   * instead of reading as skew.
    */
-  private static long offset(final long read, final long before, final long after) {
-    return read < before ? read - before : read > after ? read - after : 0L;
+  private static void printOffset(
+      final String name, final long read, final long before, final long after) {
+    System.out.println(name + "Min=" + (read - after));
+    System.out.println(name + "Max=" + (read - before));
   }
 
   // ── stressors ─────────────────────────────────────────────────────────────────────────────────
