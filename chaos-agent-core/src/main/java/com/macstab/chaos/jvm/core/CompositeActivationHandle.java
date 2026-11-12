@@ -58,13 +58,13 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
   /** Broadcasts {@link ChaosActivationHandle#start()} to all delegate handles. */
   @Override
   public void start() {
-    broadcast("start", ChaosActivationHandle::start);
+    broadcast(ChaosActivationHandle::start);
   }
 
   /** Broadcasts {@link ChaosActivationHandle#stop()} to all delegate handles. */
   @Override
   public void stop() {
-    broadcast("stop", ChaosActivationHandle::stop);
+    broadcast(ChaosActivationHandle::stop);
   }
 
   /** Closes every scenario of the plan, removing each from the registry. */
@@ -76,7 +76,7 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
       return;
     }
     try {
-      broadcast("close", ChaosActivationHandle::close);
+      broadcast(ChaosActivationHandle::close);
     } finally {
       onClose.run();
     }
@@ -85,34 +85,35 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
   /** Broadcasts {@link ChaosActivationHandle#release()} to all delegate handles. */
   @Override
   public void release() {
-    broadcast("release", ChaosActivationHandle::release);
+    broadcast(ChaosActivationHandle::release);
   }
 
   /**
    * Applies the given action to every delegate, collecting failures rather than letting the first
    * failure short-circuit the rest. {@code delegates.forEach(...)} stops on the first thrown
    * exception, leaking any delegate that came after it — for {@code stop} and {@code release} that
-   * means leaked scenarios / unrestored state. Aggregate via {@code addSuppressed} so the caller
-   * sees every failure, not just the one that happened to throw first.
+   * means leaked scenarios / unrestored state. The first failure, an exception or an error, is
+   * thrown as it is (a caller catching the API exception type of a scenario handle catches it from
+   * a plan handle too), with the later ones added to it as suppressed.
    */
-  private void broadcast(
-      final String op, final java.util.function.Consumer<ChaosActivationHandle> action) {
-    RuntimeException aggregate = null;
+  private void broadcast(final java.util.function.Consumer<ChaosActivationHandle> action) {
+    Throwable first = null;
     for (final ChaosActivationHandle delegate : delegates) {
       try {
         action.accept(delegate);
-      } catch (final RuntimeException perDelegate) {
-        if (aggregate == null) {
-          aggregate =
-              new RuntimeException(
-                  "one or more delegates failed during composite " + op, perDelegate);
-        } else {
-          aggregate.addSuppressed(perDelegate);
+      } catch (final RuntimeException | Error perDelegate) {
+        if (first == null) {
+          first = perDelegate;
+        } else if (!first.equals(perDelegate)) {
+          first.addSuppressed(perDelegate);
         }
       }
     }
-    if (aggregate != null) {
-      throw aggregate;
+    if (first instanceof RuntimeException runtimeFailure) {
+      throw runtimeFailure;
+    }
+    if (first instanceof Error error) {
+      throw error;
     }
   }
 

@@ -920,7 +920,7 @@ class LifecycleEdgeTest {
   @DisplayName("composite handles")
   class Composite {
 
-    private static final class FailingHandle implements ChaosActivationHandle {
+    private static class FailingHandle implements ChaosActivationHandle {
       private final String id;
 
       FailingHandle(final String id) {
@@ -960,22 +960,43 @@ class LifecycleEdgeTest {
     }
 
     @Test
-    @DisplayName("every delegate is tried and every failure is reported")
+    @DisplayName("every delegate is tried; the first failure is thrown as is, the rest suppressed")
     void aggregatesDelegateFailures() {
       final CompositeActivationHandle composite =
           new CompositeActivationHandle(
               "two", List.of(new FailingHandle("a"), new FailingHandle("b")), () -> {});
       assertThatThrownBy(composite::start)
-          .isExactlyInstanceOf(RuntimeException.class)
-          .hasMessage("one or more delegates failed during composite start")
-          .hasCauseInstanceOf(IllegalStateException.class)
+          .isExactlyInstanceOf(IllegalStateException.class)
+          .hasMessage("a cannot start")
           .satisfies(
-              failure -> {
-                assertThat(failure.getCause()).hasMessage("a cannot start");
-                assertThat(failure.getSuppressed())
-                    .singleElement()
-                    .satisfies(suppressed -> assertThat(suppressed).hasMessage("b cannot start"));
-              });
+              failure ->
+                  assertThat(failure.getSuppressed())
+                      .singleElement()
+                      .satisfies(
+                          suppressed -> assertThat(suppressed).hasMessage("b cannot start")));
+    }
+
+    @Test
+    @DisplayName("an Error from one delegate does not skip the others")
+    void errorDoesNotSkipTheRest() {
+      final LinkageError linkage = new LinkageError("a cannot link");
+      final ChaosActivationHandle linking =
+          new FailingHandle("a") {
+            @Override
+            public void start() {
+              throw linkage;
+            }
+          };
+      final CompositeActivationHandle composite =
+          new CompositeActivationHandle("two", List.of(linking, new FailingHandle("b")), () -> {});
+      assertThatThrownBy(composite::start)
+          .isSameAs(linkage)
+          .satisfies(
+              failure ->
+                  assertThat(failure.getSuppressed())
+                      .singleElement()
+                      .satisfies(
+                          suppressed -> assertThat(suppressed).hasMessage("b cannot start")));
     }
 
     @Test
