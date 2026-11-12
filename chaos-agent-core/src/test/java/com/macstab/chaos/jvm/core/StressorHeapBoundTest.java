@@ -107,6 +107,26 @@ class StressorHeapBoundTest {
   }
 
   @Test
+  @DisplayName("interned strings above the free heap are refused before any is interned")
+  void internAboveTheFreeHeapIsRefused() {
+    try (ChaosRuntime runtime = new ChaosRuntime()) {
+      assertThatThrownBy(
+              () ->
+                  runtime.validate(
+                      ChaosScenario.builder("huge-intern")
+                          .selector(
+                              ChaosSelector.stress(
+                                  ChaosSelector.StressTarget.STRING_INTERN_PRESSURE))
+                          .effect(ChaosEffect.stringInternPressure(1_000_000, 1 << 20))
+                          .build()))
+          .isInstanceOf(com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException.class)
+          .hasMessageStartingWith("stringInternPressure of 1000000 strings of 1048576 bytes")
+          .hasMessageContaining("needs about ")
+          .hasMessageContaining("exceeds the free heap of");
+    }
+  }
+
+  @Test
   @DisplayName("a thread-local leak whose entry count overflows an int is an invalid scenario")
   void entryCountOverflowIsInvalid() {
     try (ChaosRuntime runtime = new ChaosRuntime()) {

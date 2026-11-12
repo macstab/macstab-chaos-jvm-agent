@@ -398,7 +398,7 @@ Key matching rules:
 
 ## CompatibilityValidator
 
-Validates selector/effect combinations before registration. Throws `ChaosValidationException` on violation, `ChaosUnsupportedFeatureException` when the runtime cannot carry the scenario out (direct-buffer pressure above the direct memory limit, heap pressure above the free heap, a `safepointStorm` without retransforms under `-XX:+DisableExplicitGC`, a `finalizerBacklog` under `--finalization=disabled`), and `ChaosActivationException` when the scope does not fit where it is activated (a `SESSION` scenario outside a session, a `JVM` one in a session). All checks run at activation time, not at match time.
+Validates selector/effect combinations before registration. Throws `ChaosValidationException` on violation, `ChaosUnsupportedFeatureException` when the runtime cannot carry the scenario out (direct-buffer pressure above the direct memory limit, heap pressure, a thread-local leak, interned strings or a reference-queue flood cycle above the free heap, a `safepointStorm` without retransforms under `-XX:+DisableExplicitGC`, a `finalizerBacklog` under `--finalization=disabled`), and `ChaosActivationException` when the scope does not fit where it is activated (a `SESSION` scenario outside a session, a `JVM` one in a session). All checks run at activation time, not at match time.
 
 Key checks:
 

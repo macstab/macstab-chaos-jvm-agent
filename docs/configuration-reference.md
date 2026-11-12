@@ -1936,7 +1936,7 @@ Like `metaspacePressure`, the classes are defined without `sun.misc.Unsafe`.
 | `internCount`       | int  | > 0, ≤ 1,000,000, ≤ 256^`stringLengthBytes` | Number of distinct strings to intern |
 | `stringLengthBytes` | int  | > 0, ≤ 1 MiB | Length of each interned string (one Latin-1 character per byte) |
 
-String `i` is `i` written in base 256, so the strings are distinct; a count, length or count-per-length beyond the limits is refused with `ChaosValidationException` instead of being reduced.
+String `i` is `i` written in base 256, so the strings are distinct; a count, length or count-per-length beyond the limits is refused with `ChaosValidationException` instead of being reduced. Each string keeps about `stringLengthBytes` (with its 16-byte array header, rounded up to 8) + 40 bytes of heap reachable (the `String` and its slots in the stressor's lists; the string table's entry is outside the heap): `internCount` × that above the free heap (the maximum heap, `-Xmx`, less what is in use at activation) is refused with `ChaosUnsupportedFeatureException` (`UNSUPPORTED_RUNTIME`) before any string is interned.
 
 ---
 

@@ -223,10 +223,10 @@ final class CompatibilityValidator {
 
   /**
    * Refuses stressor parameters a stressor cannot honour, instead of clamping them: heap pressure,
-   * a thread-local leak or a reference-queue flood cycle above the free heap (it depends on the
-   * runtime's state, {@link ChaosUnsupportedFeatureException}), a thread-local leak whose entries
-   * overflow an {@code int}, more interned strings than their length can make distinct or than the
-   * caps allow, and an interval below the millisecond a stressor sleeps in.
+   * a thread-local leak, interned strings or a reference-queue flood cycle above the free heap (it
+   * depends on the runtime's state, {@link ChaosUnsupportedFeatureException}), a thread-local leak
+   * whose entries overflow an {@code int}, more interned strings than their length can make
+   * distinct or than the caps allow, and an interval below the millisecond a stressor sleeps in.
    */
   private static void validateStressorLimits(final ChaosEffect effect) {
     switch (effect) {
@@ -272,6 +272,13 @@ final class CompatibilityValidator {
    * MB without.
    */
   static final long THREAD_LOCAL_ENTRY_BYTES = 160L;
+
+  /**
+   * What one interned string keeps reachable besides its {@code byte[]}: the {@code String} object
+   * (24 bytes) and its slots in the stressor's two lists, rounded up. The string table's entry
+   * lives outside the heap.
+   */
+  static final long INTERNED_STRING_BYTES = 40L;
 
   /** The header of a {@code byte[]}: its mark word, class pointer and length. */
   private static final long ARRAY_HEADER_BYTES = 16L;
@@ -377,6 +384,18 @@ final class CompatibilityValidator {
                 + "; raise stringLengthBytes");
       }
     }
+    final long perString =
+        ((ARRAY_HEADER_BYTES + intern.stringLengthBytes() + 7L) & ~7L) + INTERNED_STRING_BYTES;
+    final long bytes = saturatedProduct(intern.internCount(), perString);
+    validateHeapLimit(
+        "stringInternPressure of "
+            + intern.internCount()
+            + " strings of "
+            + intern.stringLengthBytes()
+            + " bytes needs about "
+            + bytes
+            + " bytes, which exceeds",
+        bytes);
   }
 
   /**
