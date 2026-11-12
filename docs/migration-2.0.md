@@ -63,6 +63,7 @@
 | 42 | `spuriousWakeup` selects `NIO_SELECTOR_SELECT` alone | a `spuriousWakeup` scenario's `NioSelector` also lists a channel operation (`NIO_CHANNEL_READ`, `NIO_CHANNEL_WRITE`, `NIO_CHANNEL_CONNECT`, `NIO_CHANNEL_ACCEPT`) | remove the other operations, or put them in a scenario of their own (§42) |
 | 43 | The Quarkus and Micronaut modules no longer bring `chaos-agent-testkit` | a test uses `@QuarkusChaosTest`, `@MicronautChaosTest`, `@WithChaos` or `ChaosAssertions` and gets the testkit only through `chaos-agent-quarkus-extension` or `chaos-agent-micronaut-integration` | add `chaos-agent-testkit` to the test dependencies (§43) |
 | 44 | Of `chaos-agent-bootstrap`, only `ChaosPlatform` is API | you reference `StartupConfigPoller`, `ChaosAgentBootstrap`, `ChaosDiagnosticsMXBean`, `JfrIntegration` or the JFR event classes | use `ChaosPlatform` and the `configWatchInterval` agent argument (§44) |
+| 45 | The control plane of `ChaosPlatform` cannot be closed | code closes the plane `ChaosPlatform.installLocally()` or `current()` returns, for example in try-with-resources | close the handles and sessions you opened, or activate through a `TrackingChaosControlPlane` and call `stopTracked()` (§45) |
 
 ---
 
@@ -494,6 +495,12 @@ Before (1.x): the testkit came with the module, also into the packaged applicati
 `ChaosPlatform` is the one supported type of the agent jar's module (`chaos-agent-bootstrap`); `apiCheck` and `japicmp` guard it. `StartupConfigPoller`, which was `public` in 1.x (`createIfEnabled`, `startWithInitialPlan`, `intervalMs`, `close`, and the constants `ENV_WATCH_INTERVAL` and `ARG_WATCH_INTERVAL`), is package-private. `ChaosAgentBootstrap`, `ChaosDiagnosticsMXBean`, `JfrIntegration` and the JFR event classes (`ChaosEffectAppliedEvent`, `ChaosScenarioLifecycleEvent`, `ChaosStressorSnapshotEvent`) stay `public` for the agent's own use but are `@Internal`: they can change in any release.
 
 Before (1.x): code could start a poller with `StartupConfigPoller.createIfEnabled(...)` or read its constants. Now get the control plane through `ChaosPlatform` (`ChaosPlatform.installLocally()` or `ChaosPlatform.current()`), and have the agent reload its plan file with the `configWatchInterval` agent argument (`-Dmacstab.chaos.configWatchInterval`, `MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL`; [configuration reference](configuration-reference.md#supported-agent-args)). The MXBean is still registered and read through JMX by its object name; only compiling against its interface is unsupported. The JFR events keep their names and fields (§40), so JFR recordings and JMC are unaffected.
+
+## 45. The control plane of `ChaosPlatform` cannot be closed
+
+`ChaosPlatform.installLocally()`, `current()` and `installed()` return the one control plane the agent installed for the whole JVM; the management endpoints, the reports and the plan file poller use it too. Its `close()` now throws `UnsupportedOperationException`. In 1.x it stopped every scenario and left the plane closed for the rest of the JVM: every later `installLocally()` returned the closed plane, and every `activate` and `openSession`, in any later test, failed with `IllegalStateException: chaos control plane is closed`.
+
+Before (1.x): `try (ChaosControlPlane plane = ChaosPlatform.installLocally()) { ... }` ended chaos for the JVM. Now close what you opened: the handle of each activation and each session (`try (ChaosActivationHandle handle = plane.activate(...))`), or wrap the plane in a `TrackingChaosControlPlane` (chaos-agent-testkit), whose `close()` leaves the plane alone, and call `stopTracked()` to stop what was activated through it.
 
 ---
 

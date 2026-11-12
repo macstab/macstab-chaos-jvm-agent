@@ -562,6 +562,8 @@ public final class ChaosAgentBootstrap {
       final AgentSettings settings = AgentSettings.of(agentArgs, environment);
       final ChaosRuntime runtime = installRuntime(settings, instrumentation, deferMBean);
       installedArgs = settings.args();
+      // Shared by every caller from here on: closing it would end chaos for the whole JVM.
+      runtime.markJvmWide();
       claim.complete(runtime);
       return runtime;
     } catch (final Throwable installFailure) {

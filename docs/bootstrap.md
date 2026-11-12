@@ -28,7 +28,7 @@
 - Registering the `ChaosDiagnostics` JMX MBean
 - `ChaosPlatform.installLocally()` — self-attach path used by `chaos-agent-testkit`
 
-**Supported entry point.** `ChaosPlatform` is the only supported API of this module: `installLocally()` installs the agent (self-attach) and returns the control plane, `current()` returns the installed control plane or throws `IllegalStateException`, and `installed()` returns it as an `Optional`, empty while no agent is installed, without throwing — use it to ask whether the agent is installed. `ChaosAgentBootstrap` and the other bootstrap types are the agent's implementation; their signatures can change in any release.
+**Supported entry point.** `ChaosPlatform` is the only supported API of this module: `installLocally()` installs the agent (self-attach) and returns the control plane, `current()` returns the installed control plane or throws `IllegalStateException`, and `installed()` returns it as an `Optional`, empty while no agent is installed, without throwing — use it to ask whether the agent is installed. All three return the one control plane of the JVM, shared by every caller, the management endpoints and the plan file poller: its `close()` throws `UnsupportedOperationException` (close your handles and sessions, or use a `TrackingChaosControlPlane` and its `stopTracked()`). `ChaosAgentBootstrap` and the other bootstrap types are the agent's implementation; their signatures can change in any release.
 
 ## Scope
 

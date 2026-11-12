@@ -30,4 +30,19 @@ class ChaosPlatformLocalModeTest {
         .as("execute() must be delayed by session-scoped chaos")
         .isGreaterThanOrEqualTo(DELAY_MS);
   }
+
+  @Test
+  @DisplayName("closing the JVM-wide control plane is refused, and chaos keeps working")
+  void closingTheSharedPlaneIsRefused() throws Exception {
+    final ChildJvmProbe.ProbeResult result =
+        new ChildJvmProbe(tempDir).runWithoutAgent(SharedPlaneCloseProbeMain.class, "close");
+
+    assertThat(result.value("close"))
+        .startsWith("refused:")
+        .contains("JVM-wide")
+        .contains("TrackingChaosControlPlane");
+    assertThat(result.value("activate")).isEqualTo("ACTIVE");
+    assertThat(result.value("session")).isEqualTo("open");
+    assertThat(result.value("done")).isEqualTo("true");
+  }
 }

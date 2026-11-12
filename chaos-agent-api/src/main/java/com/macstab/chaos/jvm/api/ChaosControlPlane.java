@@ -142,6 +142,13 @@ public interface ChaosControlPlane extends AutoCloseable {
    * open session stays open but activates nothing more (its {@code activate} fails with {@link
    * IllegalStateException}); its own {@link ChaosSession#close()} still ends its binding of the
    * thread that opened it. Calling {@code close()} more than once is safe.
+   *
+   * <p>The JVM-wide control plane the agent installed ({@code ChaosPlatform.installLocally()},
+   * {@code current()}) cannot be closed: other tests, framework integrations and the management
+   * endpoints share it.
+   *
+   * @throws UnsupportedOperationException if this is the JVM-wide control plane of {@code
+   *     ChaosPlatform}
    */
   @Override
   void close();

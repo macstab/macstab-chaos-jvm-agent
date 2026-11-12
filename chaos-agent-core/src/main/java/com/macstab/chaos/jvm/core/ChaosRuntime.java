@@ -35,6 +35,10 @@ import org.jspecify.annotations.Nullable;
 @Internal
 public final class ChaosRuntime implements ChaosControlPlane {
   private final ChaosControlPlaneImpl controlPlane;
+
+  /** Whether this is the runtime the agent installed for the whole JVM; see {@link #close()}. */
+  private volatile boolean jvmWide;
+
   private final ChaosDispatcher dispatcher;
 
   // The dispatch domains, held directly: one field load per dispatch instead of two.
@@ -244,8 +248,33 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return controlPlane.removeEventListener(listener);
   }
 
+  /**
+   * Marks this runtime as the one the agent installed for the whole JVM ({@code ChaosPlatform}):
+   * its {@link #close()} is refused from then on, since every caller of {@code
+   * ChaosPlatform.installLocally()} and {@code current()}, the management endpoints and the plan
+   * file poller share it. Called by the bootstrap when it publishes the runtime.
+   */
+  @Internal
+  public void markJvmWide() {
+    jvmWide = true;
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * @throws UnsupportedOperationException if this is the JVM-wide runtime the agent installed
+   *     ({@code ChaosPlatform.installLocally()}, {@code current()}): stop or close the handles and
+   *     sessions instead, or activate through a {@code TrackingChaosControlPlane}
+   *     (chaos-agent-testkit) and call its {@code stopTracked()}
+   */
   @Override
   public void close() {
+    if (jvmWide) {
+      throw new UnsupportedOperationException(
+          "the chaos control plane of ChaosPlatform is JVM-wide and cannot be closed: close the"
+              + " handles and sessions you opened, or activate through a"
+              + " TrackingChaosControlPlane and call stopTracked()");
+    }
     controlPlane.close();
   }
 
