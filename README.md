@@ -96,7 +96,7 @@ A chaos tool that is wrong about its own behaviour is worse than none. Each clai
 | The architecture holds: the bootstrap bridge is closed, inlined advice uses only public members | `ArchitectureTest` |
 | No known bug patterns in any line that compiles | Error Prone on every compilation, warnings as errors |
 | No unchecked null in production code | NullAway proves every dereference; optional values are `@Nullable` in the types ([ADR 0008](docs/adr/0008-nullness-in-the-types.md)) |
-| The tests catch real bugs, not just run code | mutation testing with thresholds (`./gradlew pitest`, run on demand) |
+| The tests catch real bugs, not just run code | mutation testing with thresholds (`./gradlew pitest`, weekly in CI and on demand) |
 | An idle hook costs 7–12 ns and allocates nothing | JMH benchmarks, run on demand ([benchmarks](docs/benchmarks.md)) |
 | What ships is what you can verify | reproducible jars (`scripts/check-reproducible.sh`, run on demand), a CycloneDX SBOM published next to every jar (classifier `cyclonedx`), shaded dependencies listed |
 
