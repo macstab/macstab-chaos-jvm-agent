@@ -442,12 +442,14 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
         }
       }
       return planHandle;
-    } catch (final RuntimeException failure) {
+    } catch (final RuntimeException | Error failure) {
+      // An Error too (a linkage error from a stressor): registerScenario rolled back its own
+      // scenario and rethrew it, and the ones registered before it must not stay active.
       clearPlanObservability(scopeKey, ids, owner);
       for (final ChaosActivationHandle handle : handles) {
         try {
           rollback.accept(handle);
-        } catch (final RuntimeException rollbackFailure) {
+        } catch (final RuntimeException | Error rollbackFailure) {
           failure.addSuppressed(rollbackFailure);
         }
       }

@@ -17,8 +17,10 @@ import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -145,5 +147,51 @@ class PlanRollbackTest {
     } finally {
       plane.close();
     }
+  }
+
+  @Test
+  @DisplayName("an Error from the second scenario's stressor rolls the first back too")
+  void errorRollsBack() {
+    final ChaosControlPlaneImpl plane =
+        new ChaosControlPlaneImpl(
+            Clock.systemUTC(),
+            ChaosMetricsSink.NOOP,
+            new StressorFactory(Optional::empty) {
+              @Override
+              ManagedStressor createIfNeeded(
+                  final ChaosEffect effect,
+                  final boolean allowDestructiveEffects,
+                  final Consumer<String> onEnd) {
+                if (effect instanceof ChaosEffect.KeepAliveEffect keepAlive
+                    && keepAlive.threadName().equals("second")) {
+                  throw new NoClassDefFoundError("java/lang/management/ManagementFactory");
+                }
+                return () -> {};
+              }
+            });
+    final ChaosPlan plan =
+        new ChaosPlan(
+            new ChaosPlan.Metadata("linkage", ""),
+            new ChaosPlan.Observability(false, false, false),
+            List.of(keepAlive("first"), keepAlive("second")));
+    try {
+      assertThatThrownBy(() -> plane.activate(plan)).isInstanceOf(NoClassDefFoundError.class);
+
+      assertThat(plane.diagnostics().snapshot().scenarios()).isEmpty();
+      assertThat(plane.jmxVisible("jvm", "first")).as("jmxEnabled=false is cleared").isTrue();
+      try (ChaosActivationHandle again = plane.activate(keepAlive("first"))) {
+        assertThat(again.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+      }
+    } finally {
+      plane.close();
+    }
+  }
+
+  private static ChaosScenario keepAlive(final String id) {
+    return ChaosScenario.builder(id)
+        .selector(ChaosSelector.stress(ChaosSelector.StressTarget.KEEPALIVE))
+        .effect(ChaosEffect.keepAlive(id, true, Duration.ofHours(1)))
+        .activationPolicy(ActivationPolicy.always())
+        .build();
   }
 }
