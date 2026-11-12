@@ -143,6 +143,12 @@ class NetworkFaultEndToEndTest {
             // A wakeup made before the select: the select returns at once, as the JDK's does.
             softly.assertThat(result.longValue("selectWakeupBefore.millis")).isLessThan(500L);
             softly.assertThat(result.value("selectWakeupBefore.outcome")).isEqualTo("ok");
+            // A wakeup that ended a real select running when the scenario was activated is not
+            // kept: the next select is stalled for its own 3 s.
+            softly
+                .assertThat(result.longValue("selectActivatedDuring.millis"))
+                .isBetween(2_900L, 6_000L);
+            softly.assertThat(result.longValue("selectActivatedDuring.applied")).isEqualTo(1L);
             softly.assertThat(result.longValue("selectClosed.millis")).isLessThan(500L);
             softly
                 .assertThat(result.value("selectClosed.outcome"))

@@ -40,7 +40,7 @@ final class NioAdvice {
         @Advice.This final Object selector,
         @Advice.Enter final boolean spurious,
         @Advice.Return(readOnly = false) int returned) {
-      BootstrapDispatcher.afterNioSelect(selector);
+      BootstrapDispatcher.afterNioSelect(selector, spurious);
       if (spurious) {
         returned = 0;
       }
@@ -68,7 +68,7 @@ final class NioAdvice {
         @Advice.This final Object selector,
         @Advice.Enter final boolean spurious,
         @Advice.Return(readOnly = false) int returned) {
-      BootstrapDispatcher.afterNioSelect(selector);
+      BootstrapDispatcher.afterNioSelect(selector, spurious);
       if (spurious) {
         returned = 0;
       }
@@ -97,7 +97,7 @@ final class NioAdvice {
         @Advice.This final Object selector,
         @Advice.Enter final boolean spurious,
         @Advice.Return(readOnly = false) int returned) {
-      BootstrapDispatcher.afterNioSelect(selector);
+      BootstrapDispatcher.afterNioSelect(selector, spurious);
       if (spurious) {
         returned = 0;
       }
@@ -121,7 +121,7 @@ final class NioAdvice {
         @Advice.This final Object selector,
         @Advice.Enter final boolean spurious,
         @Advice.Return(readOnly = false) int returned) {
-      BootstrapDispatcher.afterNioSelect(selector);
+      BootstrapDispatcher.afterNioSelect(selector, spurious);
       if (spurious) {
         returned = 0;
       }

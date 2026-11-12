@@ -218,11 +218,135 @@ class BridgeEntryPointsTest {
         // The first match proceeds: the real select runs, and a wakeup made while it runs ends it.
         assertThat(BootstrapDispatcher.beforeNioSelect(selector, 2_000L)).isFalse();
         BootstrapDispatcher.selectorWoken(selector);
-        BootstrapDispatcher.afterNioSelect(selector);
+        endRealSelect(selector);
         assertThat(stalledMillis(selector)).as("the next select is stalled").isGreaterThan(1_500L);
         assertThat(handle.appliedCount()).isEqualTo(1L);
       } finally {
         handle.close();
+      }
+    }
+
+    /** The exit of a select that ran for real (the advice's skip flag is {@code false}). */
+    private void endRealSelect(final java.nio.channels.Selector selector) {
+      BootstrapDispatcher.afterNioSelect(selector, false);
+    }
+
+    private ChaosActivationHandle activateTimeout(final String name) {
+      return runtime.activate(
+          ChaosScenario.builder(name)
+              .selector(
+                  new ChaosSelector.NioSelector(
+                      Set.of(OperationType.NIO_SELECTOR_SELECT), NamePattern.any()))
+              .effect(ChaosEffect.timeout())
+              .activationPolicy(ActivationPolicy.always())
+              .build());
+    }
+
+    @Test
+    @DisplayName("a scenario activated while a real select runs: the wakeup ending it is not kept")
+    void activatedDuringARealSelect() throws Throwable {
+      try (java.nio.channels.Selector selector = java.nio.channels.Selector.open()) {
+        // Idle: the real select starts with no scenario indexed.
+        assertThat(BootstrapDispatcher.beforeNioSelect(selector, 2_000L)).isFalse();
+        try (ChaosActivationHandle handle = activateTimeout("select-activated-during")) {
+          BootstrapDispatcher.selectorWoken(selector);
+          endRealSelect(selector);
+          assertThat(stalledMillis(selector))
+              .as("the next select is stalled")
+              .isGreaterThan(1_500L);
+          assertThat(handle.appliedCount()).isEqualTo(1L);
+        }
+      }
+    }
+
+    @Test
+    @DisplayName(
+        "two threads on one selector: the wakeup ending the second's real select is not kept")
+    void twoThreadsOnOneSelector() throws Throwable {
+      try (java.nio.channels.Selector selector = java.nio.channels.Selector.open();
+          ChaosActivationHandle handle = activateTimeout("select-two-threads")) {
+        // Both selects run for real (infinite: a timeout cannot fire); the first ends, then a
+        // wakeup ends the second.
+        assertThat(BootstrapDispatcher.beforeNioSelect(selector, 0L)).isFalse();
+        assertThat(BootstrapDispatcher.beforeNioSelect(selector, 0L)).isFalse();
+        endRealSelect(selector);
+        BootstrapDispatcher.selectorWoken(selector);
+        endRealSelect(selector);
+        assertThat(stalledMillis(selector)).as("the next select is stalled").isGreaterThan(1_500L);
+        assertThat(handle.appliedCount()).isEqualTo(1L);
+      }
+    }
+
+    @Test
+    @DisplayName("a wakeup while a real select's enter is still delayed is not kept")
+    void wakeupDuringTheEnterOfARealSelect() throws Throwable {
+      try (java.nio.channels.Selector selector = java.nio.channels.Selector.open();
+          ChaosActivationHandle handle = activateTimeout("select-delayed-enter")) {
+        final ChaosActivationHandle delay =
+            runtime.activate(
+                ChaosScenario.builder("select-delay")
+                    .selector(
+                        new ChaosSelector.NioSelector(
+                            Set.of(OperationType.NIO_SELECTOR_SELECT), NamePattern.any()))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(500L)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        final Thread selecting = Thread.currentThread();
+        final Thread waker =
+            Thread.ofPlatform()
+                .daemon()
+                .start(
+                    () -> {
+                      // Woken up while the select's enter waits out its delay, before the real
+                      // select starts.
+                      while (java.util.Arrays.stream(selecting.getStackTrace())
+                          .noneMatch(frame -> "applyDelayAndGate".equals(frame.getMethodName()))) {
+                        Thread.onSpinWait();
+                      }
+                      BootstrapDispatcher.selectorWoken(selector);
+                    });
+        assertThat(BootstrapDispatcher.beforeNioSelect(selector, 0L)).isFalse();
+        waker.join();
+        endRealSelect(selector);
+        delay.close();
+        assertThat(stalledMillis(selector)).as("the next select is stalled").isGreaterThan(1_500L);
+        assertThat(handle.appliedCount()).isEqualTo(1L);
+      }
+    }
+
+    @Test
+    @DisplayName("a wakeup racing a real select's enter is never kept past that select's exit")
+    void wakeupRacingTheEnterOfARealSelect() throws Throwable {
+      final int rounds = 1_000;
+      int early = 0;
+      try (java.nio.channels.Selector selector = java.nio.channels.Selector.open();
+          ChaosActivationHandle handle = activateTimeout("select-race")) {
+        for (int round = 0; round < rounds; round++) {
+          final int spins = round % 64 * 16;
+          final Thread waker =
+              Thread.ofPlatform()
+                  .daemon()
+                  .start(
+                      () -> {
+                        for (int spin = 0; spin < spins; spin++) {
+                          Thread.onSpinWait();
+                        }
+                        BootstrapDispatcher.selectorWoken(selector);
+                      });
+          // A real select (infinite: a timeout cannot fire), ended by the wakeup: the wakeup lands
+          // before its enter, inside it, or after it, but always before its exit.
+          BootstrapDispatcher.beforeNioSelect(selector, 0L);
+          waker.join();
+          endRealSelect(selector);
+          // A 5 ms stall never ends before its deadline unless a kept wakeup ends it.
+          final long start = System.nanoTime();
+          BootstrapDispatcher.beforeNioSelect(selector, 5L);
+          if (System.nanoTime() - start < 4_000_000L) {
+            early++;
+          }
+        }
+        assertThat(early).as("stalls ended by a wakeup the real select consumed").isZero();
+        assertThat(handle.appliedCount()).isEqualTo(rounds);
       }
     }
 
@@ -243,9 +367,12 @@ class BridgeEntryPointsTest {
         // A real select runs on the first selector while the second is woken up.
         assertThat(BootstrapDispatcher.beforeNioSelect(running, 2_000L)).isFalse();
         BootstrapDispatcher.selectorWoken(other);
+        // The end of the first selector's real select, and of a select the agent skipped on the
+        // second, drop nothing of the second's.
+        endRealSelect(running);
+        BootstrapDispatcher.afterNioSelect(other, true);
         assertThat(stalledMillis(other)).as("the other's wakeup is kept").isLessThan(1_000L);
-        BootstrapDispatcher.afterNioSelect(running);
-        BootstrapDispatcher.afterNioSelect(running); // nothing left to end
+        endRealSelect(running); // nothing kept at all
       } finally {
         handle.close();
       }

@@ -273,6 +273,22 @@ public final class NetworkFaultProbeMain {
       selector.wakeup();
       timed("selectWakeupBefore", () -> selector.select(3_000L));
     }
+    // A scenario activated while a real select runs (the hooks woven above): the wakeup that
+    // ends that select is consumed by it, and the next select is stalled.
+    try (java.nio.channels.Selector selector = java.nio.channels.Selector.open()) {
+      final Thread selecting =
+          Thread.ofPlatform().daemon().start(() -> RealCallRows.outcome(selector::select));
+      awaitFrame(
+          selecting,
+          frame -> frame.isNativeMethod() && frame.getClassName().startsWith("sun.nio.ch."));
+      try (ChaosActivationHandle timeout =
+          RealCallRows.activate("selectActivatedDuring", select, ChaosEffect.timeout())) {
+        selector.wakeup();
+        selecting.join();
+        timed("selectActivatedDuring", () -> selector.select(3_000L));
+        System.out.println("selectActivatedDuring.applied=" + timeout.appliedCount());
+      }
+    }
     // A select of a closed selector throws ClosedSelectorException.
     final java.nio.channels.Selector closed = java.nio.channels.Selector.open();
     closed.close();

@@ -76,7 +76,8 @@ class BridgeGuardsTest {
           "isArchive",
           // What this JDK's Socket.connect closes on a failure; a constant of the JDK.
           "failedConnectClosesSocket",
-          // End a stall the bridge itself runs, or mark a real select over; they call no delegate.
+          // End a stall the bridge itself runs, or drop a wakeup a real select consumed; no
+          // delegate.
           "selectorWoken",
           "afterNioSelect",
           "currentTimeMillis",
