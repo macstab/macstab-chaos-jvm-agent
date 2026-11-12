@@ -1,6 +1,11 @@
 package com.macstab.chaos.jvm.bootstrap;
 
+import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
+import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.api.ChaosSelector;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -13,7 +18,8 @@ import java.util.logging.Logger;
  * javaSql} (whether the module is present), the state of scenario {@code jdbc}, the failures the
  * diagnostics recorded and the hook failures, then {@code done=true}. Initialises {@code
  * java.util.logging} first, which is when the agent registers its MBean, and prints {@code
- * mbeanSkipped} with the agent's line when that registration was skipped.
+ * mbeanSkipped} with the agent's line when that registration was skipped. In mode {@code
+ * minimal-code-cache} it also activates a code-cache stressor and prints {@code codeCache}.
  */
 public final class LimitedRuntimeProbeMain {
 
@@ -58,6 +64,25 @@ public final class LimitedRuntimeProbeMain {
                 .toList());
     System.out.println(
         "hookFailures=" + snapshot.runtimeDetails().getOrDefault("hookFailures", ""));
+    if (args.length > 0 && "minimal-code-cache".equals(args[0])) {
+      System.out.println("codeCache=" + activateCodeCachePressure());
+    }
     System.out.println("done=true");
+  }
+
+  /** Activates and stops a small code-cache stressor: {@code activated}, or what it threw. */
+  private static String activateCodeCachePressure() {
+    try (ChaosActivationHandle handle =
+        ChaosPlatform.current()
+            .activate(
+                ChaosScenario.builder("code-cache")
+                    .selector(ChaosSelector.stress(ChaosSelector.StressTarget.CODE_CACHE_PRESSURE))
+                    .effect(ChaosEffect.codeCachePressure(2, 2))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build())) {
+      return "activated:" + handle.state();
+    } catch (final RuntimeException | Error thrown) {
+      return thrown.getClass().getName() + ": " + thrown.getMessage();
+    }
   }
 }

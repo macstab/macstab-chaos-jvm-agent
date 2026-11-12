@@ -1,8 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
-import java.lang.management.CompilationMXBean;
-import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -57,12 +55,6 @@ final class CodeCachePressureStressor implements ManagedStressor {
    */
   CodeCachePressureStressor(
       final ChaosEffect.CodeCachePressureEffect effect, final Consumer<String> onEnd) {
-    final CompilationMXBean compilationBean = ManagementFactory.getCompilationMXBean();
-    final long compilationTimeBefore =
-        compilationBean != null && compilationBean.isCompilationTimeMonitoringSupported()
-            ? compilationBean.getTotalCompilationTime()
-            : -1L;
-
     final List<Class<?>> classes = new ArrayList<>(effect.classCount());
     for (int i = 0; i < effect.classCount(); i++) {
       // Unsealed, so InjectionClassLoader.Strategy can define the class in it after construction.
@@ -98,19 +90,10 @@ final class CodeCachePressureStressor implements ManagedStressor {
               ManagedStressor.failure(onEnd, "CodeCachePressure"));
     }
 
-    if (compilationBean != null && compilationBean.isCompilationTimeMonitoringSupported()) {
-      final long delta = compilationBean.getTotalCompilationTime() - compilationTimeBefore;
-      LOGGER.fine(
-          () ->
-              "[chaos-agent] CodeCachePressureStressor loaded "
-                  + classes.size()
-                  + " classes; JIT compilation time delta: "
-                  + delta
-                  + " ms");
-    } else {
-      LOGGER.fine(
-          () -> "[chaos-agent] CodeCachePressureStressor loaded " + classes.size() + " classes");
-    }
+    // No compilation-time figure: java.management is optional (a jlink image, --limit-modules), and
+    // the agent needs only java.base, java.instrument and java.logging.
+    LOGGER.fine(
+        () -> "[chaos-agent] CodeCachePressureStressor loaded " + classes.size() + " classes");
   }
 
   /** Returns the compiler thread, or {@code null} once {@link #close()} has run. */

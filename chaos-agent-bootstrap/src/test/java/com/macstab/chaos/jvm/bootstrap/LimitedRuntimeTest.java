@@ -72,6 +72,25 @@ class LimitedRuntimeTest {
   }
 
   @Test
+  @DisplayName("activates a code-cache stressor without java.management")
+  void codeCachePressureWithoutJavaManagement() throws Exception {
+    final ChildJvmProbe.ProbeResult result =
+        new ChildJvmProbe(tempDir)
+            .runWithoutPlan(
+                LimitedRuntimeProbeMain.class,
+                "minimal-code-cache",
+                "--limit-modules",
+                MINIMAL_MODULES);
+
+    assertSoftly(
+        softly -> {
+          softly.assertThat(result.value("codeCache")).isEqualTo("activated:ACTIVE");
+          softly.assertThat(result.value("failures")).isEqualTo("[]");
+          softly.assertThat(result.value("done")).isEqualTo("true");
+        });
+  }
+
+  @Test
   @DisplayName("starts with every hook group woven (instrumentation=eager)")
   void eagerStartWithoutJavaSql() throws Exception {
     final ChildJvmProbe.ProbeResult result =
