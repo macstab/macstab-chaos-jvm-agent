@@ -3,7 +3,6 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.logging.Logger;
 
 /**
  * {@link ManagedStressor} that simulates heap pressure by allocating and retaining a configurable
@@ -25,7 +24,6 @@ import java.util.logging.Logger;
  * close()} concurrently, no external synchronization is required.
  */
 final class HeapPressureStressor implements ManagedStressor {
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
 
   private final List<byte[]> retained = new ArrayList<>();
 
@@ -34,30 +32,15 @@ final class HeapPressureStressor implements ManagedStressor {
    *
    * <p>The total allocation is divided into chunks no larger than {@link
    * ChaosEffect.HeapPressureEffect#chunkSizeBytes()} to avoid a single oversized array request that
-   * might fail with an {@link OutOfMemoryError} before the pressure target is reached.
+   * might fail with an {@link OutOfMemoryError} before the pressure target is reached. A target
+   * above the free heap is refused at activation ({@code CompatibilityValidator}); an allocation
+   * that still runs out, because the application took memory meanwhile, fails the start.
    *
    * @param effect the heap-pressure effect configuration supplying the total byte target and chunk
    *     size
    */
   HeapPressureStressor(final ChaosEffect.HeapPressureEffect effect) {
-    // Cap the total allocation at half the JVM's max heap. Without a cap, a plan specifying
-    // `bytes=Long.MAX_VALUE` walks the allocation loop until `new byte[]` throws
-    // OutOfMemoryError inside the stressor constructor, killing the entire JVM rather than
-    // producing the "pressure" the operator asked for. Half the heap lets the effect produce
-    // meaningful pressure while still leaving headroom for the application and the GC.
-    final long maxHeap = Runtime.getRuntime().maxMemory();
-    final long softCap = (maxHeap == Long.MAX_VALUE) ? Long.MAX_VALUE : maxHeap / 2L;
-    final long target = Math.min(effect.bytes(), softCap);
-    if (target < effect.bytes()) {
-      LOGGER.warning(
-          () ->
-              "chaos-agent: heap pressure of "
-                  + effect.bytes()
-                  + " bytes capped at "
-                  + target
-                  + " bytes (half of the maximum heap)");
-    }
-    long remaining = target;
+    long remaining = effect.bytes();
     while (remaining > 0) {
       final int allocation = (int) Math.min(effect.chunkSizeBytes(), remaining);
       retained.add(new byte[allocation]);

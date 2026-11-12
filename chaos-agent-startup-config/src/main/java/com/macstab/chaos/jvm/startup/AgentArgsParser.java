@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.startup;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Parses the raw {@code -javaagent:} argument string into an {@link AgentArgs} value object.
@@ -28,7 +29,7 @@ public final class AgentArgsParser {
    * @return parsed arguments, never null
    * @throws IllegalArgumentException if a token is malformed or the input exceeds safety limits
    */
-  public static AgentArgs parse(final String agentArgs) {
+  public static AgentArgs parse(final @Nullable String agentArgs) {
     if (agentArgs == null || agentArgs.isBlank()) {
       return new AgentArgs(Map.of());
     }
@@ -47,7 +48,7 @@ public final class AgentArgsParser {
       if (escaped) {
         // Only ';', '=' and '\\' are escapable. Any other backslash is kept as written, so
         // Windows paths (configFile=C:\\chaos\\plan.json) and JSON escapes in configJson (\\",
-        // \\d) reach the consumer unchanged; dropping every backslash used to mangle both.
+        // \\d) reach the consumer unchanged; dropping every backslash would mangle both.
         if (ch != ';' && ch != '=' && ch != '\\') {
           current.append('\\');
         }
@@ -81,7 +82,7 @@ public final class AgentArgsParser {
     final int separator = token.indexOf('=');
     if (separator < 0) {
       // A bare key is a boolean flag (debugDumpOnStart is the same as debugDumpOnStart=true), as
-      // documented. Rejecting it threw from premain and aborted the JVM.
+      // documented; rejecting it would throw from premain and abort the JVM.
       addFlag(target, token.trim());
       return;
     }

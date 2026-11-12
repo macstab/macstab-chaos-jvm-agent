@@ -15,9 +15,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Checks the metadata through which Quarkus discovers this extension. Without it the extension was
- * never loaded: no build step ran, the agent was never installed and {@code ChaosControlPlane}
- * could not be injected.
+ * Checks the metadata through which Quarkus discovers this extension. Without it the extension is
+ * never loaded: no build step runs, the agent is never installed and {@code ChaosControlPlane}
+ * cannot be injected.
  */
 @DisplayName("Quarkus extension descriptor")
 class ChaosQuarkusExtensionDescriptorTest {
@@ -32,6 +32,22 @@ class ChaosQuarkusExtensionDescriptorTest {
 
     assertThat(descriptor.getProperty("deployment-artifact"))
         .matches("com\\.macstab\\.chaos\\.jvm:chaos-agent-quarkus-extension-deployment:[^:$]+");
+  }
+
+  @Test
+  @DisplayName(
+      "the runtime jar loads the api and the agent parent-first, in tests and in the packaged"
+          + " application")
+  void runtimeDescriptorLoadsApiAndAgentParentFirst() throws IOException {
+    final Properties descriptor = new Properties();
+    try (InputStream in = resource("META-INF/quarkus-extension.properties")) {
+      descriptor.load(in);
+    }
+
+    final String agentArtifacts =
+        "com.macstab.chaos.jvm:chaos-agent-api,com.macstab.chaos.jvm:chaos-agent-bootstrap";
+    assertThat(descriptor.getProperty("parent-first-artifacts")).isEqualTo(agentArtifacts);
+    assertThat(descriptor.getProperty("runner-parent-first-artifacts")).isEqualTo(agentArtifacts);
   }
 
   @Test

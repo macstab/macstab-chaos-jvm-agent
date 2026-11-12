@@ -1,20 +1,20 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.awaitility.Awaitility.await;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 /**
- * Unit tests for the eight stressor implementations introduced in Task 10. Each test verifies basic
- * lifecycle behaviour (construction does not throw, retained-count accessors return expected
- * values, close() does not throw and makes the stressor stop or release resources).
+ * Unit tests for the lifecycle of eight stressors: what they retain or start when built, and that
+ * close() stops them or releases what they hold.
  */
 @DisplayName("Stressor lifecycle")
 class StressorLifecycleTest {
@@ -47,6 +47,39 @@ class StressorLifecycleTest {
       stressor.close();
       assertThat(stressor.retainedClassCount()).isZero();
     }
+
+    @Test
+    @DisplayName(
+        "metaspace and code-cache classes are defined without sun.misc.Unsafe: denied, every class"
+            + " loads; warned, nothing warns")
+    void classesAreDefinedWithoutUnsafe() throws Exception {
+      final boolean unsafeSwitch = Runtime.version().feature() >= 23;
+      final String denied =
+          runClassDefinitionProbe(unsafeSwitch ? "--sun-misc-unsafe-memory-access=deny" : null);
+
+      assertThat(denied)
+          .contains("metaspaceRetained=5", "codeCacheRetained=5", "state=ACTIVE")
+          .doesNotContain("Thrown=");
+      if (unsafeSwitch) {
+        assertThat(runClassDefinitionProbe("--sun-misc-unsafe-memory-access=warn"))
+            .contains("metaspaceRetained=5")
+            .doesNotContain("sun.misc.Unsafe");
+      }
+    }
+
+    private String runClassDefinitionProbe(final @Nullable String unsafeAccess) throws Exception {
+      final java.util.List<String> command = new java.util.ArrayList<>();
+      command.add(java.nio.file.Path.of(System.getProperty("java.home"), "bin", "java").toString());
+      if (unsafeAccess != null) {
+        command.add(unsafeAccess);
+      }
+      command.addAll(
+          java.util.List.of(
+              "-cp",
+              System.getProperty("java.class.path"),
+              ClassDefinitionProbeMain.class.getName()));
+      return BoundedChildJvm.run(command, Duration.ofSeconds(60));
+    }
   }
 
   @Nested
@@ -63,26 +96,49 @@ class StressorLifecycleTest {
     }
 
     @Test
-    @DisplayName("registerCleaner=true still retains buffers so pressure is actually produced")
-    void cleanerModeAlsoRetainsBuffers() {
-      // Previously the cleaner mode used a throwaway referent that became unreachable
-      // immediately, causing the cleaner to fire before any sustained pressure could build.
-      // The stressor now retains strong references in both modes — the cleaner is attached
-      // to the stressor itself, so cleanup happens on stressor phantom-reachability rather
-      // than on per-buffer GC.
+    @DisplayName("registerCleaner=true allocates and drops: the buffers are freed when GC runs")
+    void cleanerModeDropsBuffers() {
       final DirectBufferPressureStressor stressor =
           new DirectBufferPressureStressor(
               new ChaosEffect.DirectBufferPressureEffect(4096L, 1024, true));
-      assertThat(stressor.retainedBufferCount()).isEqualTo(4);
+      assertThat(stressor.retainedBufferCount()).isZero();
     }
 
     @Test
-    @DisplayName("close() does not throw")
-    void closeDoesNotThrow() {
+    @DisplayName("close() releases the retained buffers")
+    void closeReleasesBuffers() {
       final DirectBufferPressureStressor stressor =
           new DirectBufferPressureStressor(
               new ChaosEffect.DirectBufferPressureEffect(2048L, 1024, false));
-      assertThatCode(stressor::close).doesNotThrowAnyException();
+      stressor.close();
+      assertThat(stressor.retainedBufferCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("running out of direct memory frees what it allocated and rethrows")
+    void outOfDirectMemoryFreesWhatItAllocated() throws Exception {
+      final String output =
+          BoundedChildJvm.run(
+              java.util.List.of(
+                  java.nio.file.Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                  "-XX:MaxDirectMemorySize=8m",
+                  // The packages the agent jar's manifest opens for the eager free.
+                  "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+                  "--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED",
+                  "-cp",
+                  System.getProperty("java.class.path"),
+                  DirectBufferOomProbeMain.class.getName()),
+              Duration.ofSeconds(60));
+
+      assertThat(output).contains("thrown=OutOfMemoryError");
+      final long used =
+          output
+              .lines()
+              .filter(line -> line.startsWith("directUsedAfter="))
+              .mapToLong(line -> Long.parseLong(line.substring("directUsedAfter=".length())))
+              .findFirst()
+              .orElseThrow(() -> new AssertionError("no directUsedAfter= line in:\n" + output));
+      assertThat(used).as(output).isLessThan(1024L * 1024L);
     }
   }
 
@@ -128,14 +184,6 @@ class StressorLifecycleTest {
       final FinalizerBacklogStressor stressor =
           new FinalizerBacklogStressor(new ChaosEffect.FinalizerBacklogEffect(20, Duration.ZERO));
       assertThat(stressor.createdCount()).isEqualTo(20);
-    }
-
-    @Test
-    @DisplayName("close() does not throw")
-    void closeDoesNotThrow() {
-      final FinalizerBacklogStressor stressor =
-          new FinalizerBacklogStressor(new ChaosEffect.FinalizerBacklogEffect(5, Duration.ZERO));
-      assertThatCode(stressor::close).doesNotThrowAnyException();
     }
   }
 
@@ -217,11 +265,35 @@ class StressorLifecycleTest {
     }
 
     @Test
-    @DisplayName("close() does not throw")
-    void closeDoesNotThrow() {
+    @DisplayName("close() releases every planted value, even while every pool worker is busy")
+    void closeReleasesValuesOnBusyPool() throws Exception {
       final ThreadLocalLeakStressor stressor =
-          new ThreadLocalLeakStressor(new ChaosEffect.ThreadLocalLeakEffect(1, 32));
-      assertThatCode(stressor::close).doesNotThrowAnyException();
+          new ThreadLocalLeakStressor(new ChaosEffect.ThreadLocalLeakEffect(1, 1024));
+      assertThat(stressor.retainedBytes()).isPositive();
+      final java.util.concurrent.ForkJoinPool pool = java.util.concurrent.ForkJoinPool.commonPool();
+      final java.util.concurrent.CountDownLatch release =
+          new java.util.concurrent.CountDownLatch(1);
+      final java.util.concurrent.CountDownLatch busy =
+          new java.util.concurrent.CountDownLatch(pool.getParallelism());
+      try {
+        for (int i = 0; i < pool.getParallelism(); i++) {
+          pool.execute(
+              () -> {
+                busy.countDown();
+                try {
+                  release.await();
+                } catch (final InterruptedException interrupted) {
+                  Thread.currentThread().interrupt();
+                }
+              });
+        }
+        assertThat(busy.await(5, TimeUnit.SECONDS)).isTrue();
+
+        assertTimeoutPreemptively(Duration.ofSeconds(5), stressor::close);
+        assertThat(stressor.retainedBytes()).isZero();
+      } finally {
+        release.countDown();
+      }
     }
   }
 

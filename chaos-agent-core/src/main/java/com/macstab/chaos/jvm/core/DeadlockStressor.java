@@ -4,8 +4,9 @@ import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.logging.Logger;
+import java.util.function.Consumer;
 
 /**
  * Permanently deadlocks {@code participantCount} threads using a circular lock-acquisition order.
@@ -24,13 +25,27 @@ import java.util.logging.Logger;
  */
 final class DeadlockStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   private final List<Thread> participants;
 
+  /** Set by {@link #close()} before it interrupts the participants: their end is no failure. */
+  private final AtomicBoolean stopped = new AtomicBoolean(false);
+
   DeadlockStressor(final ChaosEffect.DeadlockEffect effect) {
+    this(effect, NO_END);
+  }
+
+  /**
+   * Creates and starts the participants, which end the scenario through {@code onEnd} if one fails.
+   *
+   * @param effect the effect parameters
+   * @param onEnd the scenario's end callback, told when a stressor thread fails
+   */
+  DeadlockStressor(final ChaosEffect.DeadlockEffect effect, final Consumer<String> onEnd) {
     final int participantCount = effect.participantCount();
-    final long acquisitionDelayMs = effect.acquisitionDelay().toMillis();
+    // Slept as a Duration: kept below a millisecond, and lasting until close() above ~292 years.
+    final java.time.Duration acquisitionDelay = effect.acquisitionDelay();
 
     // Create one independent lock per participant.
     final ReentrantLock[] locks = new ReentrantLock[participantCount];
@@ -45,8 +60,10 @@ final class DeadlockStressor implements ManagedStressor {
     for (int participantIndex = 0; participantIndex < participantCount; participantIndex++) {
       final int index = participantIndex;
       final String name = "chaos-deadlock-" + participantIndex;
-      final Thread thread =
-          new Thread(
+      threads.add(
+          AgentThreads.platform(
+              name,
+              true,
               () -> {
                 final ReentrantLock first = locks[index];
                 final ReentrantLock second = locks[(index + 1) % participantCount];
@@ -56,8 +73,8 @@ final class DeadlockStressor implements ManagedStressor {
                     firstLockAcquired.countDown();
                     // Wait until all participants hold their first lock, then attempt second.
                     firstLockAcquired.await();
-                    if (acquisitionDelayMs > 0) {
-                      Thread.sleep(acquisitionDelayMs);
+                    if (!acquisitionDelay.isZero()) {
+                      Thread.sleep(acquisitionDelay);
                     }
                     second.lockInterruptibly();
                     try {
@@ -66,6 +83,7 @@ final class DeadlockStressor implements ManagedStressor {
                       while (!Thread.currentThread().isInterrupted()) {
                         java.util.concurrent.locks.LockSupport.parkNanos(100_000_000L);
                         if (Thread.interrupted()) {
+                          ManagedStressor.interrupted(onEnd, "Deadlock", stopped.get());
                           return;
                         }
                       }
@@ -77,15 +95,13 @@ final class DeadlockStressor implements ManagedStressor {
                   }
                 } catch (final InterruptedException e) {
                   Thread.currentThread().interrupt();
-                  LOGGER.fine(() -> "chaos deadlock thread interrupted: " + name);
+                  LOGGER.fine(() -> "[chaos-agent] chaos deadlock thread interrupted: " + name);
+                  ManagedStressor.interrupted(onEnd, "Deadlock", stopped.get());
                 }
               },
-              name);
-      thread.setDaemon(true);
-      thread.start();
-      threads.add(thread);
+              ManagedStressor.failure(onEnd, "Deadlock")));
     }
-    this.participants = List.copyOf(threads);
+    this.participants = AgentThreads.startAll(threads);
   }
 
   /**
@@ -103,23 +119,8 @@ final class DeadlockStressor implements ManagedStressor {
     // deactivate-then-reactivate cycle can start a second generation of deadlock threads while
     // the first generation still holds locks. That surfaces as overlapping thread names and a
     // stale aliveCount() — issues that vanished once close() waits for the previous generation.
-    for (final Thread thread : participants) {
-      thread.interrupt();
-    }
-    boolean selfInterrupted = false;
-    for (final Thread thread : participants) {
-      while (true) {
-        try {
-          thread.join(JOIN_TIMEOUT_MILLIS);
-          break;
-        } catch (final InterruptedException interrupted) {
-          selfInterrupted = true;
-        }
-      }
-    }
-    if (selfInterrupted) {
-      Thread.currentThread().interrupt();
-    }
+    stopped.set(true);
+    AgentThreads.stopAll(participants, JOIN_TIMEOUT_MILLIS);
   }
 
   /** Returns the number of participant threads that are still alive. */

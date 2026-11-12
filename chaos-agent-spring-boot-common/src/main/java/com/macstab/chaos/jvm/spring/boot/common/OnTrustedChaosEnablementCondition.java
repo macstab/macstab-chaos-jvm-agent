@@ -7,7 +7,9 @@ import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.type.AnnotatedTypeMetadata;
 
 /**
- * Matches when {@link TrustedChaosEnablement} decides that chaos is enabled. Replaces a plain
+ * Matches when {@link TrustedChaosEnablement} decides that chaos is enabled and the early
+ * self-attach did not fail ({@link TrustedChaosEnablement#ATTACH_FAILED_PROPERTY}): after a failed
+ * attach no chaos bean is created, so nothing attaches again. Replaces a plain
  * {@code @ConditionalOnProperty(macstab.chaos.enabled)}, which honoured the flag from any property
  * source.
  */
@@ -21,6 +23,10 @@ public final class OnTrustedChaosEnablementCondition extends SpringBootCondition
       final ConditionContext context, final AnnotatedTypeMetadata metadata) {
     if (!(context.getEnvironment() instanceof ConfigurableEnvironment environment)) {
       return ConditionOutcome.noMatch("environment is not a ConfigurableEnvironment");
+    }
+    if (Boolean.parseBoolean(
+        environment.getProperty(TrustedChaosEnablement.ATTACH_FAILED_PROPERTY))) {
+      return ConditionOutcome.noMatch("the chaos agent failed to attach at startup");
     }
     return switch (TrustedChaosEnablement.evaluate(environment)) {
       case ENABLED -> ConditionOutcome.match(TrustedChaosEnablement.ENABLED_PROPERTY + "=true");

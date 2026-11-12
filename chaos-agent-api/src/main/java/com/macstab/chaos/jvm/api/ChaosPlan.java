@@ -4,14 +4,15 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * An ordered, named collection of chaos scenarios that activate as a unit.
  *
  * <p>Plans are the primary configuration vehicle for agent-startup scenarios: they are loaded from
- * YAML or JSON files referenced via {@code -javaagent} arguments or environment variables. All
- * scenarios in a plan activate atomically; activating a plan returns a single {@link
- * ChaosActivationHandle} that controls all constituent scenarios.
+ * JSON (a file, inline or Base64) named by {@code -javaagent} arguments, system properties or
+ * environment variables. All scenarios in a plan activate atomically; activating a plan returns a
+ * single {@link ChaosActivationHandle} that controls all constituent scenarios.
  *
  * <p>Plans can also be activated programmatically:
  *
@@ -43,9 +44,13 @@ public record ChaosPlan(
    * @param scenarios the chaos scenarios to activate; must be non-empty
    * @throws IllegalArgumentException if {@code scenarios} is null or empty
    */
-  public ChaosPlan {
-    metadata = metadata == null ? new Metadata("default", "") : metadata;
-    observability = observability == null ? new Observability(true, true, false) : observability;
+  public ChaosPlan(
+      final @Nullable Metadata metadata,
+      final @Nullable Observability observability,
+      final List<ChaosScenario> scenarios) {
+    this.metadata = metadata == null ? new Metadata("default", "") : metadata;
+    this.observability =
+        observability == null ? new Observability(true, true, false) : observability;
     if (scenarios == null || scenarios.isEmpty()) {
       throw new IllegalArgumentException("scenarios must not be empty");
     }
@@ -68,7 +73,7 @@ public record ChaosPlan(
             "duplicate scenario id in plan: '" + scenario.id() + "'");
       }
     }
-    scenarios = List.copyOf(scenarios);
+    this.scenarios = List.copyOf(scenarios);
   }
 
   /**
@@ -88,11 +93,12 @@ public record ChaosPlan(
      * @param description optional free-text description; null is normalised to {@code ""}
      * @throws IllegalArgumentException if {@code name} is null or blank
      */
-    public Metadata {
+    public Metadata(final String name, final @Nullable String description) {
       if (name == null || name.isBlank()) {
         throw new IllegalArgumentException("plan name must be non-blank");
       }
-      description = description == null ? "" : description;
+      this.description = description == null ? "" : description;
+      this.name = name;
     }
   }
 
@@ -109,5 +115,22 @@ public record ChaosPlan(
    *     when this plan is activated; useful during initial agent configuration
    */
   public record Observability(
-      boolean jmxEnabled, boolean structuredLoggingEnabled, boolean debugDumpOnStart) {}
+      boolean jmxEnabled, boolean structuredLoggingEnabled, boolean debugDumpOnStart) {
+
+    /**
+     * The JSON creator: an omitted {@code jmxEnabled} or {@code structuredLoggingEnabled} is {@code
+     * true}, an omitted {@code debugDumpOnStart} {@code false}.
+     */
+    @SuppressWarnings(
+        "UnusedMethod") // bound by the JSON mix-in in chaos-agent-startup-config (ApiJsonMixins)
+    private Observability(
+        final @Nullable Boolean jmxEnabled,
+        final @Nullable Boolean structuredLoggingEnabled,
+        final @Nullable Boolean debugDumpOnStart) {
+      this(
+          jmxEnabled == null || jmxEnabled,
+          structuredLoggingEnabled == null || structuredLoggingEnabled,
+          debugDumpOnStart != null && debugDumpOnStart);
+    }
+  }
 }

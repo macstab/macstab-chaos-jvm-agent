@@ -1,0 +1,3 @@
+{"scenarios": [{"id": "refuse-connects", "scope": "JVM",
+  "selector": {"type": "network", "operations": ["SOCKET_CONNECT"], "remoteCidr": "127.0.0.0/8"},
+  "effect": {"type": "errno", "errno": "ECONNREFUSED"}}]}

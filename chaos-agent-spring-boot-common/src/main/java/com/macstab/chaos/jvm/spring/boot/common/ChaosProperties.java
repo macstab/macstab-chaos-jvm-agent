@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.spring.boot.common;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -14,7 +15,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class ChaosProperties {
 
   private boolean enabled = false;
-  private String configFile;
+  private @Nullable String configFile;
   private boolean debugDumpOnStart = false;
   private Actuator actuator = new Actuator();
 
@@ -44,7 +45,7 @@ public class ChaosProperties {
    *
    * @return the file path, or {@code null} when no startup plan should be loaded
    */
-  public String getConfigFile() {
+  public @Nullable String getConfigFile() {
     return configFile;
   }
 
@@ -53,7 +54,7 @@ public class ChaosProperties {
    *
    * @param configFile the file path, or {@code null}/blank to disable loading
    */
-  public void setConfigFile(final String configFile) {
+  public void setConfigFile(final @Nullable String configFile) {
     this.configFile = configFile;
   }
 

@@ -10,11 +10,13 @@ package com.macstab.chaos.jvm.api;
  * <ul>
  *   <li><b>Non-blocking</b> — listeners are invoked synchronously on the thread that triggers the
  *       chaos event. Any I/O, locking, or other blocking call inside {@code onEvent} adds latency
- *       to the instrumented JVM operation.
- *   <li><b>Exception-safe</b> — unchecked exceptions propagate to the triggering thread and may
- *       break application code. Never throw from {@code onEvent}.
- *   <li><b>Idempotent-safe</b> — the same event may be delivered to multiple listeners; each
- *       listener receives its own {@link ChaosEvent} reference (the object is shared, not copied).
+ *       to the instrumented JVM operation; wrap a slow listener with {@link #async} to run it on an
+ *       agent-owned thread.
+ *   <li><b>Exceptions are contained</b> — an exception thrown from {@code onEvent} is caught and
+ *       logged (at WARNING the first time, then at FINE); it never reaches the application thread,
+ *       and the other listeners still receive the event.
+ *   <li><b>Shared events</b> — every listener receives the same {@link ChaosEvent} instance (it is
+ *       immutable; nothing is copied per listener).
  * </ul>
  *
  * <p>Built-in listeners registered automatically:
@@ -35,4 +37,19 @@ public interface ChaosEventListener {
    *     lifecycle events from application events.
    */
   void onEvent(ChaosEvent event);
+
+  /**
+   * Wraps {@code delegate} so that it receives events on an agent-owned thread instead of the
+   * thread that triggered them: the control plane queues each event (a bounded queue; events beyond
+   * its capacity are dropped and counted in the diagnostics' {@code droppedEvents}) and returns
+   * immediately. Use it for listeners that log, export or block, so their latency never reaches an
+   * intercepted application call. Events are delivered in order. The thread has no context class
+   * loader, so it keeps no class loader of the thread that registered the listener reachable.
+   *
+   * @param delegate the listener to call off the triggering thread
+   * @return a listener to register with {@link ChaosControlPlane#addEventListener}
+   */
+  static ChaosEventListener async(final ChaosEventListener delegate) {
+    return new AsyncChaosEventListener(delegate);
+  }
 }

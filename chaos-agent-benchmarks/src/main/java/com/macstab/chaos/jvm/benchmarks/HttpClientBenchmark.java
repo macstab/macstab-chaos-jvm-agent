@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.benchmarks;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
@@ -40,10 +41,12 @@ public class HttpClientBenchmark {
   private static final String BENCHMARK_URL = "https://example.com/api/v1/orders";
   private static final String NO_MATCH_URL_PATTERN = "https://other\\.example\\.net/.*";
   private static final Duration ZERO_DELAY = Duration.ofMillis(0);
-  private static final ActivationPolicy ONE_SHOT_POLICY =
-      new ActivationPolicy(
-          ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false);
+  private static final ActivationPolicy ONE_SHOT_POLICY = ActivationPolicy.count(1);
   private static final int NON_MATCHING_SCENARIO_COUNT = 9;
+
+  /** The URL every benchmark sends, a field so the JIT cannot fold it into a constant. */
+  @SuppressWarnings("FieldCanBeFinal") // non-final on purpose: no constant folding
+  private String url = BENCHMARK_URL;
 
   /** State with the runtime installed but no active scenarios — measures pure dispatch overhead. */
   @State(Scope.Benchmark)
@@ -110,9 +113,13 @@ public class HttpClientBenchmark {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
-    /** Registers the matching no-effect scenario before the trial. */
+    /**
+     * Registers the matching no-effect scenario and spends its one application before the trial.
+     *
+     * @throws Throwable if the dispatcher surfaces an unexpected failure
+     */
     @Setup(Level.Trial)
-    public void setup() {
+    public void setup() throws Throwable {
       runtime = new ChaosRuntime();
       runtime.activate(
           ChaosScenario.builder("http-match-no-effect")
@@ -124,6 +131,7 @@ public class HttpClientBenchmark {
               .activationPolicy(ONE_SHOT_POLICY)
               .build());
       dispatcher = runtime.dispatcher();
+      exhaust(runtime, dispatcher, "http-match-no-effect");
     }
 
     /** Closes the runtime after the measurement trial. */
@@ -145,20 +153,31 @@ public class HttpClientBenchmark {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
-    /** Registers the session-scoped scenario before the trial. */
+    /**
+     * Registers the session-scoped scenario before the trial, from a thread of its own: opening a
+     * session binds the opening thread to it, and the benchmark thread must stay outside.
+     *
+     * @throws InterruptedException if the setup is interrupted
+     */
     @Setup(Level.Trial)
-    public void setup() {
+    public void setup() throws InterruptedException {
       runtime = new ChaosRuntime();
-      final var session = runtime.openSession("http-bench-session");
-      session.activate(
-          ChaosScenario.builder("http-session-miss")
-              .scope(ChaosScenario.ScenarioScope.SESSION)
-              .selector(
-                  ChaosSelector.httpClient(
-                      Set.of(OperationType.HTTP_CLIENT_SEND), NamePattern.any()))
-              .effect(ChaosEffect.delay(ZERO_DELAY))
-              .activationPolicy(ActivationPolicy.always())
-              .build());
+      final Thread opener =
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    final var session = runtime.openSession("http-bench-session");
+                    session.activate(
+                        ChaosScenario.builder("http-session-miss")
+                            .scope(ChaosScenario.ScenarioScope.SESSION)
+                            .selector(
+                                ChaosSelector.httpClient(
+                                    Set.of(OperationType.HTTP_CLIENT_SEND), NamePattern.any()))
+                            .effect(ChaosEffect.delay(ZERO_DELAY))
+                            .activationPolicy(ActivationPolicy.always())
+                            .build());
+                  });
+      opener.join();
       dispatcher = runtime.dispatcher();
     }
 
@@ -170,8 +189,8 @@ public class HttpClientBenchmark {
   }
 
   /**
-   * State with nine non-matching scenarios plus one matching scenario to measure registry scan
-   * cost.
+   * State with nine scenarios on the same operation whose URL pattern does not match, plus one
+   * matching scenario spent in setup: every call evaluates ten scenarios of its operation.
    */
   @State(Scope.Benchmark)
   public static class TenScenariosState {
@@ -181,9 +200,13 @@ public class HttpClientBenchmark {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
-    /** Registers the mix of non-matching and matching scenarios before the trial. */
+    /**
+     * Registers the mix of non-matching and matching scenarios before the trial.
+     *
+     * @throws Throwable if the dispatcher surfaces an unexpected failure
+     */
     @Setup(Level.Trial)
-    public void setup() {
+    public void setup() throws Throwable {
       runtime = new ChaosRuntime();
       for (int i = 0; i < NON_MATCHING_SCENARIO_COUNT; i++) {
         runtime.activate(
@@ -191,7 +214,8 @@ public class HttpClientBenchmark {
                 .scope(ChaosScenario.ScenarioScope.JVM)
                 .selector(
                     ChaosSelector.httpClient(
-                        Set.of(OperationType.HTTP_CLIENT_SEND_ASYNC), NamePattern.any()))
+                        Set.of(OperationType.HTTP_CLIENT_SEND),
+                        NamePattern.regex(NO_MATCH_URL_PATTERN)))
                 .effect(ChaosEffect.delay(ZERO_DELAY))
                 .activationPolicy(ActivationPolicy.always())
                 .build());
@@ -206,6 +230,7 @@ public class HttpClientBenchmark {
               .activationPolicy(ONE_SHOT_POLICY)
               .build());
       dispatcher = runtime.dispatcher();
+      exhaust(runtime, dispatcher, "http-match");
     }
 
     /** Closes the runtime after the measurement trial. */
@@ -216,39 +241,51 @@ public class HttpClientBenchmark {
   }
 
   /**
+   * Spends the one application of a one-shot scenario, so the measurement loop sees it exhausted,
+   * and checks that it is: otherwise the loop would measure a live scenario.
+   */
+  private static void exhaust(
+      final ChaosRuntime runtime, final ChaosDispatcher dispatcher, final String id)
+      throws Throwable {
+    dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND);
+    final ChaosDiagnostics.ScenarioState state =
+        runtime.diagnostics().scenario(id).orElseThrow().state();
+    if (state != ChaosDiagnostics.ScenarioState.INACTIVE) {
+      throw new IllegalStateException(
+          "scenario " + id + " must be exhausted (INACTIVE) after setup but is " + state);
+    }
+  }
+
+  /**
    * Baseline benchmark: no chaos agent interaction, used as a reference for URL processing cost.
    *
    * @param bh the JMH blackhole used to consume results
    */
   @Benchmark
   public void baseline_noAgent(Blackhole bh) {
-    bh.consume(BENCHMARK_URL.length());
+    bh.consume(url.length());
   }
 
   /**
    * Measures dispatcher overhead on the HTTP-send path when no scenarios are active.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void agentInstalled_zeroScenarios(ZeroScenariosState state, Blackhole bh)
-      throws Throwable {
-    bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
+  public void agentInstalled_zeroScenarios(ZeroScenariosState state) throws Throwable {
+    state.dispatcher.client().beforeHttpSend(url, OperationType.HTTP_CLIENT_SEND);
   }
 
   /**
    * Measures dispatcher overhead on the HTTP-send path when one non-matching scenario is active.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state, Blackhole bh)
-      throws Throwable {
-    bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
+  public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state) throws Throwable {
+    state.dispatcher.client().beforeHttpSend(url, OperationType.HTTP_CLIENT_SEND);
   }
 
   /**
@@ -256,13 +293,11 @@ public class HttpClientBenchmark {
    * active.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state, Blackhole bh)
-      throws Throwable {
-    bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
+  public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state) throws Throwable {
+    state.dispatcher.client().beforeHttpSend(url, OperationType.HTTP_CLIENT_SEND);
   }
 
   /**
@@ -270,12 +305,11 @@ public class HttpClientBenchmark {
    * session.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void sessionIdMiss(SessionMissState state, Blackhole bh) throws Throwable {
-    bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
+  public void sessionIdMiss(SessionMissState state) throws Throwable {
+    state.dispatcher.client().beforeHttpSend(url, OperationType.HTTP_CLIENT_SEND);
   }
 
   /**
@@ -283,11 +317,10 @@ public class HttpClientBenchmark {
    * matches.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void tenScenarios_oneMatch(TenScenariosState state, Blackhole bh) throws Throwable {
-    bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
+  public void tenScenarios_oneMatch(TenScenariosState state) throws Throwable {
+    state.dispatcher.client().beforeHttpSend(url, OperationType.HTTP_CLIENT_SEND);
   }
 }

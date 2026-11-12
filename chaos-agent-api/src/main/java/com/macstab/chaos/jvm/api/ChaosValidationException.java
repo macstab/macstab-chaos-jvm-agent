@@ -13,7 +13,9 @@ package com.macstab.chaos.jvm.api;
  *       ChaosSelector.StressSelector}.
  *   <li>A {@link ChaosSelector.StressSelector} whose {@link ChaosSelector.StressTarget} does not
  *       match the provided effect type.
- *   <li>A session-scoped scenario using a JVM-global selector.
+ *   <li>A session-scoped scenario selecting an operation the JVM evaluates without a session
+ *       ({@code CLASS_LOAD}, {@code CLASS_DEFINE}, {@code RESOURCE_LOAD}, {@code
+ *       SHUTDOWN_HOOK_REGISTER}), or a session-scoped stressor.
  * </ul>
  *
  * <p>Validation is performed by the runtime at activation time. Constructors of the API value

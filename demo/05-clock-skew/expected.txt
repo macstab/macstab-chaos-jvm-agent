@@ -1,0 +1,4 @@
+instantNow=60
+clockRead=60
+localDateTimeNow=60
+zonedDateTimeNow=60

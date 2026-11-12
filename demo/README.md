@@ -1,0 +1,22 @@
+# Demos
+
+One fault per directory, each a single-file Java program (`Demo.java`), the plan that injects the fault (`plan.json`) and the output it must print (`expected.txt`). No build, no framework:
+
+```bash
+./gradlew :chaos-agent-bootstrap:shadowJar
+demo/run-all.sh                       # runs every demo, prints [PASS]/[FAIL], exits non-zero on a failure
+cd demo/03-disk-full && java -javaagent:../../chaos-agent-bootstrap/build/libs/chaos-agent-bootstrap-<version>.jar=configFile=plan.json Demo.java
+```
+
+| Demo                  | Fault                                                                 |
+|-----------------------|-----------------------------------------------------------------------|
+| `01-connect-refused`  | connects to loopback fail with `ECONNREFUSED` (`errno`)               |
+| `02-trickle-read`     | every socket read returns at most 16 bytes; the reader loops (`trickle`) |
+| `03-disk-full`        | writes under `data/` fail with `ENOSPC`, `logs/` is fine (`pathPattern`) |
+| `04-dns-override`     | `localhost` resolves to `10.9.8.7` (`dnsAnswer` override)             |
+| `05-clock-skew`       | `Instant`, `Clock`, `LocalDateTime` and `ZonedDateTime` reads run one hour ahead (`clockSkew`) |
+| `06-process-start-fails` | starting a process fails with `ENOENT`, in the JDK's own words     |
+| `07-http-reject`      | requests to one URL prefix fail before they are sent, another host answers (`reject`) |
+| `08-slow-executor`    | each `submit()` holds the submitting thread 200 ms (`delay`)          |
+
+CI runs `demo/run-all.sh` on JDK 21 and JDK 25 (Linux, amd64) for every push to `main` and `develop` and every pull request into them; each demo has 120 seconds (`DEMO_TIMEOUT`), and a demo whose stderr has a `WARNING` or an exception line fails, with those lines printed. The plans are the same JSON the agent reads from a file, an agent argument or an environment variable ([startup-config.md](../docs/startup-config.md)).

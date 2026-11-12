@@ -1,11 +1,13 @@
 package com.macstab.chaos.jvm.api;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Primary entry point to the chaos agent runtime.
  *
  * <p>A single instance is installed per JVM when the agent attaches, accessible via {@code
- * ChaosAgentBootstrap.current()} or injected in test code via {@code
- * ChaosAgentBootstrap.installForLocalTests()}.
+ * ChaosPlatform.current()} (or {@code ChaosPlatform.installed()}, empty while no agent is
+ * installed) or installed in test code via {@code ChaosPlatform.installLocally()}.
  *
  * <p>Core operations:
  *
@@ -29,13 +31,23 @@ public interface ChaosControlPlane extends AutoCloseable {
    * instantly. Manual-start scenarios require a subsequent {@link ChaosActivationHandle#start()}
    * call.
    *
+   * <p>The exceptions have no common root besides {@link RuntimeException}: catch the ones below,
+   * or {@link RuntimeException}. Every failure of an open control plane is recorded once in the
+   * diagnostics and published as a {@code FAILED} event before it is thrown; an activation on a
+   * closed one throws {@link IllegalStateException} and records nothing.
+   *
    * @param scenario the scenario to activate; must have {@link ChaosScenario.ScenarioScope#JVM}
    *     scope
    * @return a handle for lifecycle control; close it to stop the scenario
    * @throws ChaosValidationException if the selector ↔ effect combination is invalid
    * @throws ChaosUnsupportedFeatureException if the scenario requires a JVM feature not available
    *     at runtime
-   * @throws ChaosActivationException if a scenario with the same ID is already active
+   * @throws ChaosActivationConflictException if a scenario with the same ID is still registered or
+   *     active (a {@link ChaosActivationException})
+   * @throws ChaosActivationException if the scenario is {@code SESSION}-scoped
+   * @throws ChaosInstrumentationException if the instrumentation the scenario needs cannot be woven
+   *     (a {@link ChaosActivationException})
+   * @throws IllegalStateException if the control plane is closed
    */
   ChaosActivationHandle activate(ChaosScenario scenario);
 
@@ -43,21 +55,32 @@ public interface ChaosControlPlane extends AutoCloseable {
    * Activates all scenarios in a {@link ChaosPlan} at JVM scope.
    *
    * <p>All scenarios activate atomically: either all succeed or the plan activation fails. The
-   * returned handle controls all scenarios in the plan as a group.
+   * returned handle controls all scenarios in the plan as a group. Every scenario is validated and
+   * every hook the plan needs is woven before any scenario is registered.
+   *
+   * <p>The exceptions have no common root besides {@link RuntimeException}: catch the ones below,
+   * or {@link RuntimeException}. Every failure of an open control plane is recorded once in the
+   * diagnostics and published as a {@code FAILED} event before it is thrown; an activation on a
+   * closed one throws {@link IllegalStateException} and records nothing.
    *
    * @param plan all scenarios must have {@link ChaosScenario.ScenarioScope#JVM} scope
    * @return a composite handle that stops all plan scenarios when closed
-   * @throws ChaosActivationException if any scenario in the plan is not JVM-scoped, or if any
-   *     scenario fails validation
+   * @throws ChaosValidationException if a scenario fails validation
+   * @throws ChaosUnsupportedFeatureException if a scenario requires more than the runtime provides
+   * @throws ChaosActivationConflictException if a scenario's ID is still registered or active
+   * @throws ChaosActivationException if a scenario in the plan is not JVM-scoped
+   * @throws ChaosInstrumentationException if the instrumentation the plan needs cannot be woven
+   * @throws IllegalStateException if the control plane is closed
    */
   ChaosActivationHandle activate(ChaosPlan plan);
 
   /**
    * Opens a named session scope for per-test chaos isolation.
    *
-   * <p>Scenarios activated on the returned session affect only threads explicitly bound to it via
-   * {@link ChaosSession#bind()}. Multiple sessions may be active simultaneously without interfering
-   * with each other.
+   * <p>Scenarios activated on the returned session affect only threads bound to it: the calling
+   * thread, which is bound from this call until {@link ChaosSession#close()}, and threads bound
+   * with {@link ChaosSession#bind()}. Multiple sessions may be active simultaneously without
+   * interfering with each other.
    *
    * <p>Always close the session when the test completes to stop all session scenarios and release
    * the session scope:
@@ -71,6 +94,8 @@ public interface ChaosControlPlane extends AutoCloseable {
    *
    * @param displayName human-readable name for this session; appears in diagnostics and logs
    * @return a new session; caller is responsible for closing it
+   * @throws NullPointerException if {@code displayName} is {@code null}
+   * @throws IllegalStateException if the control plane is closed
    */
   ChaosSession openSession(String displayName);
 
@@ -105,11 +130,44 @@ public interface ChaosControlPlane extends AutoCloseable {
   void addEventListener(ChaosEventListener listener);
 
   /**
-   * Stops all active scenarios, closes all open sessions, and cleans up stressor resources.
+   * Removes a listener registered with {@link #addEventListener}; a listener registered more than
+   * once is removed once. Removing an {@link ChaosEventListener#async asynchronous} listener stops
+   * its delivery thread; events still queued for it are discarded.
    *
-   * <p>After this call the control plane is inert; all selector evaluations return no-match.
-   * Calling {@code close()} more than once is safe.
+   * @param listener the listener to remove, as it was registered
+   * @return {@code true} if it was registered
+   */
+  boolean removeEventListener(ChaosEventListener listener);
+
+  /**
+   * Stops and removes every scenario, those of open sessions included, cleans up stressor resources
+   * and closes the listeners that are {@link AutoCloseable}.
+   *
+   * <p>After this call the control plane is inert; all selector evaluations return no-match. An
+   * open session stays open but activates nothing more (its {@code activate} fails with {@link
+   * IllegalStateException}); its own {@link ChaosSession#close()} still ends its binding of the
+   * thread that opened it. Calling {@code close()} more than once is safe.
+   *
+   * <p>The JVM-wide control plane the agent installed ({@code ChaosPlatform.installLocally()},
+   * {@code current()}) cannot be closed: other tests, framework integrations and the management
+   * endpoints share it.
+   *
+   * @throws UnsupportedOperationException if this is the JVM-wide control plane of {@code
+   *     ChaosPlatform}
    */
   @Override
   void close();
+
+  /**
+   * Binds the calling thread to the open session with {@code sessionId}, as {@link
+   * ChaosSession#bind()} would: how a server joins the session a request came from ({@link
+   * ChaosSession#HEADER}). The id decides for the binding's lifetime: an unknown or closed id runs
+   * the thread outside any session, even one it inherited (a pooled server thread started while a
+   * test's session was bound).
+   *
+   * @param sessionId the session id, e.g. the value of the {@link ChaosSession#HEADER} header;
+   *     {@code null} (no header) also runs the thread outside any session
+   * @return the binding to close when the work is done
+   */
+  ChaosSession.ScopeBinding bindSession(@Nullable String sessionId);
 }

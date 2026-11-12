@@ -1,7 +1,7 @@
 package com.macstab.chaos.jvm.instrumentation;
 
-import com.macstab.chaos.jvm.api.ChaosJdbcSuppressException;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import net.bytebuddy.asm.Advice;
 
 /**
@@ -20,8 +20,9 @@ import net.bytebuddy.asm.Advice;
  * </ul>
  *
  * <p>All advice classes route through {@link BootstrapDispatcher} so they require no compile-time
- * dependency on HikariCP or c3p0. When a scenario suppresses the call, the advice throws {@link
- * ChaosJdbcSuppressException} so the caller observes a terminal failure.
+ * dependency on HikariCP or c3p0. A rejected call fails with the {@link java.sql.SQLException} the
+ * dispatcher throws. The advice holds no string concatenation ({@code invokedynamic}): it is
+ * inlined into drivers and pools compiled for Java 6.
  */
 final class JdbcAdvice {
   private JdbcAdvice() {}
@@ -34,6 +35,9 @@ final class JdbcAdvice {
   static final class HikariGetConnectionAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object pool) throws Throwable {
+      if (BootstrapDispatcher.idle(OperationTags.JDBC_CONNECTION_ACQUIRE)) {
+        return;
+      }
       final String poolName;
       BootstrapDispatcher.beginInternalCall();
       try {
@@ -41,10 +45,7 @@ final class JdbcAdvice {
       } finally {
         BootstrapDispatcher.endInternalCall();
       }
-      if (BootstrapDispatcher.beforeJdbcConnectionAcquire(poolName)) {
-        throw new ChaosJdbcSuppressException(
-            "JDBC connection acquire suppressed by chaos agent: " + poolName);
-      }
+      BootstrapDispatcher.beforeJdbcConnectionAcquire(poolName);
     }
   }
 
@@ -56,10 +57,7 @@ final class JdbcAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object pool) throws Throwable {
       final String poolName = pool == null ? null : pool.getClass().getName();
-      if (BootstrapDispatcher.beforeJdbcConnectionAcquire(poolName)) {
-        throw new ChaosJdbcSuppressException(
-            "JDBC connection acquire suppressed by chaos agent: " + poolName);
-      }
+      BootstrapDispatcher.beforeJdbcConnectionAcquire(poolName);
     }
   }
 
@@ -72,20 +70,16 @@ final class JdbcAdvice {
   static final class StatementExecuteAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(0) final String sql) throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE)) {
+      // Entered also inside the driver's or pool's own work, so the exit advice stays balanced.
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE)
+          || BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_JDBC_INTERNAL)) {
         return;
       }
-      final boolean suppressed;
       try {
-        suppressed = BootstrapDispatcher.beforeJdbcStatementExecute(sql);
+        BootstrapDispatcher.beforeJdbcStatementExecute(sql);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
-        throw new ChaosJdbcSuppressException(
-            "JDBC statement execute suppressed by chaos agent: " + sql);
       }
     }
 
@@ -101,25 +95,22 @@ final class JdbcAdvice {
    * and Spring {@code JdbcTemplate}. The SQL text was bound at prepare time and is not available
    * here, so these calls report a {@code null} target: they match JDBC_STATEMENT_EXECUTE scenarios
    * whose target pattern is ANY. The SQL is visible to JDBC_PREPARED_STATEMENT scenarios at prepare
-   * time.
+   * time. Also intercepts {@code executeBatch()} / {@code executeLargeBatch()} of every {@code
+   * Statement}: one evaluation per batch, likewise without SQL text.
    */
   static final class PreparedStatementExecuteAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE)) {
+      // Entered also inside the driver's or pool's own work, so the exit advice stays balanced.
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE)
+          || BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_JDBC_INTERNAL)) {
         return;
       }
-      final boolean suppressed;
       try {
-        suppressed = BootstrapDispatcher.beforeJdbcStatementExecute(null);
+        BootstrapDispatcher.beforeJdbcStatementExecute(null);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
-        throw new ChaosJdbcSuppressException(
-            "JDBC prepared statement execute suppressed by chaos agent");
       }
     }
 
@@ -139,20 +130,16 @@ final class JdbcAdvice {
   static final class PrepareStatementAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(0) final String sql) throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_PREPARE)) {
+      // Entered also inside the driver's or pool's own work, so the exit advice stays balanced.
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_PREPARE)
+          || BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_JDBC_INTERNAL)) {
         return;
       }
-      final boolean suppressed;
       try {
-        suppressed = BootstrapDispatcher.beforeJdbcPreparedStatement(sql);
+        BootstrapDispatcher.beforeJdbcPreparedStatement(sql);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_PREPARE);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_PREPARE);
-        throw new ChaosJdbcSuppressException(
-            "JDBC prepareStatement suppressed by chaos agent: " + sql);
       }
     }
 
@@ -162,23 +149,40 @@ final class JdbcAdvice {
     }
   }
 
+  /**
+   * The JDBC work of a driver or a pool itself, scope-only ({@link
+   * BootstrapDispatcher#SCOPE_JDBC_INTERNAL}): {@code Connection.isValid(int)} (pgjdbc runs a
+   * statement there), and HikariCP's {@code PoolBase.isConnectionDead}, {@code newPoolEntry} (its
+   * {@code connectionInitSql} and driver checks), {@code resetConnectionState} and {@code
+   * ProxyConnection.close} (the rollback of a connection taken back dirty). The statements,
+   * prepares, commits and rollbacks inside it are not the application's JDBC calls.
+   */
+  static final class JdbcInternal {
+    @Advice.OnMethodEnter
+    static void enter() {
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_INTERNAL);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_INTERNAL);
+    }
+  }
+
   /** Intercepts {@code java.sql.Connection.commit()}. */
   static final class CommitAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_COMMIT)) {
+      // Entered also inside the driver's or pool's own work, so the exit advice stays balanced.
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_COMMIT)
+          || BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_JDBC_INTERNAL)) {
         return;
       }
-      final boolean suppressed;
       try {
-        suppressed = BootstrapDispatcher.beforeJdbcTransactionCommit();
+        BootstrapDispatcher.beforeJdbcTransactionCommit();
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_COMMIT);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_COMMIT);
-        throw new ChaosJdbcSuppressException("JDBC commit suppressed by chaos agent");
       }
     }
 
@@ -192,19 +196,16 @@ final class JdbcAdvice {
   static final class RollbackAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_ROLLBACK)) {
+      // Entered also inside the driver's or pool's own work, so the exit advice stays balanced.
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_ROLLBACK)
+          || BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_JDBC_INTERNAL)) {
         return;
       }
-      final boolean suppressed;
       try {
-        suppressed = BootstrapDispatcher.beforeJdbcTransactionRollback();
+        BootstrapDispatcher.beforeJdbcTransactionRollback();
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_ROLLBACK);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_ROLLBACK);
-        throw new ChaosJdbcSuppressException("JDBC rollback suppressed by chaos agent");
       }
     }
 

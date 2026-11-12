@@ -1,8 +1,13 @@
 dependencies {
     api(project(":chaos-agent-api"))
-    implementation(project(":chaos-agent-core"))
+    // The core is inside the agent jar (chaos-agent-bootstrap) at runtime, and no production class
+    // here names it (ADR 0003); only the tests drive it directly.
+    testImplementation(project(":chaos-agent-core"))
     implementation(project(":chaos-agent-bootstrap"))
-    implementation(project(":chaos-agent-startup-config"))
+    // Inside the agent jar at runtime; declaring it here would put a second, unshaded copy on the
+    // application classpath.
+    compileOnly(project(":chaos-agent-startup-config"))
+    testImplementation(project(":chaos-agent-startup-config"))
 
     // Compile-time only so this module can be linked against either Spring Boot 3 or 4
     // at the consumer's classpath. The Spring APIs used here (@AutoConfiguration,
@@ -14,6 +19,8 @@ dependencies {
     compileOnly("org.springframework.boot:spring-boot-actuator")
     compileOnly("org.springframework.boot:spring-boot-actuator-autoconfigure")
     compileOnly("org.springframework:spring-context")
+    compileOnly("jakarta.servlet:jakarta.servlet-api")
+    compileOnly("org.springframework:spring-webmvc")
 
     testImplementation(platform(libs.spring.boot3.dependencies))
     testImplementation(platform(libs.junit.bom))
@@ -24,10 +31,57 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-actuator")
     testImplementation("org.springframework.boot:spring-boot-actuator-autoconfigure")
     testImplementation("org.springframework:spring-context")
+    testImplementation("org.springframework:spring-test")
+    testImplementation("org.springframework:spring-web")
+    testImplementation("jakarta.servlet:jakarta.servlet-api")
+    // An actuator over Spring MVC (ChaosActuatorBodyLimitTest).
+    testImplementation("org.springframework:spring-webmvc")
+    testImplementation("com.fasterxml.jackson.core:jackson-databind")
 }
 
 tasks.jar {
     manifest {
         attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.spring.boot.common"
     }
+}
+
+// This module is the shared core of the Spring Boot 3 and 4 starters and is exercised through
+// them: their tests run its classes (the same class files, unshaded), so its coverage counts what
+// they execute as well as its own tests.
+val starterTests =
+    listOf(
+        ":chaos-agent-spring-boot3-starter",
+        ":chaos-agent-spring-boot4-starter",
+        ":chaos-agent-spring-boot3-test-starter",
+        ":chaos-agent-spring-boot4-test-starter",
+    )
+tasks.withType<JacocoReportBase>().configureEach {
+    dependsOn(starterTests.map { "$it:test" })
+    executionData(starterTests.map { project(it).layout.buildDirectory.file("jacoco/test.exec") })
+}
+
+// The module is compiled against Spring Boot 3 and runs on Boot 3 or 4, whichever the consumer's
+// starter brings, so its tests run on both: `test` on Boot 3, `testBoot4` on the same test classes
+// with Boot 4 on the class path (its platform raises every Spring artifact to Boot 4's version).
+val testBoot4Runtime: Configuration by configurations.creating {
+    isCanBeConsumed = false
+    extendsFrom(configurations.testImplementation.get(), configurations.testRuntimeOnly.get())
+}
+dependencies {
+    testBoot4Runtime(platform(libs.spring.boot4.dependencies))
+    // Boot 4 moved the Spring MVC actuator and the Jackson auto-configuration into their own modules.
+    testBoot4Runtime("org.springframework.boot:spring-boot-webmvc")
+    testBoot4Runtime("org.springframework.boot:spring-boot-jackson")
+}
+val testBoot4 = tasks.register<Test>("testBoot4") {
+    description = "Runs the tests on Spring Boot 4."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().output + sourceSets.main.get().output + testBoot4Runtime
+    shouldRunAfter(tasks.test)
+}
+tasks.check { dependsOn(testBoot4) }
+tasks.withType<JacocoReportBase>().configureEach {
+    dependsOn(testBoot4)
+    executionData(testBoot4.get())
 }

@@ -10,9 +10,9 @@ import org.springframework.core.env.MapPropertySource;
  * {@link ApplicationContextInitializer} that ensures the chaos agent is installed before the Spring
  * application context is refreshed.
  *
- * <p>Registered as an initializer via {@code @SpringBootTest(initializers = ...)} or via Spring
- * factories so that chaos interception is available for beans instantiated during context startup
- * (for example, {@code CommandLineRunner} beans used for integration fixtures).
+ * <p>Applied by {@code @ChaosTest} (through its {@code @ContextConfiguration}), or registered with
+ * {@code @SpringBootTest(initializers = ...)}, so that chaos interception is available for beans
+ * instantiated during context startup.
  */
 public final class ChaosAgentInitializer
     implements ApplicationContextInitializer<ConfigurableApplicationContext> {
@@ -27,8 +27,8 @@ public final class ChaosAgentInitializer
   public void initialize(final ConfigurableApplicationContext applicationContext) {
     // Install the JVM-wide agent before context refresh so instrumentation is in place when
     // beans are instantiated. The resulting control plane is exposed as a Spring bean by
-    // ChaosTestAutoConfiguration — previously this initializer also called
-    // beanFactory.registerSingleton("chaosControlPlane", ...). That early singleton lands in
+    // ChaosTestAutoConfiguration; this initializer does not call
+    // beanFactory.registerSingleton("chaosControlPlane", ...). Such an early singleton lands in
     // the bean factory before @ConditionalOnMissingBean is evaluated, silently suppressing
     // the auto-config bean method and bypassing @Bean lifecycle processing (lifecycle
     // callbacks, dependency injection checks, BeanPostProcessor hooks). Worse, test code that
@@ -40,8 +40,8 @@ public final class ChaosAgentInitializer
     // auto-config bean is only created in contexts where chaos is actually opted in. Without
     // this flag the auto-config's chaosControlPlane() would call installLocally() for every
     // @SpringBootTest context regardless of @ChaosTest, self-attaching the agent globally.
-    // The flag is added to this context's environment only. A JVM-wide system property leaked
-    // into every later @SpringBootTest context, so bean presence depended on test order.
+    // The flag is added to this context's environment only. A JVM-wide system property would
+    // leak into every later @SpringBootTest context, making bean presence depend on test order.
     applicationContext
         .getEnvironment()
         .getPropertySources()

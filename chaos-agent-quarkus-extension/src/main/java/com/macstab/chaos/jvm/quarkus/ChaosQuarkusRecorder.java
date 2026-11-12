@@ -1,11 +1,15 @@
 package com.macstab.chaos.jvm.quarkus;
 
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
+import com.macstab.chaos.jvm.startup.TrustedSources;
 import io.quarkus.runtime.RuntimeValue;
 import io.quarkus.runtime.annotations.Recorder;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.ConfigProvider;
+import org.eclipse.microprofile.config.ConfigValue;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Quarkus build-time recorder that installs the chaos agent at runtime initialization.
@@ -13,11 +17,11 @@ import org.eclipse.microprofile.config.ConfigProvider;
  * <p>Recorders are invoked by Quarkus' build-time processor during image build. The generated
  * bytecode calls {@link #installAgent()} from the generated {@code runtime-init} hook, which
  * triggers a self-attach via {@link ChaosPlatform#installLocally()} — but only when {@link
- * #ENABLED_PROPERTY} is set to {@code true} on the launched JVM. When the flag is absent or {@code
- * false} the recorder is a no-op, so the extension jar can ship with production artefacts without
- * triggering byte-code instrumentation in every environment. The same property gates the Spring
- * Boot starters and the Micronaut configurer so one configuration switch controls all supported
- * stacks.
+ * #ENABLED_PROPERTY} is set to {@code true} on the launched JVM, by a launch-time local source (see
+ * {@link #chaosEnabled()}). When the flag is absent or {@code false} the recorder is a no-op, so
+ * the extension jar can ship with production artefacts without triggering byte-code instrumentation
+ * in every environment. The same property gates the Spring Boot starters and the Micronaut
+ * configurer so one configuration switch controls all supported stacks.
  *
  * <p>The returned {@link RuntimeValue} is a boolean marker — its value reflects whether the install
  * call was actually executed (i.e. the gate was open). Consumers that need the live {@link
@@ -28,14 +32,17 @@ import org.eclipse.microprofile.config.ConfigProvider;
 public class ChaosQuarkusRecorder {
 
   /**
-   * System property / environment variable consulted at runtime-init time to decide whether to
-   * install the chaos agent. Matches the Spring Boot starter and Micronaut configurer gates.
+   * Property read through MicroProfile Config at runtime-init time to decide whether to install the
+   * chaos agent: a system property, environment variable or {@code application.properties} entry.
    */
   public static final String ENABLED_PROPERTY = "macstab.chaos.enabled";
 
   private static final Logger LOGGER = Logger.getLogger(ChaosQuarkusRecorder.class.getName());
 
-  /** Default constructor invoked by the Quarkus build step. */
+  /**
+   * Default constructor invoked by the Quarkus build step. A recorder has exactly this one
+   * constructor: Quarkus refuses a recorder whose constructor it cannot determine.
+   */
   public ChaosQuarkusRecorder() {}
 
   /**
@@ -50,11 +57,16 @@ public class ChaosQuarkusRecorder {
    *     — production traffic must not fail to boot because of an optional observability add-on.
    */
   public RuntimeValue<Boolean> installAgent() {
+    return installAgent(ChaosPlatform::installLocally);
+  }
+
+  /** {@link #installAgent()} with {@code install} attaching the agent. */
+  static RuntimeValue<Boolean> installAgent(final Runnable install) {
     if (!chaosEnabled()) {
       return new RuntimeValue<>(Boolean.FALSE);
     }
     try {
-      ChaosPlatform.installLocally();
+      install.run();
       return new RuntimeValue<>(Boolean.TRUE);
     } catch (final RuntimeException | LinkageError exception) {
       // LinkageError: self-attach is unavailable in a native image and on JVMs without the
@@ -62,21 +74,40 @@ public class ChaosQuarkusRecorder {
       LOGGER.log(
           Level.WARNING,
           exception,
-          () -> "chaos-agent: failed to self-attach during Quarkus runtime-init");
+          () -> "[chaos-agent] failed to self-attach during Quarkus runtime-init");
       return new RuntimeValue<>(Boolean.FALSE);
     }
   }
 
   /**
-   * Reads {@code macstab.chaos.enabled} through MicroProfile Config, which in Quarkus covers system
-   * properties, environment variables ({@code MACSTAB_CHAOS_ENABLED}) and {@code
-   * application.properties}. Reading only system properties and environment variables ignored
-   * {@code application.properties}, while the ArC producer honoured it, so the producer created the
-   * bean but the runtime-init attach was skipped.
+   * Reads {@code macstab.chaos.enabled} at run time through MicroProfile Config. It is honoured
+   * only from a launch-time local source: system properties, environment variables ({@code
+   * MACSTAB_CHAOS_ENABLED}), {@code .env}, {@code application.properties} and the files of {@code
+   * quarkus.config.locations}, and in tests the {@code @TestProfile} and test-resource overrides;
+   * from any other source only when {@code macstab.chaos.allow-remote-enable=true} comes from one.
+   * The runtime-init attach and the {@link ChaosArcProducer} both decide with it.
    */
-  private static boolean chaosEnabled() {
-    return ConfigProvider.getConfig()
-        .getOptionalValue(ENABLED_PROPERTY, Boolean.class)
-        .orElse(Boolean.FALSE);
+  static boolean chaosEnabled() {
+    return chaosEnabled(ConfigProvider.getConfig());
+  }
+
+  /** {@link #chaosEnabled()} against {@code config}. */
+  static boolean chaosEnabled(final Config config) {
+    return TrustedSources.switchedOn(
+        ENABLED_PROPERTY, property -> sourced(config, property), TrustedSources::smallRye);
+  }
+
+  /**
+   * The value of {@code property} in {@code config} and the name of the source it comes from.
+   *
+   * @param config the configuration
+   * @param property the property
+   * @return {@code null} when the property is not set
+   */
+  static TrustedSources.@Nullable Sourced sourced(final Config config, final String property) {
+    final ConfigValue value = config.getConfigValue(property);
+    return value.getValue() == null
+        ? null
+        : new TrustedSources.Sourced(value.getValue(), String.valueOf(value.getSourceName()));
   }
 }

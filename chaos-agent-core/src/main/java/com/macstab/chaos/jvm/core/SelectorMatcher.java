@@ -1,7 +1,10 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.CidrBlock;
+import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Stateless utility that evaluates whether a {@link ChaosSelector} matches a given {@link
@@ -70,11 +73,12 @@ final class SelectorMatcher {
           methodSelector.operations().contains(context.operationType())
               && methodSelector.classPattern().matches(context.targetClassName())
               && methodSelector.methodNamePattern().matches(context.targetName())
-              && (methodSelector.signaturePattern() == null
-                  || methodSelector.signaturePattern().matches(context.subjectClassName()));
+              && methodSelector.signaturePattern().matches(context.signature());
       case ChaosSelector.MonitorSelector monitorSelector ->
           monitorSelector.operations().contains(context.operationType())
-              && monitorSelector.monitorClassPattern().matches(context.targetClassName());
+              && monitorSelector.monitorClassPattern().matches(context.targetClassName())
+              && !(isAny(monitorSelector.monitorClassPattern())
+                  && JdkOwnUse.isPoolWorkerLock(context.targetClassName()));
       case ChaosSelector.JvmRuntimeSelector jvmRuntimeSelector ->
           jvmRuntimeSelector.operations().contains(context.operationType());
       case ChaosSelector.NioSelector nioSelector ->
@@ -82,10 +86,19 @@ final class SelectorMatcher {
               && nioSelector.channelClassPattern().matches(context.targetClassName());
       case ChaosSelector.NetworkSelector networkSelector ->
           networkSelector.operations().contains(context.operationType())
-              && networkSelector.remoteHostPattern().matches(context.targetName());
+              && networkSelector.remoteHostPattern().matches(context.targetName())
+              && (networkSelector.remoteCidr() == null
+                  || CidrBlock.cached(networkSelector.remoteCidr())
+                      .contains(context.remoteAddress()))
+              && (networkSelector.remotePort() == null
+                  || networkSelector.remotePort() == context.remotePort())
+              && inSizeRange(
+                  networkSelector.minBytes(), networkSelector.maxBytes(), context.byteCount());
       case ChaosSelector.ThreadLocalSelector threadLocalSelector ->
           threadLocalSelector.operations().contains(context.operationType())
-              && threadLocalSelector.threadLocalClassPattern().matches(context.targetClassName());
+              && threadLocalSelector.threadLocalClassPattern().matches(context.targetClassName())
+              && !(isAny(threadLocalSelector.threadLocalClassPattern())
+                  && JdkOwnUse.isJdkThreadLocal(context.targetClassName()));
       case ChaosSelector.HttpClientSelector httpClientSelector ->
           httpClientSelector.operations().contains(context.operationType())
               && httpClientSelector.urlPattern().matches(context.targetName());
@@ -98,10 +111,46 @@ final class SelectorMatcher {
       case ChaosSelector.SslSelector sslSelector ->
           sslSelector.operations().contains(context.operationType());
       case ChaosSelector.FileIoSelector fileIoSelector ->
-          fileIoSelector.operations().contains(context.operationType());
+          fileIoSelector.operations().contains(context.operationType())
+              && (fileIoSelector.pathPattern() == null
+                  ? !JdkOwnUse.isRandomDevice(context.path())
+                  : fileIoSelector.pathPattern().matches(context.path()))
+              && inSizeRange(
+                  fileIoSelector.minBytes(), fileIoSelector.maxBytes(), context.byteCount());
+      case ChaosSelector.MessagingSelector messagingSelector ->
+          messagingSelector.operations().contains(context.operationType())
+              && anyDestinationMatches(
+                  messagingSelector.destinationPattern(), context.targetName());
+      case ChaosSelector.RpcSelector rpcSelector ->
+          rpcSelector.operations().contains(context.operationType())
+              && rpcSelector.methodPattern().matches(context.targetName());
+      case ChaosSelector.RedisSelector redisSelector ->
+          redisSelector.operations().contains(context.operationType())
+              && redisSelector.commandPattern().matches(context.targetName());
+      case ChaosSelector.AwsSdkSelector awsSdkSelector ->
+          awsSdkSelector.operations().contains(context.operationType())
+              && awsSdkSelector.servicePattern().matches(context.subjectClassName())
+              && awsSdkSelector.operationPattern().matches(context.targetName());
+      case ChaosSelector.NettySelector nettySelector ->
+          nettySelector.operations().contains(context.operationType())
+              && (nettySelector.remoteCidr() == null
+                  || CidrBlock.cached(nettySelector.remoteCidr()).contains(context.remoteAddress()))
+              && (nettySelector.remotePort() == null
+                  || nettySelector.remotePort() == context.remotePort());
+      case ChaosSelector.ProcessSelector processSelector ->
+          processSelector.operations().contains(context.operationType())
+              && processSelector.commandPattern().matches(context.targetName());
       case ChaosSelector.StressSelector stressSelector ->
           context.operationType() == OperationType.LIFECYCLE && stressSelector.target() != null;
     };
+  }
+
+  /**
+   * Whether {@code pattern} matches every name: the JDK's own uses that L3a lists by class ({@link
+   * JdkOwnUse}) are reached only by a pattern that names them.
+   */
+  private static boolean isAny(final NamePattern pattern) {
+    return pattern.mode() == NamePattern.MatchMode.ANY;
   }
 
   /**
@@ -141,5 +190,42 @@ final class SelectorMatcher {
   private static boolean matchesDaemon(
       final ChaosSelector.ThreadSelector selector, final InvocationContext context) {
     return selector.daemon() == null || selector.daemon().equals(context.daemonThread());
+  }
+
+  /**
+   * A consumer poll reports all subscribed topics, comma-separated (Kafka topic names cannot
+   * contain a comma); the pattern matches when it matches any of them.
+   */
+  private static boolean anyDestinationMatches(
+      final NamePattern pattern, final @Nullable String destinations) {
+    if (pattern.mode() == NamePattern.MatchMode.ANY) {
+      return true;
+    }
+    if (destinations == null) {
+      return false;
+    }
+    if (destinations.indexOf(',') < 0) {
+      return pattern.matches(destinations);
+    }
+    for (final String destination : destinations.split(",", -1)) {
+      if (pattern.matches(destination)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Checks a byte count against an inclusive range; an unknown count ({@code < 0}) never satisfies
+   * a range.
+   */
+  private static boolean inSizeRange(
+      final @Nullable Long minBytes, final @Nullable Long maxBytes, final long bytes) {
+    if (minBytes == null && maxBytes == null) {
+      return true;
+    }
+    return bytes >= 0
+        && (minBytes == null || bytes >= minBytes)
+        && (maxBytes == null || bytes <= maxBytes);
   }
 }

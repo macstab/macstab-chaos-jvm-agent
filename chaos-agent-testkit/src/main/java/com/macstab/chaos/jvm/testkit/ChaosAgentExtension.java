@@ -1,13 +1,25 @@
 package com.macstab.chaos.jvm.testkit;
 
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.extension.AfterEachCallback;
+import org.junit.jupiter.api.extension.AfterTestExecutionCallback;
 import org.junit.jupiter.api.extension.BeforeEachCallback;
+import org.junit.jupiter.api.extension.BeforeTestExecutionCallback;
+import org.junit.jupiter.api.extension.DynamicTestInvocationContext;
 import org.junit.jupiter.api.extension.ExtensionContext;
+import org.junit.jupiter.api.extension.InvocationInterceptor;
 import org.junit.jupiter.api.extension.ParameterContext;
+import org.junit.jupiter.api.extension.ParameterResolutionException;
 import org.junit.jupiter.api.extension.ParameterResolver;
+import org.junit.jupiter.api.extension.ReflectiveInvocationContext;
+import org.junit.platform.commons.support.AnnotationSupport;
 
 /**
  * JUnit 5 extension that integrates the chaos agent into the JUnit lifecycle, providing per-test
@@ -37,6 +49,12 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  *       (self-attaching if necessary via {@link ChaosPlatform#installLocally()}), then opens a
  *       fresh {@link ChaosSession} scoped to the test's display name. The {@link ChaosControlPlane}
  *       and {@link ChaosSession} are stored in the JUnit {@link ExtensionContext} store.
+ *   <li><b>Around the test method</b>: {@link #beforeTestExecution} activates the scenarios
+ *       declared with {@link WithChaos} on the test class, the classes a {@code @Nested} test class
+ *       runs inside, and the method, after the test's {@code @BeforeEach} methods; the thread that
+ *       runs the test method (or a dynamic test) is bound to the session while it runs, so
+ *       session-scoped ones reach the test body; {@link #afterTestExecution} stops them before the
+ *       test's {@code @AfterEach} methods.
  *   <li><b>After each test</b> ({@link #afterEach}): closes the session, which stops all
  *       session-scoped scenarios and releases any session-bound threads. The session is removed
  *       from the store to prevent cross-test leakage.
@@ -60,7 +78,12 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  * parallel tests must be aware of this.
  */
 public final class ChaosAgentExtension
-    implements BeforeEachCallback, AfterEachCallback, ParameterResolver {
+    implements BeforeEachCallback,
+        BeforeTestExecutionCallback,
+        AfterTestExecutionCallback,
+        AfterEachCallback,
+        InvocationInterceptor,
+        ParameterResolver {
 
   /** Creates a new ChaosAgentExtension. */
   public ChaosAgentExtension() {}
@@ -71,7 +94,8 @@ public final class ChaosAgentExtension
   /**
    * Installs the chaos agent (if not already installed) and opens a new {@link ChaosSession} for
    * the current test, storing both the {@link ChaosControlPlane} and the session in the extension
-   * context store.
+   * context store. No scenario is activated yet: {@link WithChaos} scenarios start in {@link
+   * #beforeTestExecution}, after the test's {@code @BeforeEach} methods.
    *
    * @param context the JUnit extension context for the test about to run
    */
@@ -82,6 +106,128 @@ public final class ChaosAgentExtension
     final ChaosSession session = tracker.openSession(context.getDisplayName());
     context.getStore(NAMESPACE).put(ChaosControlPlane.class, tracker);
     context.getStore(NAMESPACE).put(ChaosSession.class, session);
+  }
+
+  /**
+   * Activates the {@link WithChaos} scenarios of the test class, the classes a {@code @Nested} test
+   * class runs inside, and the method, right before the test method runs.
+   *
+   * @param context the JUnit extension context for the test about to run
+   */
+  @Override
+  public void beforeTestExecution(final ExtensionContext context) {
+    final ChaosControlPlane controlPlane =
+        context.getStore(NAMESPACE).get(ChaosControlPlane.class, ChaosControlPlane.class);
+    final ChaosSession session =
+        context.getStore(NAMESPACE).get(ChaosSession.class, ChaosSession.class);
+    if (controlPlane == null || session == null) {
+      return;
+    }
+    // The scenarios of the classes and of the method are all activated, whichever declare any.
+    final List<ChaosActivationHandle> handles = new ArrayList<>();
+    try {
+      for (final Class<?> testClass : testClasses(context.getRequiredTestClass())) {
+        handles.addAll(WithChaosSupport.activate(testClass, controlPlane, session));
+      }
+      handles.addAll(
+          WithChaosSupport.activate(context.getRequiredTestMethod(), controlPlane, session));
+    } catch (final RuntimeException failure) {
+      WithChaosSupport.close(handles);
+      throw failure;
+    }
+    context.getStore(NAMESPACE).put(WithChaosSupport.class, handles);
+  }
+
+  /**
+   * Runs the test method bound to the session when any {@link WithChaos} applies, on the thread
+   * that runs it (also the separate thread of {@code @Timeout(threadMode = SEPARATE_THREAD)}).
+   */
+  @Override
+  public void interceptTestMethod(
+      final Invocation<Void> invocation,
+      final ReflectiveInvocationContext<Method> invocationContext,
+      final ExtensionContext extensionContext)
+      throws Throwable {
+    proceedBound(invocation, extensionContext);
+  }
+
+  /** Runs a test template invocation bound to the session, as {@link #interceptTestMethod}. */
+  @Override
+  public void interceptTestTemplateMethod(
+      final Invocation<Void> invocation,
+      final ReflectiveInvocationContext<Method> invocationContext,
+      final ExtensionContext extensionContext)
+      throws Throwable {
+    proceedBound(invocation, extensionContext);
+  }
+
+  /** Runs a test factory method bound to the session, as {@link #interceptTestMethod}. */
+  @Override
+  public <T> T interceptTestFactoryMethod(
+      final Invocation<T> invocation,
+      final ReflectiveInvocationContext<Method> invocationContext,
+      final ExtensionContext extensionContext)
+      throws Throwable {
+    return proceedBound(invocation, extensionContext);
+  }
+
+  /**
+   * Runs a dynamic test bound to its factory's session. Under concurrent execution ({@code
+   * junit.jupiter.execution.parallel}) a dynamic test may run after its factory's teardown, outside
+   * the session.
+   */
+  @Override
+  public void interceptDynamicTest(
+      final Invocation<Void> invocation,
+      final DynamicTestInvocationContext invocationContext,
+      final ExtensionContext extensionContext)
+      throws Throwable {
+    proceedBound(invocation, extensionContext);
+  }
+
+  private static <T> T proceedBound(final Invocation<T> invocation, final ExtensionContext context)
+      throws Throwable {
+    final List<?> handles = context.getStore(NAMESPACE).get(WithChaosSupport.class, List.class);
+    final ChaosSession session =
+        context.getStore(NAMESPACE).get(ChaosSession.class, ChaosSession.class);
+    if (handles == null || handles.isEmpty() || session == null) {
+      return invocation.proceed();
+    }
+    // Declared session scenarios must reach the test body without a manual bind().
+    try (ChaosSession.ScopeBinding binding = session.bind()) {
+      return invocation.proceed();
+    }
+  }
+
+  /**
+   * Stops the {@link WithChaos} scenarios activated for this test, right after the test method ran
+   * and before the test's {@code @AfterEach} methods.
+   *
+   * @param context the JUnit extension context for the test that just ran
+   */
+  @Override
+  @SuppressWarnings("unchecked") // the store holds the handle list beforeTestExecution put there
+  public void afterTestExecution(final ExtensionContext context) {
+    WithChaosSupport.close(
+        (List<ChaosActivationHandle>)
+            context.getStore(NAMESPACE).remove(WithChaosSupport.class, List.class));
+  }
+
+  /**
+   * Returns the test class and the classes enclosing it, outermost first: a {@code @Nested} test
+   * runs inside them, so their {@link WithChaos} scenarios apply to it.
+   */
+  private static java.util.List<Class<?>> testClasses(final Class<?> testClass) {
+    final java.util.Deque<Class<?>> classes = new java.util.ArrayDeque<>();
+    for (Class<?> current = testClass;
+        current != null;
+        current =
+            AnnotationSupport.isAnnotated(current, Nested.class)
+                ? current.getEnclosingClass()
+                : null) {
+      classes.addFirst(current);
+    }
+    return java.util.List.copyOf(classes);
   }
 
   /**
@@ -139,12 +285,22 @@ public final class ChaosAgentExtension
    *
    * @param parameterContext the context for the parameter to be resolved
    * @param extensionContext the JUnit extension context for the test
-   * @return the resolved parameter value; never null if {@link #beforeEach} completed successfully
+   * @return the resolved parameter value
+   * @throws ParameterResolutionException outside a test, its {@code @BeforeEach} and
+   *     {@code @AfterEach} methods: the session is opened per test
    */
   @Override
   public Object resolveParameter(
       final ParameterContext parameterContext, final ExtensionContext extensionContext) {
     final Class<?> parameterType = parameterContext.getParameter().getType();
-    return extensionContext.getStore(NAMESPACE).get(parameterType, parameterType);
+    final Object resolved = extensionContext.getStore(NAMESPACE).get(parameterType, parameterType);
+    if (resolved != null) {
+      return resolved;
+    }
+    throw new ParameterResolutionException(
+        "ChaosAgentExtension: no "
+            + parameterType.getSimpleName()
+            + " available — the session is opened per test: inject it into a test, @BeforeEach or"
+            + " @AfterEach method");
   }
 }

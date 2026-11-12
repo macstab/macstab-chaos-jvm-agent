@@ -33,7 +33,11 @@ public class PaymentGatewayClient {
    */
   @CircuitBreaker(name = "payment-gateway", fallbackMethod = "chargeFallback")
   public String charge(final String orderId) {
-    return restTemplate.postForObject(gatewayUrl + "/charge", orderId, String.class);
+    final String body = restTemplate.postForObject(gatewayUrl + "/charge", orderId, String.class);
+    if (body == null) {
+      throw new IllegalStateException("payment gateway answered without a body");
+    }
+    return body;
   }
 
   /**

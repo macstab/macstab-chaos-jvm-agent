@@ -8,15 +8,8 @@ final class ShutdownAdvice {
 
   static final class AddShutdownHookAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(value = 0, readOnly = false) Thread hook) throws Throwable {
-      hook = BootstrapDispatcher.decorateShutdownHook(hook);
-    }
-  }
-
-  static final class RemoveShutdownHookAdvice {
-    @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(value = 0, readOnly = false) Thread hook) {
-      hook = BootstrapDispatcher.resolveShutdownHook(hook);
+    static void enter(@Advice.Argument(0) Thread hook) throws Throwable {
+      BootstrapDispatcher.decorateShutdownHook(hook);
     }
   }
 }

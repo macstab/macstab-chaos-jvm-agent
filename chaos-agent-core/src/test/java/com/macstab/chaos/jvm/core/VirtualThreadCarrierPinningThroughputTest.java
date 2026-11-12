@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
@@ -11,6 +12,7 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -18,8 +20,8 @@ import org.junit.jupiter.api.Test;
 /**
  * Verifies that the carrier-pinning stressor actually takes virtual-thread carriers out of service:
  * while it holds every carrier, a newly started virtual thread cannot run; once it stops, the
- * virtual thread runs. The 1.0.0 stressor used platform threads and passed its old tests (which
- * only counted threads) while having no effect on the scheduler at all.
+ * virtual thread runs. Counting the stressor's threads is not enough: platform threads would pass
+ * such a check while having no effect on the scheduler at all.
  */
 @DisplayName("VirtualThreadCarrierPinning holds virtual-thread carriers")
 class VirtualThreadCarrierPinningThroughputTest {
@@ -107,13 +109,11 @@ class VirtualThreadCarrierPinningThroughputTest {
                 .effect(HOLD_ALL_CARRIERS)
                 .activationPolicy(ActivationPolicy.always())
                 .build());
-        Thread.sleep(300L);
-        final CountDownLatch ran = new CountDownLatch(1);
-        Thread.ofVirtual().start(ran::countDown);
-
-        assertThat(ran.await(5L, TimeUnit.SECONDS))
-            .as("a virtual thread runs on the carrier left free")
-            .isTrue();
+        // Throughout a window that outlasts the stressor's start, a new virtual thread still runs.
+        await()
+            .during(Duration.ofMillis(500))
+            .atMost(Duration.ofSeconds(10))
+            .until(() -> runsWithin(Duration.ofSeconds(1)));
       } finally {
         runtime.close();
       }
@@ -135,20 +135,35 @@ class VirtualThreadCarrierPinningThroughputTest {
     }
   }
 
+  /**
+   * Waits until the stressor holds every carrier, that is until a new virtual thread no longer runs
+   * within 500 ms, then stops it and expects that waiting thread to run.
+   */
   private static void assertStarvedUntil(final Runnable stop) throws InterruptedException {
-    // Give the stressor's virtual threads time to mount on every carrier.
-    Thread.sleep(300L);
-    final CountDownLatch ran = new CountDownLatch(1);
-    Thread.ofVirtual().start(ran::countDown);
-
-    assertThat(ran.await(500L, TimeUnit.MILLISECONDS))
-        .as("no carrier is free while the stressor holds all %d", CARRIERS)
-        .isFalse();
+    final AtomicReference<CountDownLatch> waiting = new AtomicReference<>();
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .pollInterval(Duration.ofMillis(10))
+        .alias("no carrier is free while the stressor holds all " + CARRIERS)
+        .until(
+            () -> {
+              final CountDownLatch ran = new CountDownLatch(1);
+              Thread.ofVirtual().start(ran::countDown);
+              waiting.set(ran);
+              return !ran.await(500L, TimeUnit.MILLISECONDS);
+            });
 
     stop.run();
 
-    assertThat(ran.await(5L, TimeUnit.SECONDS))
+    assertThat(waiting.get().await(5L, TimeUnit.SECONDS))
         .as("the waiting virtual thread runs once the carriers are released")
         .isTrue();
+  }
+
+  /** Whether a new virtual thread runs within {@code timeout}. */
+  private static boolean runsWithin(final Duration timeout) throws InterruptedException {
+    final CountDownLatch ran = new CountDownLatch(1);
+    Thread.ofVirtual().start(ran::countDown);
+    return ran.await(timeout.toMillis(), TimeUnit.MILLISECONDS);
   }
 }

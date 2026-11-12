@@ -10,18 +10,18 @@ package com.macstab.chaos.jvm.api;
  * <p>Lifecycle state machine:
  *
  * <pre>
- * REGISTERED
- *   │
- *   ├─ [AUTOMATIC] → ACTIVE ──┐
- *   │                         │
- *   └─ [MANUAL] → INACTIVE    │
- *        │                    │
- *        └── start() ─────────┤
- *                             │
- *                          stop() / close()
- *                             │
- *                          STOPPED
+ * REGISTERED ── start() ──→ ACTIVE      (AUTOMATIC: inside activate(); MANUAL: handle.start())
+ * REGISTERED ── stop() / close() ──→ STOPPED
+ * ACTIVE ── expiry ──→ INACTIVE          (activeFor / activeUntil passed, maxApplications spent,
+ *                                         or the stressor ended)
+ * ACTIVE ── stop() / close() ──→ STOPPED
+ * INACTIVE ── stop() / close() ──→ STOPPED
  * </pre>
+ *
+ * <p>Only a {@code REGISTERED} scenario starts: {@code INACTIVE} and {@code STOPPED} are final for
+ * the handle, and {@code start()} on them does nothing. {@code close()} also unregisters the
+ * scenario; activating its id again registers a new one that replaces a {@code STOPPED} or {@code
+ * INACTIVE} scenario.
  *
  * <p>Once {@code STOPPED}, the handle cannot be restarted. Create a new activation to re-inject the
  * same scenario.
@@ -40,12 +40,13 @@ public interface ChaosActivationHandle extends AutoCloseable {
   String id();
 
   /**
-   * Transitions the scenario from {@link ChaosDiagnostics.ScenarioState#INACTIVE INACTIVE} to
+   * Transitions the scenario from {@link ChaosDiagnostics.ScenarioState#REGISTERED REGISTERED} to
    * {@link ChaosDiagnostics.ScenarioState#ACTIVE ACTIVE}. For scenarios with {@link
    * ActivationPolicy.StartMode#AUTOMATIC}, this is a no-op as they start immediately on activation.
    *
    * <p>For stressor effects (heap pressure, deadlock, etc.), this also spawns the stressor
-   * background task.
+   * background task. Of concurrent calls, one starts the scenario; the others return at once,
+   * possibly before it is {@code ACTIVE}.
    */
   void start();
 
@@ -62,6 +63,12 @@ public interface ChaosActivationHandle extends AutoCloseable {
   /**
    * Opens a blocked {@link ChaosEffect.GateEffect} gate, releasing all threads currently blocked by
    * this scenario without stopping the scenario itself.
+   *
+   * <p>On an active scenario the gate closes again at once, so later calls are held until the next
+   * release. On an {@link ChaosDiagnostics.ScenarioState#INACTIVE inactive} scenario (its {@code
+   * maxApplications} spent, or expired) the gate opens once and is not closed again. A spent {@code
+   * maxApplications} keeps its last admitted caller at the gate until {@code release()} or {@link
+   * #stop()}; expiry releases waiting threads by itself.
    *
    * <p>Calling {@code release()} on a scenario that does not use {@link ChaosEffect.GateEffect} is
    * a no-op. Calling it on a stopped scenario is also a no-op.
@@ -83,6 +90,22 @@ public interface ChaosActivationHandle extends AutoCloseable {
    * @see ChaosDiagnostics.ScenarioState
    */
   ChaosDiagnostics.ScenarioState state();
+
+  /**
+   * Returns how many calls matched the scenario's selector (and passed its time bounds) so far: the
+   * {@code matchedCount} of the diagnostics. For a plan handle, the sum over its scenarios.
+   *
+   * @return the match count
+   */
+  long matchedCount();
+
+  /**
+   * Returns how many times the scenario's effect took effect so far: the {@code appliedCount} of
+   * the diagnostics. For a plan handle, the sum over its scenarios.
+   *
+   * @return the application count
+   */
+  long appliedCount();
 
   /**
    * Delegates to {@link #stop()}. Enables use in try-with-resources.

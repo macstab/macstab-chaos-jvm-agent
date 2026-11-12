@@ -3,84 +3,59 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
-import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
- * Interns a configurable number of unique strings into the JVM's native string table (Metaspace),
- * simulating the pattern of interned-string exhaustion seen in applications that intern user input
- * or request identifiers.
+ * Interns a configurable number of distinct strings into the JVM's string table, simulating the
+ * pattern of interned-string exhaustion seen in applications that intern user input or request
+ * identifiers.
  *
- * <p>Unlike heap pressure, interned strings reside in Metaspace and are not collected by normal GC
- * until the classloader that owns them is collected. This creates Metaspace pressure distinct from
- * class-loading pressure.
+ * <p>The interned strings live on the heap, and the string table that maps them grows with every
+ * distinct one: a long table makes every {@code intern()} of the application slower.
  *
- * <p>Each string is unique (UUID-prefixed) and of exactly {@code stringLengthBytes} characters.
+ * <p>String {@code i} is {@code i} written in base 256, one Latin-1 character per digit, padded to
+ * exactly {@code stringLengthBytes} characters (one byte each in a compact string), so the strings
+ * are distinct as long as {@code internCount <= 256^stringLengthBytes}; the validator refuses more.
+ * Two such stressors of one length intern the same strings, so the table grows by the larger count.
  * Strong references to the interned strings are retained so they cannot be collected while this
  * stressor is active.
  *
- * <p>{@link #close()} nulls all references. The strings may remain in the native string table until
- * the next full GC that collects the associated classloader.
+ * <p>{@link #close()} nulls all references; the next collection removes the strings from the table.
  */
 final class StringInternPressureStressor implements ManagedStressor {
 
-  private static final Logger LOGGER =
-      Logger.getLogger(StringInternPressureStressor.class.getName());
+  private static final AgentLog LOGGER =
+      AgentLog.named(StringInternPressureStressor.class.getName());
 
   /**
-   * Upper bound on {@code stringLengthBytes}. Guards the {@code new StringBuilder(lengthBytes)}
-   * allocation in {@link #buildAndIntern} against OOM / {@code NegativeArraySizeException} if the
-   * effect is constructed with a pathological value. 1 MiB is well above any realistic
-   * interned-string fixture and still fits in a single char[] allocation.
+   * Upper bound on {@code stringLengthBytes}, refused above by the validator: 1 MiB is well above
+   * any realistic interned-string fixture and still fits in a single array.
    */
-  private static final int MAX_STRING_LENGTH_BYTES = 1 << 20;
+  static final int MAX_STRING_LENGTH_BYTES = 1 << 20;
 
   /**
-   * Upper bound on {@code internCount}. An unbounded value multiplied by a large length can exhaust
-   * Metaspace before any operator telemetry fires. 1M interned strings is an order of magnitude
-   * above typical stress runs.
+   * Upper bound on {@code internCount}, refused above by the validator: an unbounded count
+   * multiplied by a large length exhausts the heap before any operator telemetry fires.
    */
-  private static final int MAX_INTERN_COUNT = 1_000_000;
+  static final int MAX_INTERN_COUNT = 1_000_000;
 
-  private volatile List<String> internedStrings;
+  private volatile @Nullable List<String> internedStrings;
 
   StringInternPressureStressor(final ChaosEffect.StringInternPressureEffect effect) {
-    final int lengthBytes = clamp(effect.stringLengthBytes(), 1, MAX_STRING_LENGTH_BYTES);
-    final int internCount = clamp(effect.internCount(), 0, MAX_INTERN_COUNT);
-    if (internCount != effect.internCount() || lengthBytes != effect.stringLengthBytes()) {
-      LOGGER.warning(
-          () ->
-              "chaos-agent: string-intern pressure clamped to "
-                  + internCount
-                  + " strings of "
-                  + lengthBytes
-                  + " bytes (limits "
-                  + MAX_INTERN_COUNT
-                  + " strings, "
-                  + MAX_STRING_LENGTH_BYTES
-                  + " bytes)");
-    }
+    final int lengthBytes = effect.stringLengthBytes();
+    final int internCount = effect.internCount();
     final List<String> strings = new ArrayList<>(internCount);
     for (int i = 0; i < internCount; i++) {
       strings.add(buildAndIntern(i, lengthBytes));
     }
     this.internedStrings = List.copyOf(strings);
     LOGGER.fine(
-        "StringInternPressureStressor interned "
-            + strings.size()
-            + " strings of "
-            + lengthBytes
-            + " bytes each");
-  }
-
-  private static int clamp(final int value, final int min, final int max) {
-    if (value < min) {
-      return min;
-    }
-    if (value > max) {
-      return max;
-    }
-    return value;
+        () ->
+            "[chaos-agent] StringInternPressureStressor interned "
+                + strings.size()
+                + " strings of "
+                + lengthBytes
+                + " bytes each");
   }
 
   @Override
@@ -94,13 +69,20 @@ final class StringInternPressureStressor implements ManagedStressor {
     return snapshot == null ? 0 : snapshot.size();
   }
 
+  /** Returns the number of distinct retained strings, or 0 after {@link #close()}; a test seam. */
+  int distinctCount() {
+    final List<String> snapshot = internedStrings;
+    return snapshot == null ? 0 : new java.util.HashSet<>(snapshot).size();
+  }
+
+  /** Interns {@code index} in base 256, one Latin-1 character per digit, most significant first. */
   private static String buildAndIntern(final int index, final int lengthBytes) {
-    final String uuid = UUID.randomUUID().toString().replace("-", "");
-    final StringBuilder sb = new StringBuilder(lengthBytes);
-    sb.append(uuid, 0, Math.min(uuid.length(), lengthBytes));
-    while (sb.length() < lengthBytes) {
-      sb.append((char) ('a' + (index % 26)));
+    final char[] digits = new char[lengthBytes];
+    int rest = index;
+    for (int position = lengthBytes - 1; position >= 0 && rest != 0; position--) {
+      digits[position] = (char) (rest & 0xFF);
+      rest >>>= 8;
     }
-    return sb.toString().intern();
+    return new String(digits).intern();
   }
 }

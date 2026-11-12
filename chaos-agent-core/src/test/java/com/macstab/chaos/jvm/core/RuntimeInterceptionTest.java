@@ -1,0 +1,801 @@
+package com.macstab.chaos.jvm.core;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
+
+import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.NamePattern;
+import com.macstab.chaos.jvm.api.OperationType;
+import java.time.Duration;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+
+/**
+ * Tests of the {@link ChaosRuntime} interception points for GC and exit requests, selectors and
+ * future cancellation. Tests call {@code before*()} methods directly — no ByteBuddy install
+ * required.
+ */
+@DisplayName("GC, exit, selector and future interception")
+class RuntimeInterceptionTest {
+
+  private static final long DELAY_MS = 50L;
+
+  // ---------------------------------------------------------------------------
+  // GC request
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeGcRequest")
+  class GcRequestTests {
+
+    @Test
+    @DisplayName("SuppressEffect returns true (GC suppressed)")
+    void suppressEffectReturnsTrueForGc() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("gc-suppress")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_GC_REQUEST)))
+                  .effect(ChaosEffect.suppress())
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        assertThat(runtime.beforeGcRequest()).isTrue();
+      }
+    }
+
+    @Test
+    @DisplayName("no scenario — returns false (GC not suppressed)")
+    void noScenarioReturnsFalse() throws Throwable {
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        assertThat(runtime.beforeGcRequest()).isFalse();
+      }
+    }
+
+    @Test
+    @DisplayName("delay effect — returns false after sleep")
+    void delayEffectReturnsFalseAfterSleep() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("gc-delay")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_GC_REQUEST)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final long start = System.nanoTime();
+        final boolean result = runtime.beforeGcRequest();
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(result).isFalse();
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Exit request
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeExitRequest")
+  class ExitRequestTests {
+
+    @Test
+    @DisplayName("SuppressEffect throws SecurityException")
+    void suppressEffectThrowsSecurityException() {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("exit-suppress")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_EXIT_REQUEST)))
+                  .effect(ChaosEffect.suppress())
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        assertThatThrownBy(() -> runtime.beforeExitRequest(0))
+            .isInstanceOf(SecurityException.class);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // NIO selector
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeNioSelect")
+  class NioSelectTests {
+
+    @Test
+    @DisplayName("SuppressEffect returns true (spurious wakeup injected)")
+    void suppressEffectReturnsTrueForNioSelect() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("nio-suppress")
+                  .selector(
+                      new ChaosSelector.NioSelector(
+                          Set.of(OperationType.NIO_SELECTOR_SELECT), NamePattern.any()))
+                  .effect(ChaosEffect.suppress())
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        assertThat(runtime.beforeNioSelect(null, 1000L)).isZero();
+      }
+    }
+
+    @Test
+    @DisplayName("no scenario — returns false (no spurious wakeup)")
+    void noScenarioReturnsFalse() throws Throwable {
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        assertThat(runtime.beforeNioSelect(null, 1000L)).isEqualTo(NetworkDispatch.SELECT_PROCEEDS);
+      }
+    }
+
+    @Test
+    @DisplayName("delay effect — returns false after delay")
+    void delayEffectReturnsFalseAfterDelay() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("nio-delay")
+                  .selector(
+                      new ChaosSelector.NioSelector(
+                          Set.of(OperationType.NIO_SELECTOR_SELECT), NamePattern.any()))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final long start = System.nanoTime();
+        final long result = runtime.beforeNioSelect(null, 1000L);
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(result).isEqualTo(NetworkDispatch.SELECT_PROCEEDS);
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Async cancel
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeAsyncCancel")
+  class AsyncCancelTests {
+
+    @Test
+    @DisplayName("SuppressEffect returns true (cancel suppressed)")
+    void suppressEffectReturnsTrueForAsyncCancel() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("async-suppress")
+                  .selector(ChaosSelector.async(Set.of(OperationType.ASYNC_CANCEL)))
+                  .effect(ChaosEffect.suppress())
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        assertThat(runtime.beforeAsyncCancel(null, true)).isTrue();
+      }
+    }
+
+    @Test
+    @DisplayName("no scenario — returns false (cancel proceeds)")
+    void noScenarioReturnsFalse() throws Throwable {
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        assertThat(runtime.beforeAsyncCancel(null, true)).isFalse();
+      }
+    }
+
+    @Test
+    @DisplayName("RejectEffect is refused at activation: a cancel never fails")
+    void rejectEffectIsRefused() {
+      assertThatThrownBy(
+              () ->
+                  runtimeWith(
+                      ChaosScenario.builder("async-fail")
+                          .selector(ChaosSelector.async(Set.of(OperationType.ASYNC_CANCEL)))
+                          .effect(ChaosEffect.reject("cancel rejected by chaos"))
+                          .activationPolicy(ActivationPolicy.always())
+                          .build()))
+          .isExactlyInstanceOf(com.macstab.chaos.jvm.api.ChaosValidationException.class)
+          .hasMessageContaining("ASYNC_CANCEL");
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Object deserialization
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeObjectDeserialize")
+  class ObjectDeserializeTests {
+
+    @Test
+    @DisplayName("RejectEffect throws InvalidClassException")
+    void rejectEffectThrowsInvalidClassException() {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("deser-reject")
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.OBJECT_DESERIALIZE)))
+                  .effect(ChaosEffect.reject("chaos rejection"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final Throwable thrown = catchThrowable(() -> runtime.beforeObjectDeserialize(null));
+        assertThat(thrown).isInstanceOf(java.io.InvalidClassException.class);
+      }
+    }
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("deser-delay")
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.OBJECT_DESERIALIZE)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final long start = System.nanoTime();
+        runtime.beforeObjectDeserialize(null);
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Object serialization
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeObjectSerialize")
+  class ObjectSerializeTests {
+
+    @Test
+    @DisplayName("RejectEffect throws NotSerializableException")
+    void rejectEffectThrowsNotSerializableException() {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("ser-reject")
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.OBJECT_SERIALIZE)))
+                  .effect(ChaosEffect.reject("chaos rejection"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final Throwable thrown = catchThrowable(() -> runtime.beforeObjectSerialize(null, null));
+        assertThat(thrown).isInstanceOf(java.io.NotSerializableException.class);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // ZIP inflate / deflate
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeZipInflate")
+  class ZipInflateTests {
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("zip-inflate-delay")
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.ZIP_INFLATE)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final long start = System.nanoTime();
+        runtime.beforeZipInflate();
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
+    }
+  }
+
+  @Nested
+  @DisplayName("beforeZipDeflate")
+  class ZipDeflateTests {
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("zip-deflate-delay")
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.ZIP_DEFLATE)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final long start = System.nanoTime();
+        runtime.beforeZipDeflate();
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Direct buffer allocation
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeDirectBufferAllocate")
+  class DirectBufferAllocateTests {
+
+    @Test
+    @DisplayName("RejectEffect throws OutOfMemoryError")
+    void rejectEffectThrowsOutOfMemoryError() {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("direct-buffer-reject")
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.DIRECT_BUFFER_ALLOCATE)))
+                  .effect(ChaosEffect.reject("direct buffer exhausted"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final Throwable thrown = catchThrowable(() -> runtime.beforeDirectBufferAllocate(1024));
+        assertThat(thrown).isInstanceOf(OutOfMemoryError.class);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Reflection invoke
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeReflectionInvoke")
+  class ReflectionInvokeTests {
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("reflect-delay")
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.REFLECTION_INVOKE)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final long start = System.nanoTime();
+        runtime.beforeReflectionInvoke(null, null);
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Socket connect
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeSocketConnect")
+  class SocketConnectTests {
+
+    @Test
+    @DisplayName("RejectEffect throws ConnectException")
+    void rejectEffectThrowsConnectException() {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-connect-reject")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_CONNECT), NamePattern.any()))
+                  .effect(ChaosEffect.reject("connection refused by chaos"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final Throwable thrown = catchThrowable(() -> runtime.beforeSocketConnect(null, null, 0));
+        assertThat(thrown).isInstanceOf(java.net.ConnectException.class);
+      }
+    }
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-connect-delay")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_CONNECT), NamePattern.any()))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final long start = System.nanoTime();
+        runtime.beforeSocketConnect(null, null, 0);
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Class define
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeClassDefine")
+  class ClassDefineTests {
+
+    @Test
+    @DisplayName("RejectEffect throws ClassFormatError")
+    void rejectEffectThrowsClassFormatError() {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("class-define-reject")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(
+                      ChaosSelector.classLoading(
+                          Set.of(OperationType.CLASS_DEFINE), NamePattern.any()))
+                  .effect(ChaosEffect.reject("bad class format"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final Throwable thrown =
+            catchThrowable(() -> runtime.beforeClassDefine(null, "com.example.Foo"));
+        assertThat(thrown).isInstanceOf(ClassFormatError.class);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Socket accept
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeSocketAccept")
+  class SocketAcceptTests {
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-accept-delay")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_ACCEPT), NamePattern.any()))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final long start = System.nanoTime();
+        runtime.beforeSocketAccept(null);
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
+    }
+
+    @Test
+    @DisplayName("RejectEffect throws on beforeSocketAccept")
+    void rejectEffectThrows() {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-accept-reject")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_ACCEPT), NamePattern.any()))
+                  .effect(ChaosEffect.reject("chaos accept rejection"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        assertThatThrownBy(() -> runtime.beforeSocketAccept(null))
+            .isInstanceOf(java.io.IOException.class)
+            .hasMessage("chaos accept rejection");
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Socket read
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeSocketRead")
+  class SocketReadTests {
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-read-delay")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_READ), NamePattern.any()))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final long start = System.nanoTime();
+        runtime.beforeSocketRead(null, InvocationContext.UNKNOWN, null, 0, 0);
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
+    }
+
+    @Test
+    @DisplayName("RejectEffect on a read without SO_TIMEOUT throws SocketException, not a timeout")
+    void rejectEffectThrowsSocketException() {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-read-reject")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_READ), NamePattern.any()))
+                  .effect(ChaosEffect.reject("chaos read rejection"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final Throwable thrown =
+            catchThrowable(
+                () -> runtime.beforeSocketRead(null, InvocationContext.UNKNOWN, null, 0, 0));
+        assertThat(thrown).isExactlyInstanceOf(java.net.SocketException.class);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Socket write
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeSocketWrite")
+  class SocketWriteTests {
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-write-delay")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_WRITE), NamePattern.any()))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final long start = System.nanoTime();
+        runtime.beforeSocketWrite(null, 64, null, 0);
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
+    }
+
+    @Test
+    @DisplayName("RejectEffect throws IOException")
+    void rejectEffectThrowsIoException() {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-write-reject")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_WRITE), NamePattern.any()))
+                  .effect(ChaosEffect.reject("chaos write rejection"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final Throwable thrown = catchThrowable(() -> runtime.beforeSocketWrite(null, 64, null, 0));
+        assertThat(thrown).isInstanceOf(java.io.IOException.class);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Socket close
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeSocketClose")
+  class SocketCloseTests {
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-close-delay")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_CLOSE), NamePattern.any()))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final long start = System.nanoTime();
+        runtime.beforeSocketClose(null);
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // JNDI lookup
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeJndiLookup")
+  class JndiLookupTests {
+
+    @Test
+    @DisplayName("RejectEffect throws NamingException")
+    void rejectEffectThrowsNamingException() {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("jndi-reject")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.JNDI_LOOKUP)))
+                  .effect(ChaosEffect.reject("chaos jndi rejection"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        assertThatThrownBy(() -> runtime.beforeJndiLookup(null, "java:comp/env/test"))
+            .isInstanceOf(javax.naming.NamingException.class)
+            .hasMessage("chaos jndi rejection");
+      }
+    }
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("jndi-delay")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.JNDI_LOOKUP)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final long start = System.nanoTime();
+        runtime.beforeJndiLookup(null, "java:comp/env/test");
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // JMX MBeanServer
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeJmxGetAttr / beforeJmxInvoke")
+  class JmxTests {
+
+    @Test
+    @DisplayName("delay effect adds latency to getAttribute path")
+    void delayEffectAddsLatencyToGetAttr() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("jmx-get-attr-delay")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.JMX_GET_ATTR)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final long start = System.nanoTime();
+        runtime.beforeJmxGetAttr(null, null, "VmName");
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
+    }
+
+    @Test
+    @DisplayName("delay effect adds latency to invoke path")
+    void delayEffectAddsLatencyToInvoke() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("jmx-invoke-delay")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.JMX_INVOKE)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final long start = System.nanoTime();
+        runtime.beforeJmxInvoke(null, null, "gc");
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Native library load
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeNativeLibraryLoad")
+  class NativeLibraryLoadTests {
+
+    @Test
+    @DisplayName("RejectEffect throws UnsatisfiedLinkError")
+    void rejectEffectThrowsUnsatisfiedLinkError() {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("native-reject")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.NATIVE_LIBRARY_LOAD)))
+                  .effect(ChaosEffect.reject("chaos native load rejection"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final Throwable thrown =
+            catchThrowable(() -> runtime.beforeNativeLibraryLoad("nonexistent_chaos_lib_xyz"));
+        assertThat(thrown).isInstanceOf(UnsatisfiedLinkError.class);
+      }
+    }
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      try (ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("native-delay")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.NATIVE_LIBRARY_LOAD)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build())) {
+        final long start = System.nanoTime();
+        runtime.beforeNativeLibraryLoad("nonexistent_chaos_lib_xyz");
+        final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(elapsedMs)
+            .as("delay effect should add the whole configured %dms", DELAY_MS)
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  private static ChaosRuntime runtimeWith(final ChaosScenario scenario) {
+    final ChaosRuntime runtime = new ChaosRuntime();
+    runtime.activate(scenario);
+    return runtime;
+  }
+
+  /** How often the runtime's scenarios applied, all together. */
+  private static long applied(final ChaosRuntime runtime) {
+    return runtime.diagnostics().snapshot().scenarios().stream()
+        .mapToLong(com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioReport::appliedCount)
+        .sum();
+  }
+}

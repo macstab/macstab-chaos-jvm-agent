@@ -13,6 +13,7 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
+    testImplementation(libs.archunit.junit5)
     testImplementation(libs.h2)
     testImplementation(libs.hikari.cp)
 }
@@ -21,4 +22,10 @@ tasks.jar {
     manifest {
         attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.instrumentation.jdk"
     }
+}
+
+// JdkImplementationPrefixesTest describes every class of the runtime image through one caching
+// type pool; the default 512 MB test heap leaves it little room as the image grows.
+tasks.test {
+    maxHeapSize = "1g"
 }

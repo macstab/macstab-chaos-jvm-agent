@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosActivationException;
@@ -9,20 +10,28 @@ import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosEvent;
+import com.macstab.chaos.jvm.api.ChaosMetricsSink;
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.api.OperationType;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Scenario re-activation and handle lifecycle")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class ScenarioReactivationTest {
 
   private ChaosRuntime runtime;
@@ -132,7 +141,10 @@ class ScenarioReactivationTest {
           .isInstanceOf(ChaosActivationException.class);
 
       // Assert
-      assertThat(events).as("no STARTED/STOPPED for the rejected duplicate").isEmpty();
+      assertThat(events)
+          .as("no STARTED/STOPPED for the rejected duplicate; only its FAILED report")
+          .extracting(ChaosEvent::type)
+          .containsExactly(ChaosEvent.Type.FAILED);
       assertThat(runtime.diagnostics().scenario("dup"))
           .get()
           .extracting(ChaosDiagnostics.ScenarioReport::state)
@@ -176,6 +188,170 @@ class ScenarioReactivationTest {
           .isInstanceOf(IllegalStateException.class);
       assertThatThrownBy(() -> runtime.addEventListener(event -> {}))
           .isInstanceOf(IllegalStateException.class);
+    }
+  }
+
+  @Nested
+  @DisplayName("an INACTIVE scenario is final")
+  class InactiveIsFinal {
+
+    @Test
+    @DisplayName("start() after maxApplications is spent does not revive it")
+    void spentScenarioIsNotRevived() {
+      final List<ChaosEvent.Type> events = new CopyOnWriteArrayList<>();
+      runtime.addEventListener(event -> events.add(event.type()));
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("spent")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                  .activationPolicy(ActivationPolicy.count(1))
+                  .build());
+      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+      assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.INACTIVE);
+
+      handle.start();
+      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+
+      assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.INACTIVE);
+      assertThat(handle.appliedCount()).isEqualTo(1L);
+      assertThat(events).as("no second start").containsOnlyOnce(ChaosEvent.Type.STARTED);
+    }
+
+    @Test
+    @DisplayName("start() after a stressor expired builds no second stressor")
+    void expiredStressorIsNotRebuilt() {
+      final AtomicInteger built = new AtomicInteger();
+      final StressorFactory counting =
+          new StressorFactory(Optional::empty) {
+            @Override
+            @Nullable ManagedStressor createIfNeeded(
+                final ChaosEffect effect,
+                final boolean allowDestructiveEffects,
+                final java.util.function.Consumer<String> onEnd) {
+              built.incrementAndGet();
+              return super.createIfNeeded(effect, allowDestructiveEffects, onEnd);
+            }
+          };
+      final ScenarioController controller =
+          new ScenarioController(
+              ChaosScenario.builder("keep-alive")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.stress(ChaosSelector.StressTarget.KEEPALIVE))
+                  .effect(
+                      new ChaosEffect.KeepAliveEffect(
+                          "final-keep-alive", true, Duration.ofMillis(10)))
+                  .activationPolicy(
+                      ActivationPolicy.builder().activeFor(Duration.ofMillis(50)).build())
+                  .build(),
+              "jvm",
+              null,
+              Clock.systemUTC(),
+              new ObservabilityBus(ChaosMetricsSink.NOOP),
+              counting);
+      try {
+        controller.start();
+        await()
+            .atMost(Duration.ofSeconds(5))
+            .until(() -> controller.state() == ChaosDiagnostics.ScenarioState.INACTIVE);
+
+        controller.start();
+
+        assertThat(controller.state()).isEqualTo(ChaosDiagnostics.ScenarioState.INACTIVE);
+        assertThat(built).hasValue(1);
+      } finally {
+        controller.stop();
+      }
+    }
+  }
+
+  @Nested
+  @DisplayName("a stop while start() builds the stressor")
+  class StopDuringStart {
+
+    @Test
+    @DisplayName("wins: the built stressor is closed, and nothing starts or is published")
+    void stopWins() {
+      final AtomicReference<ScenarioController> target = new AtomicReference<>();
+      final AtomicInteger closed = new AtomicInteger();
+      final StressorFactory stopping =
+          new StressorFactory(Optional::empty) {
+            @Override
+            @Nullable ManagedStressor createIfNeeded(
+                final ChaosEffect effect,
+                final boolean allowDestructiveEffects,
+                final java.util.function.Consumer<String> onEnd) {
+              target.get().stop();
+              return closed::incrementAndGet;
+            }
+          };
+      final List<ChaosEvent.Type> events = new CopyOnWriteArrayList<>();
+      final ObservabilityBus bus = new ObservabilityBus(ChaosMetricsSink.NOOP);
+      bus.addListener(event -> events.add(event.type()));
+      final ScenarioController controller =
+          new ScenarioController(
+              ChaosScenario.builder("raced")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.stress(ChaosSelector.StressTarget.KEEPALIVE))
+                  .effect(new ChaosEffect.KeepAliveEffect("raced", true, Duration.ofMillis(10)))
+                  .build(),
+              "jvm",
+              null,
+              Clock.systemUTC(),
+              bus,
+              stopping);
+      target.set(controller);
+
+      controller.start();
+
+      assertThat(controller.state()).isEqualTo(ChaosDiagnostics.ScenarioState.STOPPED);
+      assertThat(closed).hasValue(1);
+      assertThat(events).containsExactly(ChaosEvent.Type.STOPPED);
+    }
+  }
+
+  @Nested
+  @DisplayName("a plan in a session")
+  class SessionPlans {
+
+    @Test
+    @DisplayName("is refused by a closed session")
+    void closedSessionRefusesPlan() {
+      final ChaosSession session = runtime.openSession("closed");
+      session.close();
+
+      assertThatThrownBy(() -> session.activate(plan(sessionScenario("a"))))
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessageContaining("closed session");
+    }
+
+    @Test
+    @DisplayName("that fails leaves none of its scenarios behind, and the session's own running")
+    void failedPlanRollsBack() {
+      try (ChaosSession session = runtime.openSession("rollback")) {
+        final ChaosActivationHandle own = session.activate(sessionScenario("b"));
+
+        assertThatThrownBy(() -> session.activate(plan(sessionScenario("a"), sessionScenario("b"))))
+            .isInstanceOf(ChaosActivationException.class);
+
+        assertThat(runtime.diagnostics().scenario("a")).isEmpty();
+        assertThat(own.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+      }
+    }
+
+    private ChaosScenario sessionScenario(final String id) {
+      return ChaosScenario.builder(id)
+          .scope(ChaosScenario.ScenarioScope.SESSION)
+          .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+          .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+          .activationPolicy(ActivationPolicy.always())
+          .build();
+    }
+
+    private ChaosPlan plan(final ChaosScenario... scenarios) {
+      return new ChaosPlan(new ChaosPlan.Metadata("session-plan", ""), null, List.of(scenarios));
     }
   }
 

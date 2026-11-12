@@ -1,7 +1,9 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import java.lang.reflect.Method;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Reflective pool-identifier extraction helpers for intercepted JDBC pool calls.
@@ -19,25 +21,44 @@ public final class JdbcTargetExtractor {
   // ClassValue keyed on the Class object (not its name) — see HttpUrlExtractor for the
   // shared rationale: a String cache keyed on class name collides across classloaders,
   // hands the wrong Method back, and pins loaders for JVM lifetime.
-  private static final ClassValue<ConcurrentHashMap<String, Method>> METHOD_CACHE =
+  // An empty Optional records a method the class does not have: a pool type without the accessor is
+  // searched once, not on every connection acquire.
+  private static final ClassValue<ConcurrentHashMap<String, Optional<Method>>> METHOD_CACHE =
       new ClassValue<>() {
         @Override
-        protected ConcurrentHashMap<String, Method> computeValue(final Class<?> type) {
+        protected ConcurrentHashMap<String, Optional<Method>> computeValue(final Class<?> type) {
           return new ConcurrentHashMap<>();
+        }
+      };
+
+  // Whether a pool type declares a toString() of its own, looked up once per class: a reflective
+  // getMethod copies a Method on every call, on every connection acquire.
+  private static final ClassValue<Boolean> OWN_TO_STRING =
+      new ClassValue<>() {
+        @Override
+        protected Boolean computeValue(final Class<?> type) {
+          try {
+            return type.getMethod("toString").getDeclaringClass() != Object.class;
+          } catch (final NoSuchMethodException | SecurityException unreachable) {
+            return false;
+          }
         }
       };
 
   private JdbcTargetExtractor() {}
 
   /**
-   * Extracts the HikariCP pool name by calling {@code getPoolName()} reflectively. Falls back to
-   * the instance's fully qualified class name when extraction fails.
+   * Extracts the HikariCP pool name. {@code HikariPool} declares no {@code getPoolName()} (only
+   * {@code HikariDataSource} and {@code HikariConfig} do); its {@code PoolBase} holds the name in a
+   * protected field and returns it from {@code toString()}. A {@code getPoolName()} is used where a
+   * pool type has one, then a {@code toString()} the pool class declares itself, then the class
+   * name.
    *
    * @param pool the {@code com.zaxxer.hikari.pool.HikariPool} instance; may be {@code null}
    * @return the pool name, or the class name as a fallback, or {@code null} when {@code pool} is
    *     {@code null}
    */
-  public static String fromHikariPool(final Object pool) {
+  public static @Nullable String fromHikariPool(final @Nullable Object pool) {
     if (pool == null) {
       return null;
     }
@@ -49,14 +70,26 @@ public final class JdbcTargetExtractor {
     } catch (final Throwable ignored) {
       // fall through
     }
+    try {
+      if (OWN_TO_STRING.get(pool.getClass())) {
+        final String name = pool.toString();
+        if (name != null && !name.isBlank()) {
+          return name;
+        }
+      }
+    } catch (final Throwable ignored) {
+      // fall through
+    }
     return pool.getClass().getName();
   }
 
-  private static Object invoke(final Object target, final String methodName) throws Throwable {
+  private static @Nullable Object invoke(final Object target, final String methodName)
+      throws Throwable {
     final Class<?> targetClass = target.getClass();
-    final ConcurrentHashMap<String, Method> perClass = METHOD_CACHE.get(targetClass);
-    Method method = perClass.get(methodName);
-    if (method == null) {
+    final ConcurrentHashMap<String, Optional<Method>> perClass = METHOD_CACHE.get(targetClass);
+    final Optional<Method> cached = perClass.get(methodName);
+    Method method = cached == null ? null : cached.orElse(null);
+    if (cached == null) {
       method = findMethod(targetClass, methodName);
       if (method != null) {
         // See HttpUrlExtractor for the full rationale: setAccessible can throw
@@ -69,8 +102,8 @@ public final class JdbcTargetExtractor {
         } catch (final java.lang.reflect.InaccessibleObjectException encapsulated) {
           // leave method un-accessible; invoke() may still succeed.
         }
-        perClass.put(methodName, method);
       }
+      perClass.put(methodName, Optional.ofNullable(method));
     }
     if (method == null) {
       return null;
@@ -78,7 +111,7 @@ public final class JdbcTargetExtractor {
     return method.invoke(target);
   }
 
-  private static Method findMethod(final Class<?> start, final String methodName) {
+  private static @Nullable Method findMethod(final Class<?> start, final String methodName) {
     Class<?> searchClass = start;
     while (searchClass != null) {
       for (final Method candidate : searchClass.getDeclaredMethods()) {

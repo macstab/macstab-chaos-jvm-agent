@@ -114,6 +114,76 @@ class ScheduledRunnableWrapperTest {
 
       assertThatThrownBy(wrapper::run).isSameAs(delegateEx);
     }
+
+    @Test
+    @DisplayName("an interrupt from the tick is rethrown with the thread's interrupt flag restored")
+    void interruptFromTickRestoresTheFlag() throws Exception {
+      final InterruptedException injected = new InterruptedException("chaos-interrupt");
+      installTickBridge(
+          (e, t, p) -> {
+            throw injected;
+          });
+      final ScheduledRunnableWrapper wrapper =
+          new ScheduledRunnableWrapper(executor, () -> {}, false);
+      try {
+        assertThatThrownBy(wrapper::run).isSameAs(injected);
+        assertThat(Thread.currentThread().isInterrupted()).isTrue();
+      } finally {
+        Thread.interrupted();
+      }
+    }
+  }
+
+  @Nested
+  @DisplayName("periodic task")
+  class PeriodicTask {
+
+    @Test
+    @DisplayName("a failure of the tick skips this run but keeps the schedule: nothing is thrown")
+    void tickFailureIsSwallowed() throws Exception {
+      installTickBridge(
+          (e, t, p) -> {
+            assertThat(p).isTrue();
+            throw new IllegalStateException("chaos-injected");
+          });
+      final AtomicBoolean ran = new AtomicBoolean(false);
+      new ScheduledRunnableWrapper(executor, () -> ran.set(true), true).run();
+      assertThat(ran).isFalse();
+    }
+
+    @Test
+    @DisplayName("an interrupt from the tick is swallowed with the interrupt flag restored")
+    void interruptFromTickRestoresTheFlag() throws Exception {
+      installTickBridge(
+          (e, t, p) -> {
+            throw new InterruptedException("chaos-interrupt");
+          });
+      final AtomicBoolean ran = new AtomicBoolean(false);
+      try {
+        new ScheduledRunnableWrapper(executor, () -> ran.set(true), true).run();
+        assertThat(Thread.currentThread().isInterrupted()).isTrue();
+      } finally {
+        Thread.interrupted();
+      }
+      assertThat(ran).isFalse();
+    }
+  }
+
+  @Nested
+  @DisplayName("when the executor is gone")
+  class WhenExecutorGone {
+
+    @Test
+    @DisplayName("runs the delegate without consulting the tick")
+    void runsWithoutTick() throws Exception {
+      installTickBridge(
+          (e, t, p) -> {
+            throw new AssertionError("the tick must not be consulted");
+          });
+      final AtomicBoolean ran = new AtomicBoolean(false);
+      new ScheduledRunnableWrapper(null, () -> ran.set(true), true).run();
+      assertThat(ran).isTrue();
+    }
   }
 
   // — bridge test infrastructure —

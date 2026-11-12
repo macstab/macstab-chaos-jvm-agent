@@ -1,42 +1,95 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
-import java.util.logging.Logger;
+import java.util.concurrent.RecursiveAction;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.IntFunction;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Plants {@link ThreadLocal} entries in threads from the common {@link ForkJoinPool}, simulating
  * the most common form of ThreadLocal memory leak in production: pool threads retaining large
  * request-scoped objects across requests.
  *
- * <p>For each of the {@link ForkJoinPool#getParallelism()} common-pool threads, {@link
- * ChaosEffect.ThreadLocalLeakEffect#entriesPerThread()} ThreadLocals are created and set to a
- * byte-array of {@link ChaosEffect.ThreadLocalLeakEffect#valueSizeBytes()} bytes. The ThreadLocals
- * are set by submitting tasks to the pool and running them synchronously to completion before
- * returning from the constructor.
+ * <p>{@link ForkJoinPool#getParallelism()} × {@link
+ * ChaosEffect.ThreadLocalLeakEffect#entriesPerThread()} ThreadLocals are created and each is set,
+ * by a task submitted to the common pool, to a byte array of {@link
+ * ChaosEffect.ThreadLocalLeakEffect#valueSizeBytes()} bytes. The pool spreads the tasks over its
+ * workers; which worker holds which entry is up to the pool. The constructor returns once every
+ * entry is planted, and fails with {@link ChaosUnsupportedFeatureException} when the pool has not
+ * planted them all within {@value #PLANT_TIMEOUT_SECONDS} s of the last value's allocation (its
+ * workers are busy or blocked); the entries are then emptied and the remaining tasks cancelled.
+ * Only the pool's workers plant: the constructor waits for the entries without joining the tasks,
+ * since a join or {@code get()} from a thread outside the pool may run a task still queued on that
+ * thread (JDK 25 does), which would plant the entry on the activating application thread.
  *
- * <p>The planted ThreadLocals are retained in a list so that {@link #close()} can remove them from
- * each pool thread by submitting cleanup tasks. Note: pool threads may be replaced by the JVM after
- * they terminate, so cleanup is best-effort.
+ * <p>The planting is the agent's own work (L3): its tasks are {@link AgentOwned}, so no
+ * FORK_JOIN_TASK_RUN scenario holds them, and they run with the dispatch depth raised, so no
+ * THREAD_LOCAL_SET or logging scenario applies to them. The planted ThreadLocals themselves are
+ * plain ones: they are the leak.
+ *
+ * <p>Each entry's value is held through a small {@link Planted} holder that this stressor keeps.
+ * {@link #close()} empties the holders from the calling thread, so the planted bytes are released
+ * no matter which worker holds the entry or whether that worker is busy; the emptied holders and
+ * their ThreadLocals are cleared from the workers' maps as the JVM expunges stale entries.
  */
 final class ThreadLocalLeakStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
-  private final List<ThreadLocal<byte[]>> plantedLocals;
+  /** How long the constructor waits for the common pool to plant every entry. */
+  static final long PLANT_TIMEOUT_SECONDS = 10L;
+
+  /** The value of one planted entry; emptied on {@link #close()}. */
+  static final class Planted {
+    volatile byte @Nullable [] value;
+
+    Planted(final byte[] value) {
+      this.value = value;
+    }
+  }
+
+  private final List<Planted> planted;
 
   ThreadLocalLeakStressor(final ChaosEffect.ThreadLocalLeakEffect effect) {
-    final int parallelism = ForkJoinPool.commonPool().getParallelism();
+    this(effect, ForkJoinPool.commonPool().getParallelism());
+  }
+
+  /**
+   * Plants {@code parallelism} × {@code entriesPerThread} entries. Test seam (U-72 c6): a test
+   * fixes the parallelism, so its result does not depend on the processor count of the machine it
+   * runs on.
+   */
+  ThreadLocalLeakStressor(final ChaosEffect.ThreadLocalLeakEffect effect, final int parallelism) {
+    this(
+        effect,
+        parallelism,
+        TimeUnit.SECONDS.toNanos(PLANT_TIMEOUT_SECONDS),
+        valueSizeBytes -> new byte[valueSizeBytes]);
+  }
+
+  /**
+   * Plants {@code parallelism} × {@code entriesPerThread} entries whose values {@code values}
+   * allocates, waiting up to {@code plantTimeoutNanos} for the pool to plant them. Test seam: a
+   * slow {@code values} stands for the zeroing of large values.
+   */
+  ThreadLocalLeakStressor(
+      final ChaosEffect.ThreadLocalLeakEffect effect,
+      final int parallelism,
+      final long plantTimeoutNanos,
+      final IntFunction<byte[]> values) {
     final int totalLocals;
     try {
-      // Math.multiplyExact rejects overflow. Without this guard, `parallelism *
-      // effect.entriesPerThread()` wraps to a negative int for pathological entriesPerThread
-      // values and `new ArrayList<>(totalLocals)` throws NegativeArraySizeException inside the
-      // stressor factory — the controller then logs a cryptic construction failure instead of
-      // surfacing the real misconfiguration.
+      // CompatibilityValidator refuses an entry count that overflows an int at activation; this
+      // only asserts that invariant for a stressor built directly (a test, a parallelism changed
+      // since the validation).
       totalLocals = Math.multiplyExact(parallelism, effect.entriesPerThread());
     } catch (final ArithmeticException overflow) {
       throw new IllegalArgumentException(
@@ -46,85 +99,174 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
               + effect.entriesPerThread(),
           overflow);
     }
-    final List<ThreadLocal<byte[]>> locals = new ArrayList<>(totalLocals);
-
-    // Create entriesPerThread ThreadLocals per pool thread. Submit one task per
-    // (thread × entry) pair so that each task runs on a specific pool thread turn.
-    // We submit all tasks then join, so the common pool distributes them.
+    final List<Planted> holders = new ArrayList<>(totalLocals);
     final List<ForkJoinTask<?>> tasks = new ArrayList<>(totalLocals);
+    final Progress progress = new Progress(totalLocals, plantTimeoutNanos);
+    final int valueSizeBytes = effect.valueSizeBytes();
+    try {
+      for (int i = 0; i < totalLocals; i++) {
+        // One instance per entry is the leak this stressor produces.
+        @SuppressWarnings("ThreadLocalUsage")
+        final ThreadLocal<Planted> local = new ThreadLocal<>();
+        final Planted holder = new Planted(values.apply(valueSizeBytes));
+        holders.add(holder);
+        tasks.add(ForkJoinPool.commonPool().submit(new Planting(local, holder, progress)));
+      }
+    } catch (final RuntimeException | Error failed) {
+      // An allocation that ran out of memory or a submit the pool refused: the entries planted
+      // so far keep no value, and the tasks not yet run plant an empty holder.
+      abandon(tasks, holders);
+      throw failed;
+    }
+    // The timeout covers the planting only: allocating large values may take long by itself.
+    progress.arm();
+    awaitPlanting(progress, tasks, holders);
+    this.planted = List.copyOf(holders);
+  }
 
-    for (int e = 0; e < effect.entriesPerThread(); e++) {
-      final int valueSizeBytes = effect.valueSizeBytes();
-      for (int t = 0; t < parallelism; t++) {
-        final ThreadLocal<byte[]> local = new ThreadLocal<>();
-        locals.add(local);
-        tasks.add(
-            ForkJoinPool.commonPool()
-                .submit(
-                    () -> {
-                      local.set(new byte[valueSizeBytes]);
-                      LOGGER.fine(
-                          () ->
-                              "chaos thread-local-leak planted entry on "
-                                  + Thread.currentThread().getName());
-                    }));
+  /**
+   * Waits until the workers have planted every entry; on a timeout, an interrupt or a failed task,
+   * empties every holder and cancels the remaining tasks before it throws, so a task that runs late
+   * plants an empty holder. It blocks through {@link ForkJoinPool#managedBlock}, so an activation
+   * from a common-pool worker lets the pool add a worker for the tasks it waits on.
+   */
+  private static void awaitPlanting(
+      final Progress progress, final List<ForkJoinTask<?>> tasks, final List<Planted> holders) {
+    try {
+      ForkJoinPool.managedBlock(progress);
+    } catch (final InterruptedException interrupted) {
+      abandon(tasks, holders);
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("thread-local-leak: interrupted while planting", interrupted);
+    }
+    final Throwable failure = progress.failure.get();
+    if (failure != null) {
+      abandon(tasks, holders);
+      if (failure instanceof RuntimeException runtime) {
+        throw runtime;
+      }
+      throw (Error) failure;
+    }
+    if (!progress.planted()) {
+      abandon(tasks, holders);
+      throw new ChaosUnsupportedFeatureException(
+          "thread-local-leak: the common ForkJoinPool did not plant the "
+              + holders.size()
+              + " entries within "
+              + java.time.Duration.ofNanos(progress.timeoutNanos)
+              + "; its workers are busy or blocked");
+    }
+  }
+
+  /**
+   * Counts the entries still to plant and keeps the first planting failure, until {@code
+   * timeoutNanos} after {@link #arm()}, which the constructor calls once every value is allocated
+   * and every task submitted.
+   */
+  private static final class Progress implements ForkJoinPool.ManagedBlocker {
+    private final CountDownLatch remaining;
+    private long deadline;
+    final long timeoutNanos;
+    final AtomicReference<@Nullable Throwable> failure = new AtomicReference<>();
+
+    Progress(final int entries, final long timeoutNanos) {
+      this.remaining = new CountDownLatch(entries);
+      this.timeoutNanos = timeoutNanos;
+    }
+
+    /** Starts the timeout; on the constructing thread, before it blocks. */
+    void arm() {
+      deadline = System.nanoTime() + timeoutNanos;
+    }
+
+    /** Records one planting task as ended, {@code failed} or not. */
+    void ended(final @Nullable Throwable failed) {
+      if (failed != null) {
+        failure.compareAndSet(null, failed);
+      }
+      remaining.countDown();
+    }
+
+    boolean planted() {
+      return remaining.getCount() == 0L;
+    }
+
+    @Override
+    public boolean block() throws InterruptedException {
+      remaining.await(Math.max(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+      return true;
+    }
+
+    @Override
+    public boolean isReleasable() {
+      return planted() || failure.get() != null || deadline - System.nanoTime() <= 0L;
+    }
+  }
+
+  private static void abandon(final List<ForkJoinTask<?>> tasks, final List<Planted> holders) {
+    for (final Planted holder : holders) {
+      holder.value = null;
+    }
+    for (final ForkJoinTask<?> task : tasks) {
+      task.cancel(false);
+    }
+  }
+
+  /** Plants one entry on the worker that runs it; agent-owned, so no scenario sees it. */
+  private static final class Planting extends RecursiveAction implements AgentOwned {
+    private static final long serialVersionUID = 1L;
+
+    private final transient ThreadLocal<Planted> local;
+    private final transient Planted holder;
+    private final transient Progress progress;
+
+    Planting(final ThreadLocal<Planted> local, final Planted holder, final Progress progress) {
+      this.local = local;
+      this.holder = holder;
+      this.progress = progress;
+    }
+
+    @Override
+    protected void compute() {
+      @Nullable Throwable failed = null;
+      DispatchDepth.increment();
+      try {
+        local.set(holder);
+        LOGGER.fine(
+            () ->
+                "[chaos-agent] chaos thread-local-leak planted entry on "
+                    + Thread.currentThread().getName());
+      } catch (final RuntimeException | Error failure) {
+        failed = failure;
+        throw failure;
+      } finally {
+        DispatchDepth.decrement();
+        progress.ended(failed);
       }
     }
-
-    // Wait for all planting tasks to complete.
-    for (final ForkJoinTask<?> task : tasks) {
-      task.join();
-    }
-
-    this.plantedLocals = List.copyOf(locals);
   }
 
   @Override
   public void close() {
-    // Submit `parallelism` removal tasks per ThreadLocal. Each planted entry was set on exactly
-    // one worker thread, but work-stealing provides no guarantee that a single removal task lands
-    // on the same worker. Submitting one task per worker per local ensures that every live pool
-    // thread will execute local.remove(), regardless of which worker holds the entry.
-    // remove() is a no-op on threads that never called set(), so the redundant calls are safe.
-    final int parallelism = ForkJoinPool.commonPool().getParallelism();
-    final List<ForkJoinTask<?>> cleanupTasks = new ArrayList<>(plantedLocals.size() * parallelism);
-    for (final ThreadLocal<byte[]> local : plantedLocals) {
-      for (int t = 0; t < parallelism; t++) {
-        cleanupTasks.add(ForkJoinPool.commonPool().submit(local::remove));
-      }
-    }
-    int failedTaskCount = 0;
-    for (final ForkJoinTask<?> task : cleanupTasks) {
-      try {
-        task.join();
-      } catch (final Exception taskFailure) {
-        // Escalate individual failures beyond FINE: a silently swallowed cleanup task means a
-        // planted entry is permanently retained, and operators watching INFO/WARNING logs would
-        // otherwise never learn why plantedCount() reports the original size post-close. The
-        // stack trace is preserved on the per-task warning so the concrete failure (pool
-        // rejection, OOM, unchecked exception from remove()) is attributable.
-        failedTaskCount++;
-        LOGGER.log(
-            java.util.logging.Level.WARNING,
-            "chaos thread-local-leak cleanup task failed",
-            taskFailure);
-      }
-    }
-    if (failedTaskCount > 0) {
-      final int capturedFailureCount = failedTaskCount;
-      LOGGER.warning(
-          () ->
-              "chaos thread-local-leak cleanup completed with "
-                  + capturedFailureCount
-                  + " failed task(s) out of "
-                  + plantedLocals.size()
-                  + "; ThreadLocal entries on affected pool threads may remain until workers"
-                  + " are recycled");
+    for (final Planted holder : planted) {
+      holder.value = null;
     }
   }
 
   /** Returns the number of planted ThreadLocals. */
   int plantedCount() {
-    return plantedLocals.size();
+    return planted.size();
+  }
+
+  /** Returns the bytes the planted entries still hold. */
+  long retainedBytes() {
+    long retained = 0;
+    for (final Planted holder : planted) {
+      final byte[] value = holder.value;
+      if (value != null) {
+        retained += value.length;
+      }
+    }
+    return retained;
   }
 }

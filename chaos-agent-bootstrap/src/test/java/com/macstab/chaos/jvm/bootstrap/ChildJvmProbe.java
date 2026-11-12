@@ -10,6 +10,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -54,6 +55,158 @@ final class ChildJvmProbe {
   }
 
   /**
+   * Runs {@code mainClass mode} in a child JVM without {@code -javaagent:} and without the flags
+   * that allow self-attach ({@code -Djdk.attach.allowAttachSelf}, {@code
+   * -XX:+EnableDynamicAgentLoading}): the launch an application gets by default.
+   *
+   * @param mainClass the probe main class
+   * @param mode the probe mode passed as the first program argument
+   * @return the probe's {@code key=value} output lines, with its stderr
+   */
+  ProbeResult runWithoutAgentOrFlags(final Class<?> mainClass, final String mode) throws Exception {
+    final List<String> command = new ArrayList<>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.add("-cp");
+    command.add(System.getProperty("java.class.path"));
+    command.add(mainClass.getName());
+    command.add(mode);
+    return execute(command);
+  }
+
+  /**
+   * Runs {@code mainClass mode programArgs} in a child JVM without {@code -javaagent:}, for a probe
+   * that is expected to end the JVM with a failure.
+   *
+   * @param mainClass the probe main class
+   * @param mode the probe mode passed as the first program argument
+   * @param programArgs further program arguments
+   * @return the child's exit value and output
+   */
+  Failure runWithoutAgentExpectingFailure(
+      final Class<?> mainClass, final String mode, final String... programArgs) throws Exception {
+    final List<String> command = new ArrayList<>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.add("-Djdk.attach.allowAttachSelf=true");
+    command.add("-XX:+EnableDynamicAgentLoading");
+    command.add("-cp");
+    command.add(System.getProperty("java.class.path"));
+    command.add(mainClass.getName());
+    command.add(mode);
+    command.addAll(List.of(programArgs));
+    final BoundedRun run =
+        runBounded(
+            command,
+            Files.createTempFile(workDir, "expecting-failure-", ".log"),
+            Duration.ofSeconds(TIMEOUT_SECONDS));
+    assertThat(run.finished())
+        .as(
+            "probe JVM must finish within %d s: %s\nthreads:\n%s",
+            TIMEOUT_SECONDS, run.output(), run.threads())
+        .isTrue();
+    return new Failure(run.exitValue(), run.output());
+  }
+
+  /** Exit value and output of a probe run expected to fail. */
+  record Failure(int exitValue, String output) {}
+
+  /**
+   * Runs {@code mainClass mode} in a child JVM with the agent attached and no startup plan.
+   *
+   * @param mainClass the probe main class
+   * @param mode the probe mode passed as the first program argument
+   * @param jvmArgs additional JVM arguments placed before the classpath
+   * @return the probe's {@code key=value} output lines
+   */
+  ProbeResult runWithoutPlan(final Class<?> mainClass, final String mode, final String... jvmArgs)
+      throws Exception {
+    return runWithoutPlanOnClasspath(mainClass, mode, null, jvmArgs);
+  }
+
+  /**
+   * As {@link #runWithoutPlan(Class, String, String...)}, with {@code extraClasspath} appended to
+   * the child's classpath.
+   *
+   * @param mainClass the probe main class
+   * @param mode the probe mode passed as the first program argument
+   * @param extraClasspath extra classpath entries, or {@code null}
+   * @param jvmArgs additional JVM arguments placed before the classpath
+   * @return the probe's {@code key=value} output lines
+   */
+  ProbeResult runWithoutPlanOnClasspath(
+      final Class<?> mainClass,
+      final String mode,
+      final String extraClasspath,
+      final String... jvmArgs)
+      throws Exception {
+    final List<String> command = new ArrayList<>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.add("-javaagent:" + System.getProperty("chaos.bootstrap.agentJar"));
+    command.addAll(List.of(jvmArgs));
+    command.add("-cp");
+    final String baseClasspath = System.getProperty("java.class.path");
+    command.add(
+        extraClasspath == null || extraClasspath.isEmpty()
+            ? baseClasspath
+            : baseClasspath + File.pathSeparator + extraClasspath);
+    command.add(mainClass.getName());
+    command.add(mode);
+    return execute(command);
+  }
+
+  /**
+   * Runs {@code mainClass mode} in a child JVM whose agent classes all come from the agent jar: the
+   * classpath holds the test classes only, none of the project's modules or their libraries, so the
+   * shaded jar is what runs.
+   *
+   * @param mainClass the probe main class
+   * @param mode the probe mode passed as the first program argument
+   * @param jvmArgs additional JVM arguments placed before the classpath
+   * @return the probe's {@code key=value} output lines
+   */
+  ProbeResult runShadedOnly(final Class<?> mainClass, final String mode, final String... jvmArgs)
+      throws Exception {
+    final List<String> command = new ArrayList<>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.add("-javaagent:" + System.getProperty("chaos.bootstrap.agentJar"));
+    command.addAll(List.of(jvmArgs));
+    command.add("-cp");
+    command.add(
+        Path.of(mainClass.getProtectionDomain().getCodeSource().getLocation().toURI()).toString());
+    command.add(mainClass.getName());
+    command.add(mode);
+    // Without the coverage agent: the agent jar's classes are other class files than the
+    // module classes the child coverage is mapped onto, and would replace their data.
+    return executeAsIs(command);
+  }
+
+  /**
+   * Runs {@code mainClass mode} in a child JVM in the fat-jar shape: the class path holds the test
+   * classes only, and the probe loads the agent jar ({@code chaos.bootstrap.agentJar}) in a class
+   * loader of its own and self-attaches.
+   *
+   * @param mainClass the probe main class
+   * @param mode the probe mode passed as the first program argument
+   * @param jvmArgs additional JVM arguments placed before the classpath
+   * @return the probe's {@code key=value} output lines, with its stderr
+   */
+  ProbeResult runInFatJarShape(final Class<?> mainClass, final String mode, final String... jvmArgs)
+      throws Exception {
+    final List<String> command = new ArrayList<>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.add("-Djdk.attach.allowAttachSelf=true");
+    command.add("-XX:+EnableDynamicAgentLoading");
+    command.add("-Dchaos.bootstrap.agentJar=" + System.getProperty("chaos.bootstrap.agentJar"));
+    command.addAll(List.of(jvmArgs));
+    command.add("-cp");
+    command.add(
+        Path.of(mainClass.getProtectionDomain().getCodeSource().getLocation().toURI()).toString());
+    command.add(mainClass.getName());
+    command.add(mode);
+    // Without the coverage agent, as runShadedOnly.
+    return executeAsIs(command);
+  }
+
+  /**
    * Runs {@code mainClass mode} in a child JVM with the agent attached and {@code plan} loaded.
    *
    * @param plan the plan written to the child's config file
@@ -90,30 +243,152 @@ final class ChildJvmProbe {
     return execute(command);
   }
 
-  private static ProbeResult execute(final List<String> command) throws Exception {
+  /**
+   * The JVM options that record the child's coverage, placed before every other agent: the JaCoCo
+   * agent named by {@code chaos.test.jacocoAgent}, appending to {@code chaos.test.jacocoExec}, for
+   * the agent's own classes (the bootstrap-loaded bridge included, the shaded libraries not). Empty
+   * when the build does not ask for coverage.
+   *
+   * @return the options, or an empty list
+   */
+  static List<String> coverageAgent() {
+    final String agent = System.getProperty("chaos.test.jacocoAgent");
+    final String exec = System.getProperty("chaos.test.jacocoExec");
+    if (agent == null || agent.isBlank() || exec == null || exec.isBlank()) {
+      return List.of();
+    }
+    return List.of(
+        "-javaagent:"
+            + agent
+            + "=destfile="
+            + exec
+            + ",append=true,inclbootstrapclasses=true"
+            + ",includes=com.macstab.chaos.jvm.*,excludes=com.macstab.chaos.jvm.shaded.*");
+  }
+
+  private static ProbeResult execute(final List<String> base) throws Exception {
+    final List<String> command = new ArrayList<>(base);
+    command.addAll(1, coverageAgent());
+    return executeAsIs(command);
+  }
+
+  private static ProbeResult executeAsIs(final List<String> command) throws Exception {
     final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-    final List<String> lines = new ArrayList<>();
-    try (final BufferedReader reader =
-        new BufferedReader(
-            new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-      String line;
-      while ((line = reader.readLine()) != null) {
-        lines.add(line);
-      }
-    }
+    final List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
+    // Read on another thread: reading to the end first would block until the child exits, so a
+    // hanging child would never reach the timeout below.
+    final Thread reader =
+        Thread.ofPlatform()
+            .daemon()
+            .start(
+                () -> {
+                  try (BufferedReader in =
+                      new BufferedReader(
+                          new InputStreamReader(
+                              process.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = in.readLine()) != null) {
+                      lines.add(line);
+                    }
+                  } catch (final java.io.IOException closed) {
+                    // the process was destroyed
+                  }
+                });
     final boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+    final String threads = finished ? "" : threadDump(process);
     if (!finished) {
-      process.destroyForcibly();
+      stop(process);
     }
+    reader.join(TimeUnit.SECONDS.toMillis(5));
     final String output = String.join("\n", lines);
     assertThat(finished)
-        .as("probe JVM must finish within %d s: %s", TIMEOUT_SECONDS, output)
+        .as("probe JVM must finish within %d s: %s\nthreads:\n%s", TIMEOUT_SECONDS, output, threads)
         .isTrue();
     assertThat(process.exitValue()).as("probe JVM exit value, output:\n%s", output).isZero();
     return new ProbeResult(output, parse(lines));
   }
 
-  private static Map<String, String> parse(final List<String> lines) {
+  /**
+   * Runs {@code command} as it is (no coverage agent added, no exit value asserted) with its output
+   * and errors written to {@code log}: a file, not a pipe, so a child that prints a lot never
+   * blocks on a full pipe nobody reads. Waits at most {@code timeout}; a child still running then
+   * has its threads dumped and is destroyed, so no test leaves a child JVM behind.
+   *
+   * @param command the command line
+   * @param log the file that receives the child's output
+   * @param timeout how long the child may run
+   * @return whether the child finished, its exit value and its output
+   */
+  static BoundedRun runBounded(final List<String> command, final Path log, final Duration timeout)
+      throws Exception {
+    final Process process =
+        new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile()).start();
+    try {
+      final boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+      final String threads = finished ? "" : threadDump(process);
+      if (!finished) {
+        stop(process);
+      }
+      final List<String> lines = Files.readAllLines(log);
+      return new BoundedRun(
+          finished,
+          finished ? process.exitValue() : -1,
+          String.join("\n", lines),
+          lines,
+          threads,
+          process.pid());
+    } finally {
+      if (process.isAlive()) {
+        process.destroyForcibly();
+      }
+    }
+  }
+
+  /**
+   * Stops a child that outlived its timeout as a shutdown would ({@code SIGTERM}), so its shutdown
+   * hooks run and its JaCoCo agent writes the coverage the child recorded, and forcibly when it has
+   * not ended 10 s later. A forcibly stopped child writes no coverage; its test fails on the
+   * timeout either way.
+   *
+   * @param process the child
+   * @throws InterruptedException when interrupted while waiting for the child to end
+   */
+  static void stop(final Process process) throws InterruptedException {
+    process.destroy();
+    if (!process.waitFor(10, TimeUnit.SECONDS)) {
+      process.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
+    }
+  }
+
+  /**
+   * A bounded child run.
+   *
+   * @param finished whether the child exited within the timeout
+   * @param exitValue its exit value; {@code -1} when it did not finish
+   * @param output its output, one line per line
+   * @param lines its output lines
+   * @param threads its thread dump when it did not finish, else empty
+   * @param pid its process id
+   */
+  record BoundedRun(
+      boolean finished,
+      int exitValue,
+      String output,
+      List<String> lines,
+      String threads,
+      long pid) {
+
+    /** The {@code key=value} lines of the output, as {@link #parse(List)} reads them. */
+    ProbeResult result() {
+      return new ProbeResult(output, parse(lines));
+    }
+  }
+
+  /**
+   * Reads the {@code key=value} lines a probe printed, the one parser of probe output; later keys
+   * overwrite earlier ones, and indented or bracketed lines (stack traces, agent logs) are skipped.
+   */
+  static Map<String, String> parse(final List<String> lines) {
     final Map<String, String> values = new LinkedHashMap<>();
     for (final String line : lines) {
       final int separator = line.indexOf('=');
@@ -138,6 +413,44 @@ final class ChildJvmProbe {
     /** Returns the value printed for {@code key} as a {@code long}. */
     long longValue(final String key) {
       return Long.parseLong(value(key));
+    }
+  }
+
+  /**
+   * The threads of a probe JVM that did not finish, from {@code jcmd Thread.print}, so a hang
+   * reports where it stuck; empty when the dump itself fails.
+   */
+  static String threadDump(final Process process) {
+    try {
+      // The dump goes to a file, not a pipe: a jcmd that never ends must not block this read, so
+      // it is waited for at most 10 s and then destroyed.
+      final Path dump = Files.createTempFile("chaos-thread-dump-", ".txt");
+      try {
+        final Process jcmd =
+            new ProcessBuilder(
+                    Path.of(System.getProperty("java.home"), "bin", "jcmd").toString(),
+                    Long.toString(process.pid()),
+                    "Thread.print")
+                .redirectErrorStream(true)
+                .redirectOutput(dump.toFile())
+                .start();
+        try {
+          if (!jcmd.waitFor(10, TimeUnit.SECONDS)) {
+            jcmd.destroyForcibly().waitFor(5, TimeUnit.SECONDS);
+            return "(no thread dump: jcmd did not finish within 10 s)\n"
+                + Files.readString(dump, StandardCharsets.UTF_8);
+          }
+          return Files.readString(dump, StandardCharsets.UTF_8);
+        } finally {
+          if (jcmd.isAlive()) {
+            jcmd.destroyForcibly();
+          }
+        }
+      } finally {
+        Files.deleteIfExists(dump);
+      }
+    } catch (final java.io.IOException | InterruptedException failed) {
+      return "(no thread dump: " + failed + ")";
     }
   }
 }

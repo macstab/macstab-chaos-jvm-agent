@@ -13,9 +13,9 @@ import com.macstab.chaos.jvm.api.OperationType;
 import java.lang.instrument.Instrumentation;
 import java.net.URL;
 import java.time.Clock;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Thin facade that composes {@link ChaosControlPlaneImpl} and {@link ChaosDispatcher}.
@@ -35,9 +35,26 @@ import java.util.concurrent.CompletableFuture;
 @Internal
 public final class ChaosRuntime implements ChaosControlPlane {
   private final ChaosControlPlaneImpl controlPlane;
+
+  /** Whether this is the runtime the agent installed for the whole JVM; see {@link #close()}. */
+  private volatile boolean jvmWide;
+
   private final ChaosDispatcher dispatcher;
 
+  // The dispatch domains, held directly: one field load per dispatch instead of two.
+  private final ThreadDispatch threadDispatch;
+  private final ExecutorDispatch executorDispatch;
+  private final MethodDispatch methodDispatch;
+  private final ClockDispatch clockDispatch;
+  private final RuntimeDispatch runtimeDispatch;
+  private final NetworkDispatch networkDispatch;
+  private final DnsDispatch dnsDispatch;
+  private final FileDispatch fileDispatch;
+  private final ProcessDispatch processDispatch;
+  private final ClientDispatch clientDispatch;
+
   /** Creates a runtime using the system UTC clock and a no-op metrics sink. */
+  @SuppressWarnings("removal") // the deprecated sink's no-op
   public ChaosRuntime() {
     this(Clock.systemUTC(), ChaosMetricsSink.NOOP);
   }
@@ -48,9 +65,20 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param clock the clock used for scheduling and timestamping
    * @param metricsSink the metrics sink to receive observability events
    */
+  @SuppressWarnings("removal") // the deprecated sink is still fed until it is removed
   public ChaosRuntime(final Clock clock, final ChaosMetricsSink metricsSink) {
     this.controlPlane = new ChaosControlPlaneImpl(clock, metricsSink);
     this.dispatcher = new ChaosDispatcher(controlPlane);
+    this.threadDispatch = dispatcher.thread();
+    this.executorDispatch = dispatcher.executor();
+    this.methodDispatch = dispatcher.method();
+    this.clockDispatch = dispatcher.clock();
+    this.runtimeDispatch = dispatcher.runtime();
+    this.networkDispatch = dispatcher.network();
+    this.dnsDispatch = dispatcher.dns();
+    this.fileDispatch = dispatcher.file();
+    this.processDispatch = dispatcher.process();
+    this.clientDispatch = dispatcher.client();
   }
 
   /**
@@ -77,13 +105,108 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   @Override
+  public ChaosSession.ScopeBinding bindSession(final @Nullable String sessionId) {
+    return controlPlane.bindSession(sessionId);
+  }
+
+  /**
+   * Validates a scenario as {@link #activate(ChaosScenario)} would, without activating it: nothing
+   * is registered, but a refusal is recorded in the diagnostics and published as {@code FAILED}, as
+   * an activation's is (L21).
+   *
+   * @param scenario the scenario
+   * @throws com.macstab.chaos.jvm.api.ChaosActivationException if the scenario is session-scoped
+   * @throws com.macstab.chaos.jvm.api.ChaosValidationException if the scenario is invalid
+   * @throws com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException if the runtime cannot run it
+   */
+  public void validate(final ChaosScenario scenario) {
+    controlPlane.validate(scenario);
+  }
+
+  /**
+   * Weaves the hooks a scenario needs, as {@link #activate(ChaosScenario)} would, without
+   * activating it: its hook groups, and its method selector added to the ones woven already (a
+   * selector whose scenario is never activated is removed at the next removal). A weaving failure
+   * is recorded in the diagnostics and published as {@code FAILED}.
+   *
+   * @param scenario the scenario
+   * @throws com.macstab.chaos.jvm.api.ChaosInstrumentationException if its hooks cannot be woven
+   *     (the weaving failure is the cause)
+   * @throws com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException if the runtime cannot weave
+   */
+  public void requireHooks(final ChaosScenario scenario) {
+    controlPlane.requireHooks(scenario);
+  }
+
+  /**
+   * Returns whether a JVM-scoped scenario with this id is live (registered and not finished): an
+   * activation of the same id would be a conflict.
+   *
+   * @param scenarioId the scenario id
+   * @return {@code true} when the id is taken
+   */
+  public boolean isActive(final String scenarioId) {
+    return controlPlane.isLive(scenarioId);
+  }
+
+  /**
+   * Applies a plan's observability settings to JVM-scoped scenarios activated one by one (the
+   * plan-file reloader does this); {@link #activate(ChaosPlan)} applies them itself.
+   *
+   * @param scenarioIds the plan's scenario ids
+   * @param observability the plan's settings
+   * @param owner the plan the settings belong to; only it can clear them
+   */
+  public void applyPlanObservability(
+      final java.util.Collection<String> scenarioIds,
+      final ChaosPlan.Observability observability,
+      final Object owner) {
+    controlPlane.applyPlanObservability("jvm", scenarioIds, observability, owner);
+  }
+
+  /**
+   * Restores the default observability of JVM-scoped scenarios that left {@code owner}'s plan.
+   *
+   * @param scenarioIds the scenario ids
+   * @param owner the owner that applied the settings
+   */
+  public void clearPlanObservability(
+      final java.util.Collection<String> scenarioIds, final Object owner) {
+    controlPlane.clearPlanObservability("jvm", scenarioIds, owner);
+  }
+
+  /**
+   * Returns whether JMX may list and dump the scenario.
+   *
+   * @param scopeKey the scenario's scope, as {@link
+   *     com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioReport#scopeKey()} reports it
+   * @param scenarioId the scenario id
+   * @return {@code false} when its plan set {@code jmxEnabled=false}
+   */
+  public boolean jmxVisible(final String scopeKey, final String scenarioId) {
+    return controlPlane.jmxVisible(scopeKey, scenarioId);
+  }
+
+  /**
+   * Returns the diagnostics dump restricted to scenarios {@code include} accepts.
+   *
+   * @param include whether a scenario is part of the dump
+   * @return the dump
+   */
+  public String debugDump(
+      final java.util.function.Predicate<com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioReport>
+          include) {
+    return controlPlane.debugDump(include);
+  }
+
+  @Override
   public ChaosActivationHandle activate(final ChaosPlan plan) {
     return controlPlane.activate(plan);
   }
 
   @Override
   public ChaosSession openSession(final String displayName) {
-    return controlPlane.openSession(displayName, this);
+    return controlPlane.openSession(displayName);
   }
 
   @Override
@@ -97,7 +220,61 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   @Override
+  public boolean removeEventListener(final ChaosEventListener listener) {
+    return controlPlane.removeEventListener(listener);
+  }
+
+  /**
+   * Registers a listener of the agent's own that never reads {@code SKIPPED} events (the JFR sink,
+   * the reports' hit counter): it receives every event, but does not make the runtime build the
+   * {@code SKIPPED} events that exist only for observers. Closed by {@link #close()} like every
+   * listener.
+   *
+   * @param listener the listener
+   */
+  @Internal
+  public void addLifecycleListener(final ChaosEventListener listener) {
+    controlPlane.addLifecycleListener(listener);
+  }
+
+  /**
+   * Removes a listener registered with {@link #addLifecycleListener}.
+   *
+   * @param listener the listener as it was registered
+   * @return {@code true} if it was registered
+   */
+  @Internal
+  public boolean removeLifecycleListener(final ChaosEventListener listener) {
+    return controlPlane.removeEventListener(listener);
+  }
+
+  /**
+   * Marks this runtime as the one the agent installed for the whole JVM ({@code ChaosPlatform}):
+   * its {@link #close()} is refused from then on, since every caller of {@code
+   * ChaosPlatform.installLocally()} and {@code current()}, the management endpoints and the plan
+   * file poller share it. Called by the bootstrap when it publishes the runtime.
+   */
+  @Internal
+  public void markJvmWide() {
+    jvmWide = true;
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * @throws UnsupportedOperationException if this is the JVM-wide runtime the agent installed
+   *     ({@code ChaosPlatform.installLocally()}, {@code current()}): stop or close the handles and
+   *     sessions instead, or activate through a {@code TrackingChaosControlPlane}
+   *     (chaos-agent-testkit) and call its {@code stopTracked()}
+   */
+  @Override
   public void close() {
+    if (jvmWide) {
+      throw new UnsupportedOperationException(
+          "the chaos control plane of ChaosPlatform is JVM-wide and cannot be closed: close the"
+              + " handles and sessions you opened, or activate through a"
+              + " TrackingChaosControlPlane and call stopTracked()");
+    }
     controlPlane.close();
   }
 
@@ -106,12 +283,12 @@ public final class ChaosRuntime implements ChaosControlPlane {
    *
    * @return the current thread-bound session id, or {@code null} if no session is active
    */
-  public String currentSessionId() {
+  public @Nullable String currentSessionId() {
     return dispatcher.currentSessionId();
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#decorateExecutorRunnable}.
+   * Delegates to {@link ExecutorDispatch#decorateExecutorRunnable}.
    *
    * @param operation the {@link OperationType} name for the submission
    * @param executor the executor receiving the submission
@@ -119,12 +296,12 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the decorated runnable produced by the dispatcher
    */
   public Runnable decorateExecutorRunnable(
-      final String operation, final Object executor, final Runnable task) {
-    return dispatcher.decorateExecutorRunnable(operation, executor, task);
+      final String operation, final @Nullable Object executor, final Runnable task) {
+    return executorDispatch.decorateExecutorRunnable(operation, executor, task);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#decorateExecutorCallable}.
+   * Delegates to {@link ExecutorDispatch#decorateExecutorCallable}.
    *
    * @param <T> the callable's result type
    * @param operation the {@link OperationType} name for the submission
@@ -133,92 +310,72 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the decorated callable produced by the dispatcher
    */
   public <T> Callable<T> decorateExecutorCallable(
-      final String operation, final Object executor, final Callable<T> task) {
-    return dispatcher.decorateExecutorCallable(operation, executor, task);
+      final String operation, final @Nullable Object executor, final Callable<T> task) {
+    return executorDispatch.decorateExecutorCallable(operation, executor, task);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeThreadStart}.
+   * Delegates to {@link ThreadDispatch#beforeThreadStart(Thread, boolean)}.
    *
    * @param thread the thread being started
+   * @param poolWorker whether a thread pool is starting one of its workers
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeThreadStart(final Thread thread) throws Throwable {
-    dispatcher.beforeThreadStart(thread);
+  public void beforeThreadStart(final Thread thread, final boolean poolWorker) throws Throwable {
+    threadDispatch.beforeThreadStart(thread, poolWorker);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeWorkerRun}.
+   * Delegates to {@link ExecutorDispatch#beforeWorkerRun}.
    *
    * @param executor the executor owning the worker
    * @param worker the worker thread about to run the task
    * @param task the task being run, or {@code null} if not yet known
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeWorkerRun(final Object executor, final Thread worker, final Runnable task)
-      throws Throwable {
-    dispatcher.beforeWorkerRun(executor, worker, task);
+  public void beforeWorkerRun(
+      final Object executor, final Thread worker, final @Nullable Runnable task) throws Throwable {
+    executorDispatch.beforeWorkerRun(executor, worker, task);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeForkJoinTaskRun}.
+   * Delegates to {@link ExecutorDispatch#beforeForkJoinTaskRun}.
    *
    * @param task the fork-join task about to execute
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeForkJoinTaskRun(final java.util.concurrent.ForkJoinTask<?> task)
       throws Throwable {
-    dispatcher.beforeForkJoinTaskRun(task);
+    executorDispatch.beforeForkJoinTaskRun(task);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustScheduleDelay}.
-   *
-   * @param operation the {@link OperationType} name for the schedule operation
-   * @param executor the scheduling executor
-   * @param task the task being scheduled
-   * @param delay the originally requested delay
-   * @param periodic {@code true} if the submission is periodic
-   * @return the possibly-adjusted delay, or {@link Long#MAX_VALUE} to effectively suppress the
-   *     schedule
-   * @throws Throwable if an active scenario throws to simulate a failure
-   */
-  public long adjustScheduleDelay(
-      final String operation,
-      final Object executor,
-      final Object task,
-      final long delay,
-      final boolean periodic)
-      throws Throwable {
-    return dispatcher.adjustScheduleDelay(operation, executor, task, delay, periodic);
-  }
-
-  /**
-   * Delegates to {@link ChaosDispatcher#beforeQueueOperation}.
+   * Delegates to {@link ExecutorDispatch#beforeQueueOperation}.
    *
    * @param operation the {@link OperationType} name for the queue operation
    * @param queue the queue being operated on
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeQueueOperation(final String operation, final Object queue) throws Throwable {
-    dispatcher.beforeQueueOperation(operation, queue);
+  public void beforeQueueOperation(final String operation, final @Nullable Object queue)
+      throws Throwable {
+    executorDispatch.beforeQueueOperation(operation, queue);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeBooleanQueueOperation}.
+   * Delegates to {@link ExecutorDispatch#beforeBooleanQueueOperation}.
    *
    * @param operation the {@link OperationType} name for the queue operation
    * @param queue the queue being operated on
    * @return an override result from the queue operation, or {@code null} to proceed normally
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
-      throws Throwable {
-    return dispatcher.beforeBooleanQueueOperation(operation, queue);
+  public @Nullable Boolean beforeBooleanQueueOperation(
+      final String operation, final @Nullable Object queue) throws Throwable {
+    return executorDispatch.beforeBooleanQueueOperation(operation, queue);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeCompletableFutureComplete}.
+   * Delegates to {@link ExecutorDispatch#beforeCompletableFutureComplete}.
    *
    * @param operation the {@link OperationType} name for the completion operation
    * @param future the future being completed
@@ -227,25 +384,26 @@ public final class ChaosRuntime implements ChaosControlPlane {
    *     normally
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public Boolean beforeCompletableFutureComplete(
-      final String operation, final CompletableFuture<?> future, final Object payload)
+  public @Nullable Boolean beforeCompletableFutureComplete(
+      final String operation, final CompletableFuture<?> future, final @Nullable Object payload)
       throws Throwable {
-    return dispatcher.beforeCompletableFutureComplete(operation, future, payload);
+    return executorDispatch.beforeCompletableFutureComplete(operation, future, payload);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeClassLoad}.
+   * Delegates to {@link RuntimeDispatch#beforeClassLoad}.
    *
    * @param loader the class loader performing the load (may be {@code null} for bootstrap)
    * @param className the binary class name being loaded
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeClassLoad(final ClassLoader loader, final String className) throws Throwable {
-    dispatcher.beforeClassLoad(loader, className);
+  public void beforeClassLoad(final @Nullable ClassLoader loader, final String className)
+      throws Throwable {
+    runtimeDispatch.beforeClassLoad(loader, className);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#afterResourceLookup}.
+   * Delegates to {@link RuntimeDispatch#afterResourceLookup}.
    *
    * @param loader the class loader performing the lookup (may be {@code null} for bootstrap)
    * @param name the resource name being looked up
@@ -253,34 +411,34 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the (possibly substituted) URL to return to the caller
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public URL afterResourceLookup(
-      final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
-    return dispatcher.afterResourceLookup(loader, name, currentValue);
+  public @Nullable URL afterResourceLookup(
+      final @Nullable ClassLoader loader, final String name, final @Nullable URL currentValue)
+      throws Throwable {
+    return runtimeDispatch.afterResourceLookup(loader, name, currentValue);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#decorateShutdownHook}.
+   * Delegates to {@link ChaosDispatcher#idle(String)}.
    *
-   * @param hook the original shutdown hook being registered
-   * @return the wrapper thread that should actually be registered with the runtime
+   * @param operationTag the operation tag the bridge passes
+   * @return {@code true} when no scenario is indexed for the operation
+   */
+  public boolean idle(final String operationTag) {
+    return dispatcher.idle(operationTag);
+  }
+
+  /**
+   * Delegates to {@link ExecutorDispatch#decorateShutdownHook}.
+   *
+   * @param hook the shutdown hook being registered
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public Thread decorateShutdownHook(final Thread hook) throws Throwable {
-    return dispatcher.decorateShutdownHook(hook);
+  public void decorateShutdownHook(final @Nullable Thread hook) throws Throwable {
+    executorDispatch.decorateShutdownHook(hook);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#resolveShutdownHook}.
-   *
-   * @param original the original shutdown hook that was registered
-   * @return the wrapper thread, or {@code original} if no wrapper is registered
-   */
-  public Thread resolveShutdownHook(final Thread original) {
-    return dispatcher.resolveShutdownHook(original);
-  }
-
-  /**
-   * Delegates to {@link ChaosDispatcher#beforeExecutorShutdown}.
+   * Delegates to {@link ExecutorDispatch#beforeExecutorShutdown}.
    *
    * @param operation the {@link OperationType} name for the shutdown operation
    * @param executor the executor being shut down
@@ -289,11 +447,11 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public void beforeExecutorShutdown(
       final String operation, final Object executor, final long timeoutMillis) throws Throwable {
-    dispatcher.beforeExecutorShutdown(operation, executor, timeoutMillis);
+    executorDispatch.beforeExecutorShutdown(operation, executor, timeoutMillis);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeScheduledTick}.
+   * Delegates to {@link ExecutorDispatch#beforeScheduledTick}.
    *
    * @param executor the scheduling executor running the tick
    * @param task the task being ticked
@@ -302,8 +460,9 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public boolean beforeScheduledTick(
-      final Object executor, final Object task, final boolean periodic) throws Throwable {
-    return dispatcher.beforeScheduledTick(executor, task, periodic);
+      final @Nullable Object executor, final @Nullable Object task, final boolean periodic)
+      throws Throwable {
+    return executorDispatch.beforeScheduledTick(executor, task, periodic);
   }
 
   /**
@@ -312,8 +471,9 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * Quarkus interceptors, or your own bytecode advice) at the start of every intercepted method to
    * give chaos scenarios a chance to inject an exception before the body runs.
    *
-   * <p>The agent does <i>not</i> auto-rewrite arbitrary user methods, so the entry event must be
-   * raised here. A matching {@code MethodSelector} scenario with {@link
+   * <p>For use without the agent (a plain {@code ChaosRuntime} in a unit test). With the agent
+   * attached, a {@code MethodSelector} scenario weaves its methods itself; calling this hook for
+   * them as well evaluates each call twice. A matching {@code MethodSelector} scenario with {@link
    * com.macstab.chaos.jvm.api.ChaosEffect.ExceptionInjectionEffect} causes this method to throw the
    * configured exception type.
    *
@@ -333,7 +493,42 @@ public final class ChaosRuntime implements ChaosControlPlane {
    *     no-op if no scenario matches
    */
   public void beforeMethodEnter(final String className, final String methodName) throws Throwable {
-    dispatcher.beforeMethodEnter(className, methodName);
+    methodDispatch.beforeMethodEnter(className, methodName);
+  }
+
+  /**
+   * Delegates to {@link MethodDispatch#beforeMethodEnter(Class, String, String)}: the entry of a
+   * method woven for a {@code MethodSelector}.
+   *
+   * @param declaringType the class declaring the method
+   * @param methodName the method name
+   * @param descriptor the method's JVM descriptor
+   * @throws Throwable if a matching scenario injects an exception
+   */
+  public void beforeMethodEnter(
+      final Class<?> declaringType, final String methodName, final String descriptor)
+      throws Throwable {
+    methodDispatch.beforeMethodEnter(declaringType, methodName, descriptor);
+  }
+
+  /**
+   * Delegates to {@link MethodDispatch#afterMethodExit(Class, String, String, Object)}: the normal
+   * exit of a method woven for a {@code MethodSelector}.
+   *
+   * @param declaringType the class declaring the method
+   * @param methodName the method name
+   * @param descriptor the method's JVM descriptor
+   * @param actualValue the returned value, boxed; {@code null} for a void method
+   * @return the (possibly corrupted) value to return
+   * @throws Throwable if a matching scenario fails the call
+   */
+  public @Nullable Object afterMethodExit(
+      final Class<?> declaringType,
+      final String methodName,
+      final String descriptor,
+      final @Nullable Object actualValue)
+      throws Throwable {
+    return methodDispatch.afterMethodExit(declaringType, methodName, descriptor, actualValue);
   }
 
   /**
@@ -366,17 +561,17 @@ public final class ChaosRuntime implements ChaosControlPlane {
    *     METHOD_EXIT}, thrown after the method body ran ({@code ExceptionInjectionEffect} is valid
    *     on {@code METHOD_ENTER} only)
    */
-  public Object afterMethodExit(
+  public @Nullable Object afterMethodExit(
       final String className,
       final String methodName,
-      final Class<?> returnType,
+      final @Nullable Class<?> returnType,
       final Object actualValue)
       throws Throwable {
-    return dispatcher.afterMethodExit(className, methodName, returnType, actualValue);
+    return methodDispatch.afterMethodExit(className, methodName, returnType, actualValue);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#applyClockSkew}.
+   * Delegates to {@link ClockDispatch#applyClockSkew}.
    *
    * @param realValue the raw clock value as read from the OS
    * @param clockType {@link OperationType#SYSTEM_CLOCK_MILLIS} or {@link
@@ -384,7 +579,20 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the skewed (or unchanged) clock value
    */
   public long applyClockSkew(final long realValue, final OperationType clockType) {
-    return dispatcher.applyClockSkew(realValue, clockType);
+    return clockDispatch.applyClockSkew(realValue, clockType);
+  }
+
+  /**
+   * Installs the callback that weaves hooks on demand. Called by the agent bootstrap once the
+   * instrumentation is installed; without it (plain unit tests) activation weaves nothing.
+   *
+   * @param demand the hook demand; never {@code null}
+   */
+  public void setHookDemand(final HookDemand demand) {
+    // The installer connects the runtime here, after it injected the bootstrap dispatcher.
+    DispatchDepth.forgetAbsent();
+    ExpiryScheduler.adoptAfterInstall();
+    controlPlane.setHookDemand(demand);
   }
 
   /**
@@ -417,7 +625,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    *     {@code realMillis} unchanged otherwise
    */
   public long adjustClockMillis(final long realMillis) {
-    return dispatcher.adjustClockMillis(realMillis);
+    return clockDispatch.adjustClockMillis(realMillis);
   }
 
   /**
@@ -435,21 +643,41 @@ public final class ChaosRuntime implements ChaosControlPlane {
    *     {@code realNanos} unchanged otherwise
    */
   public long adjustClockNanos(final long realNanos) {
-    return dispatcher.adjustClockNanos(realNanos);
+    return clockDispatch.adjustClockNanos(realNanos);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustInstantNow}.
+   * Delegates to {@link ClockDispatch#adjustInstantNow}.
    *
    * @param realInstant the real current instant
    * @return adjusted instant
    */
   public java.time.Instant adjustInstantNow(final java.time.Instant realInstant) {
-    return dispatcher.adjustInstantNow(realInstant);
+    return clockDispatch.adjustInstantNow(realInstant);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustLocalDateTimeNowInZone}.
+   * Delegates to {@link ClockDispatch#adjustClockInstant}.
+   *
+   * @param realInstant the instant the system clock read
+   * @return the (possibly skewed) instant
+   */
+  public java.time.Instant adjustClockInstant(final java.time.Instant realInstant) {
+    return clockDispatch.adjustClockInstant(realInstant);
+  }
+
+  /**
+   * Delegates to {@link ClockDispatch#adjustClockReadMillis}.
+   *
+   * @param realMillis the milliseconds the system clock read
+   * @return the (possibly skewed) milliseconds
+   */
+  public long adjustClockReadMillis(final long realMillis) {
+    return clockDispatch.adjustClockReadMillis(realMillis);
+  }
+
+  /**
+   * Delegates to {@link ClockDispatch#adjustLocalDateTimeNowInZone}.
    *
    * @param realValue the real local date-time
    * @param zone the zone {@code LocalDateTime.now(ZoneId)} was called with
@@ -457,255 +685,386 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public java.time.LocalDateTime adjustLocalDateTimeNowInZone(
       final java.time.LocalDateTime realValue, final java.time.ZoneId zone) {
-    return dispatcher.adjustLocalDateTimeNowInZone(realValue, zone);
+    return clockDispatch.adjustLocalDateTimeNowInZone(realValue, zone);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustLocalDateTimeNow}.
+   * Delegates to {@link ClockDispatch#adjustLocalDateTimeNow}.
    *
    * @param realValue the real current local date-time
    * @return adjusted local date-time
    */
   public java.time.LocalDateTime adjustLocalDateTimeNow(final java.time.LocalDateTime realValue) {
-    return dispatcher.adjustLocalDateTimeNow(realValue);
+    return clockDispatch.adjustLocalDateTimeNow(realValue);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustZonedDateTimeNow}.
+   * Delegates to {@link ClockDispatch#adjustZonedDateTimeNow}.
    *
    * @param realValue the real current zoned date-time
    * @return adjusted zoned date-time
    */
   public java.time.ZonedDateTime adjustZonedDateTimeNow(final java.time.ZonedDateTime realValue) {
-    return dispatcher.adjustZonedDateTimeNow(realValue);
+    return clockDispatch.adjustZonedDateTimeNow(realValue);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustDateNew}.
+   * Delegates to {@link ClockDispatch#adjustDateNew}.
    *
    * @param realMillis real wall-clock time in milliseconds
    * @return adjusted time in milliseconds
    */
   public long adjustDateNew(final long realMillis) {
-    return dispatcher.adjustDateNew(realMillis);
+    return clockDispatch.adjustDateNew(realMillis);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeGcRequest}.
+   * Delegates to {@link RuntimeDispatch#beforeGcRequest}.
    *
-   * @return {@code true} if the GC request should proceed
+   * @return {@code true} to suppress the real {@code System.gc()} call, {@code false} to let it
+   *     proceed
    * @throws Throwable if a chaos effect injects an exception
    */
   public boolean beforeGcRequest() throws Throwable {
-    return dispatcher.beforeGcRequest();
+    return runtimeDispatch.beforeGcRequest();
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeExitRequest}.
+   * Delegates to {@link RuntimeDispatch#beforeExitRequest}.
    *
    * @param status the requested exit status code
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeExitRequest(final int status) throws Throwable {
-    dispatcher.beforeExitRequest(status);
+    runtimeDispatch.beforeExitRequest(status);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeReflectionInvoke}.
+   * Delegates to {@link RuntimeDispatch#beforeReflectionInvoke}.
    *
    * @param method the reflective method being invoked
    * @param target the target object
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeReflectionInvoke(final Object method, final Object target) throws Throwable {
-    dispatcher.beforeReflectionInvoke(method, target);
+  public void beforeReflectionInvoke(final Object method, final @Nullable Object target)
+      throws Throwable {
+    runtimeDispatch.beforeReflectionInvoke(method, target);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeDirectBufferAllocate}.
+   * Delegates to {@link RuntimeDispatch#beforeDirectBufferAllocate}.
    *
    * @param capacity requested buffer capacity in bytes
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeDirectBufferAllocate(final int capacity) throws Throwable {
-    dispatcher.beforeDirectBufferAllocate(capacity);
+    runtimeDispatch.beforeDirectBufferAllocate(capacity);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeObjectDeserialize}.
+   * Delegates to {@link RuntimeDispatch#beforeObjectDeserialize}.
    *
    * @param stream the ObjectInputStream being read
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeObjectDeserialize(final Object stream) throws Throwable {
-    dispatcher.beforeObjectDeserialize(stream);
+    runtimeDispatch.beforeObjectDeserialize(stream);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeClassDefine}.
+   * Delegates to {@link RuntimeDispatch#beforeClassDefine}.
    *
    * @param loader the class loader defining the class
    * @param className the binary name of the class being defined
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeClassDefine(final Object loader, final String className) throws Throwable {
-    dispatcher.beforeClassDefine(loader, className);
+  public void beforeClassDefine(final Object loader, final @Nullable String className)
+      throws Throwable {
+    runtimeDispatch.beforeClassDefine(loader, className);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeMonitorEnter}.
+   * Delegates to {@link ThreadDispatch#beforeMonitorEnter}.
    *
    * @param lock the monitor object
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeMonitorEnter(final Object lock) throws Throwable {
-    dispatcher.beforeMonitorEnter(lock);
+  public void beforeMonitorEnter(final @Nullable Object lock) throws Throwable {
+    threadDispatch.beforeMonitorEnter(lock);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeThreadPark}.
+   * Delegates to {@link ThreadDispatch#beforeThreadPark}.
    *
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeThreadPark() throws Throwable {
-    dispatcher.beforeThreadPark();
+    threadDispatch.beforeThreadPark();
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeNioSelect}.
+   * Delegates to {@link NetworkDispatch#beforeNioSelect}.
    *
    * @param selector the NIO Selector
    * @param timeoutMillis the select timeout
-   * @return {@code true} if the select should proceed
+   * @return {@link NetworkDispatch#SELECT_PROCEEDS}, {@code 0} for no ready channel at once, or the
+   *     nanoseconds to stall for first
    * @throws Throwable if a chaos effect injects an exception
    */
-  public boolean beforeNioSelect(final Object selector, final long timeoutMillis) throws Throwable {
-    return dispatcher.beforeNioSelect(selector, timeoutMillis);
+  public long beforeNioSelect(final Object selector, final long timeoutMillis) throws Throwable {
+    return networkDispatch.beforeNioSelect(selector, timeoutMillis);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeNioChannelOp}.
+   * Delegates to {@link NetworkDispatch#beforeNioChannelOp}.
    *
    * @param operation the channel operation name
    * @param channel the NIO channel
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeNioChannelOp(final String operation, final Object channel) throws Throwable {
-    dispatcher.beforeNioChannelOp(operation, channel);
+    networkDispatch.beforeNioChannelOp(operation, channel);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketConnect}.
+   * Delegates to {@link NetworkDispatch#beforeSocketConnect}.
    *
    * @param socket the socket
    * @param socketAddress the target address
    * @param timeoutMillis connect timeout
+   * @return the endpoint to connect to instead, or {@code null}
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeSocketConnect(
+  public java.net.@Nullable InetSocketAddress beforeSocketConnect(
       final Object socket, final Object socketAddress, final int timeoutMillis) throws Throwable {
-    dispatcher.beforeSocketConnect(socket, socketAddress, timeoutMillis);
+    return networkDispatch.beforeSocketConnect(socket, socketAddress, timeoutMillis);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketAccept}.
+   * Delegates to {@link NetworkDispatch#beforeSocketAccept}.
    *
    * @param serverSocket the server socket
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeSocketAccept(final Object serverSocket) throws Throwable {
-    dispatcher.beforeSocketAccept(serverSocket);
+    networkDispatch.beforeSocketAccept(serverSocket);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketRead}.
-   *
-   * @param stream the socket input stream
-   * @throws Throwable if a chaos effect injects an exception
-   */
-  public void beforeSocketRead(final Object stream) throws Throwable {
-    dispatcher.beforeSocketRead(stream, null);
-  }
-
-  /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketRead(Object, Object)}.
+   * Delegates to {@link NetworkDispatch#beforeSocketRead(Object, int, Object, int, int)}.
    *
    * @param stream the socket implementation being read from
+   * @param len the number of bytes requested
    * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
+   * @param remotePort the peer port
+   * @param soTimeoutMillis the socket's {@code SO_TIMEOUT}; {@code 0} for infinite
+   * @return the byte count to read, encoded when the read must be corrupted
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeSocketRead(final Object stream, final Object remoteAddress) throws Throwable {
-    dispatcher.beforeSocketRead(stream, remoteAddress);
+  public int beforeSocketRead(
+      final Object stream,
+      final int len,
+      final @Nullable Object remoteAddress,
+      final int remotePort,
+      final int soTimeoutMillis)
+      throws Throwable {
+    return networkDispatch.beforeSocketRead(
+        stream, len, remoteAddress, remotePort, soTimeoutMillis);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketWrite}.
-   *
-   * @param stream the socket output stream
-   * @param len number of bytes to write
-   * @throws Throwable if a chaos effect injects an exception
-   */
-  public void beforeSocketWrite(final Object stream, final int len) throws Throwable {
-    dispatcher.beforeSocketWrite(stream, len, null);
-  }
-
-  /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketWrite(Object, int, Object)}.
+   * Delegates to {@link NetworkDispatch#beforeSocketWrite(Object, int, Object, int)}.
    *
    * @param stream the socket implementation being written to
    * @param len the number of bytes about to be written
    * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
+   * @param remotePort the peer port
+   * @return the bytes to write: {@code len}, or a shorter prefix under a torn write
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeSocketWrite(final Object stream, final int len, final Object remoteAddress)
+  public int beforeSocketWrite(
+      final Object stream,
+      final int len,
+      final @Nullable Object remoteAddress,
+      final int remotePort)
       throws Throwable {
-    dispatcher.beforeSocketWrite(stream, len, remoteAddress);
+    return networkDispatch.beforeSocketWrite(stream, len, remoteAddress, remotePort);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketClose}.
+   * Delegates to {@link ChaosDispatcher#corruptionSeed()}.
+   *
+   * @return the seed of the bit flip the current thread's read was told to apply
+   */
+  public long corruptionSeed() {
+    return dispatcher.corruptionSeed();
+  }
+
+  /**
+   * Delegates to {@link ProcessDispatch#beforeProcessStart(String)}.
+   *
+   * @param command the program
+   * @throws Throwable if an active scenario fails the start
+   */
+  public void beforeProcessStart(final String command) throws Throwable {
+    processDispatch.beforeProcessStart(command);
+  }
+
+  /**
+   * Delegates to {@link ProcessDispatch#afterProcessStart(Object, String)}.
+   *
+   * @param process the started process
+   * @param program the program it was started as, or {@code null}
+   */
+  public void afterProcessStart(final Object process, final @Nullable String program) {
+    processDispatch.afterProcessStart(process, program);
+  }
+
+  /**
+   * Delegates to {@link NetworkDispatch#beforeNioChannelWrite(Object, int)}.
+   *
+   * @param channel the channel being written to
+   * @param remaining the bytes the buffer holds
+   * @return the bytes to write: {@code remaining}, or fewer under a torn write
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
+  public int beforeNioChannelWrite(final Object channel, final int remaining) throws Throwable {
+    return networkDispatch.beforeNioChannelWrite(channel, remaining);
+  }
+
+  /**
+   * Delegates to {@link NetworkDispatch#beforeSocketClose}.
    *
    * @param socket the socket being closed
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeSocketClose(final Object socket) throws Throwable {
-    dispatcher.beforeSocketClose(socket);
+    networkDispatch.beforeSocketClose(socket);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJndiLookup}.
+   * Delegates to {@link NetworkDispatch#beforeDatagram(String, Object, Object, int)}.
+   *
+   * @param operation {@code "DATAGRAM_SEND"} or {@code "DATAGRAM_RECEIVE"}
+   * @param channel the datagram channel
+   * @param peer the destination of a send, or {@code null}
+   * @param length the datagram's length or the space for it
+   * @return the dispatcher's answer
+   * @throws Throwable if an active scenario fails the call
+   */
+  public int beforeDatagram(
+      final String operation, final Object channel, final @Nullable Object peer, final int length)
+      throws Throwable {
+    return networkDispatch.beforeDatagram(operation, channel, peer, length);
+  }
+
+  /**
+   * Delegates to {@link ProcessDispatch#beforeProcessWait(Object, long)}.
+   *
+   * @param process the process waited for
+   * @param timeoutMillis the wait's timeout, {@code 0} for none
+   * @return {@code true} when the wait must report that the child has not exited
+   * @throws Throwable if an active scenario rejects the wait
+   */
+  public boolean beforeProcessWait(final Object process, final long timeoutMillis)
+      throws Throwable {
+    return processDispatch.beforeProcessWait(process, timeoutMillis);
+  }
+
+  /**
+   * Delegates to {@link NetworkDispatch#beforeSocketShutdown(Object, Object, int)}.
+   *
+   * @param endpoint the socket implementation or channel
+   * @param remoteAddress the peer address, or {@code null}
+   * @param remotePort the peer port
+   * @throws Throwable if an active scenario fails the shutdown
+   */
+  public void beforeSocketShutdown(
+      final Object endpoint, final @Nullable Object remoteAddress, final int remotePort)
+      throws Throwable {
+    networkDispatch.beforeSocketShutdown(endpoint, remoteAddress, remotePort);
+  }
+
+  /**
+   * Delegates to {@link DnsDispatch#beforeDnsReverse(String)}.
+   *
+   * @param address the IP literal looked up
+   * @throws Throwable if an active scenario fails the lookup
+   */
+  public void beforeDnsReverse(final String address) throws Throwable {
+    dnsDispatch.beforeDnsReverse(address);
+  }
+
+  /**
+   * Delegates to {@link NetworkDispatch#beforeSocketBind(Object, int)}.
+   *
+   * @param address the local address being bound
+   * @param port the local port being bound
+   * @throws Throwable if an active scenario fails the bind
+   */
+  public void beforeSocketBind(final Object address, final int port) throws Throwable {
+    networkDispatch.beforeSocketBind(address, port);
+  }
+
+  /**
+   * Delegates to {@link NetworkDispatch#beforeSocketChannelRead(Object, int)}.
+   *
+   * @param channel the channel being read from
+   * @param remaining the bytes the buffers can take
+   * @return the byte count to read
+   * @throws Throwable if an active scenario injects a failure
+   */
+  public int beforeSocketChannelRead(final Object channel, final int remaining) throws Throwable {
+    return networkDispatch.beforeSocketChannelRead(channel, remaining);
+  }
+
+  /**
+   * Delegates to {@link NetworkDispatch#beforeSocketChannelWrite(Object, int)}.
+   *
+   * @param channel the channel being written to
+   * @param remaining the bytes the buffers hold
+   * @return the bytes to write
+   * @throws Throwable if an active scenario injects a failure
+   */
+  public int beforeSocketChannelWrite(final Object channel, final int remaining) throws Throwable {
+    return networkDispatch.beforeSocketChannelWrite(channel, remaining);
+  }
+
+  /**
+   * Delegates to {@link RuntimeDispatch#beforeJndiLookup}.
    *
    * @param context the JNDI context
    * @param name the name to look up
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeJndiLookup(final Object context, final String name) throws Throwable {
-    dispatcher.beforeJndiLookup(context, name);
+    runtimeDispatch.beforeJndiLookup(context, name);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeObjectSerialize}.
+   * Delegates to {@link RuntimeDispatch#beforeObjectSerialize}.
    *
    * @param stream the ObjectOutputStream
    * @param obj the object being serialized
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeObjectSerialize(final Object stream, final Object obj) throws Throwable {
-    dispatcher.beforeObjectSerialize(stream, obj);
+  public void beforeObjectSerialize(final Object stream, final @Nullable Object obj)
+      throws Throwable {
+    runtimeDispatch.beforeObjectSerialize(stream, obj);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeNativeLibraryLoad}.
+   * Delegates to {@link RuntimeDispatch#beforeNativeLibraryLoad}.
    *
    * @param libraryName the native library name
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeNativeLibraryLoad(final String libraryName) throws Throwable {
-    dispatcher.beforeNativeLibraryLoad(libraryName);
+    runtimeDispatch.beforeNativeLibraryLoad(libraryName);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeAsyncCancel}.
+   * Delegates to {@link ExecutorDispatch#beforeAsyncCancel}.
    *
    * @param future the Future being cancelled
    * @param mayInterruptIfRunning whether to interrupt if running
@@ -714,53 +1073,53 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public boolean beforeAsyncCancel(final Object future, final boolean mayInterruptIfRunning)
       throws Throwable {
-    return dispatcher.beforeAsyncCancel(future, mayInterruptIfRunning);
+    return executorDispatch.beforeAsyncCancel(future, mayInterruptIfRunning);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeZipInflate}.
+   * Delegates to {@link RuntimeDispatch#beforeZipInflate}.
    *
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeZipInflate() throws Throwable {
-    dispatcher.beforeZipInflate();
+    runtimeDispatch.beforeZipInflate();
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeZipDeflate}.
+   * Delegates to {@link RuntimeDispatch#beforeZipDeflate}.
    *
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeZipDeflate() throws Throwable {
-    dispatcher.beforeZipDeflate();
+    runtimeDispatch.beforeZipDeflate();
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeThreadLocalGet}.
+   * Delegates to {@link ThreadDispatch#beforeThreadLocalGet}.
    *
    * @param threadLocal the ThreadLocal being accessed
    * @return {@code true} if the get should proceed
    * @throws Throwable if a chaos effect injects an exception
    */
   public boolean beforeThreadLocalGet(final Object threadLocal) throws Throwable {
-    return dispatcher.beforeThreadLocalGet(threadLocal);
+    return threadDispatch.beforeThreadLocalGet(threadLocal);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeThreadLocalSet}.
+   * Delegates to {@link ThreadDispatch#beforeThreadLocalSet}.
    *
    * @param threadLocal the ThreadLocal being set
    * @param value the value being stored
    * @return {@code true} if the set should proceed
    * @throws Throwable if a chaos effect injects an exception
    */
-  public boolean beforeThreadLocalSet(final Object threadLocal, final Object value)
+  public boolean beforeThreadLocalSet(final Object threadLocal, final @Nullable Object value)
       throws Throwable {
-    return dispatcher.beforeThreadLocalSet(threadLocal, value);
+    return threadDispatch.beforeThreadLocalSet(threadLocal, value);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJmxInvoke}.
+   * Delegates to {@link RuntimeDispatch#beforeJmxInvoke}.
    *
    * @param server the MBeanServer
    * @param objectName the target MBean ObjectName
@@ -769,11 +1128,11 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public void beforeJmxInvoke(
       final Object server, final Object objectName, final String operationName) throws Throwable {
-    dispatcher.beforeJmxInvoke(server, objectName, operationName);
+    runtimeDispatch.beforeJmxInvoke(server, objectName, operationName);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJmxGetAttr}.
+   * Delegates to {@link RuntimeDispatch#beforeJmxGetAttr}.
    *
    * @param server the MBeanServer
    * @param objectName the target MBean ObjectName
@@ -782,123 +1141,196 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public void beforeJmxGetAttr(final Object server, final Object objectName, final String attribute)
       throws Throwable {
-    dispatcher.beforeJmxGetAttr(server, objectName, attribute);
+    runtimeDispatch.beforeJmxGetAttr(server, objectName, attribute);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeHttpSend}.
+   * Delegates to {@link ClientDispatch#beforeHttpSend}.
    *
    * @param url the request URL
    * @param opType the HTTP operation type
-   * @return {@code true} if the request should proceed
-   * @throws Throwable if a chaos effect injects an exception
+   * @throws Throwable if a scenario rejects the call
    */
-  public boolean beforeHttpSend(final String url, final OperationType opType) throws Throwable {
-    return dispatcher.beforeHttpSend(url, opType);
+  public void beforeHttpSend(final @Nullable String url, final OperationType opType)
+      throws Throwable {
+    clientDispatch.beforeHttpSend(url, opType);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJdbcConnectionAcquire}.
+   * Delegates to {@link ClientDispatch#beforeJdbcConnectionAcquire}.
    *
    * @param poolName the connection pool name
-   * @return {@code true} if connection acquisition should proceed
-   * @throws Throwable if a chaos effect injects an exception
+   * @throws Throwable if a scenario rejects the call
    */
-  public boolean beforeJdbcConnectionAcquire(final String poolName) throws Throwable {
-    return dispatcher.beforeJdbcConnectionAcquire(poolName);
+  public void beforeJdbcConnectionAcquire(final @Nullable String poolName) throws Throwable {
+    clientDispatch.beforeJdbcConnectionAcquire(poolName);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJdbcStatementExecute}.
+   * Delegates to {@link ClientDispatch#beforeJdbcStatementExecute}.
    *
    * @param sql the SQL statement
-   * @return {@code true} if execution should proceed
-   * @throws Throwable if a chaos effect injects an exception
+   * @throws Throwable if a scenario rejects the call
    */
-  public boolean beforeJdbcStatementExecute(final String sql) throws Throwable {
-    return dispatcher.beforeJdbcStatementExecute(sql);
+  public void beforeJdbcStatementExecute(final @Nullable String sql) throws Throwable {
+    clientDispatch.beforeJdbcStatementExecute(sql);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJdbcPreparedStatement}.
+   * Delegates to {@link ClientDispatch#beforeJdbcPreparedStatement}.
    *
    * @param sql the SQL statement being prepared
-   * @return {@code true} if preparation should proceed
-   * @throws Throwable if a chaos effect injects an exception
+   * @throws Throwable if a scenario rejects the call
    */
-  public boolean beforeJdbcPreparedStatement(final String sql) throws Throwable {
-    return dispatcher.beforeJdbcPreparedStatement(sql);
+  public void beforeJdbcPreparedStatement(final @Nullable String sql) throws Throwable {
+    clientDispatch.beforeJdbcPreparedStatement(sql);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJdbcTransactionCommit}.
+   * Delegates to {@link ClientDispatch#beforeJdbcTransactionCommit}.
    *
-   * @return {@code true} if the commit should proceed
-   * @throws Throwable if a chaos effect injects an exception
+   * @throws Throwable if a scenario rejects the call
    */
-  public boolean beforeJdbcTransactionCommit() throws Throwable {
-    return dispatcher.beforeJdbcTransactionCommit();
+  public void beforeJdbcTransactionCommit() throws Throwable {
+    clientDispatch.beforeJdbcTransactionCommit();
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJdbcTransactionRollback}.
+   * Delegates to {@link ClientDispatch#beforeJdbcTransactionRollback}.
    *
-   * @return {@code true} if the rollback should proceed
-   * @throws Throwable if a chaos effect injects an exception
+   * @throws Throwable if a scenario rejects the call
    */
-  public boolean beforeJdbcTransactionRollback() throws Throwable {
-    return dispatcher.beforeJdbcTransactionRollback();
+  public void beforeJdbcTransactionRollback() throws Throwable {
+    clientDispatch.beforeJdbcTransactionRollback();
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeThreadSleep}.
+   * Delegates to {@link ThreadDispatch#beforeThreadSleep}.
    *
    * @param millis the requested sleep duration in milliseconds
    * @return {@code true} if the sleep should proceed
    * @throws Throwable if a chaos effect injects an exception
    */
   public boolean beforeThreadSleep(final long millis) throws Throwable {
-    return dispatcher.beforeThreadSleep(millis);
+    return threadDispatch.beforeThreadSleep(millis);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeDnsResolve}.
+   * Delegates to {@link DnsDispatch#beforeDnsResolve}.
    *
    * @param hostname the hostname being resolved
+   * @return the name to resolve: {@code hostname}, or another under a {@code DnsRewriteEffect}
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeDnsResolve(final String hostname) throws Throwable {
-    dispatcher.beforeDnsResolve(hostname);
+  public @Nullable String beforeDnsResolve(final @Nullable String hostname) throws Throwable {
+    return dnsDispatch.beforeDnsResolve(hostname);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSslHandshake}.
+   * Delegates to {@link DnsDispatch#afterDnsAnswer}.
+   *
+   * @param hostname the name that was looked up
+   * @param answer the resolver's answer, or {@code null}
+   * @param failure the lookup failure, or {@code null}
+   * @return the reshaped answer, or {@code null} to keep the original outcome
+   * @throws Throwable if a scenario rejects the lookup
+   */
+  public java.net.InetAddress @Nullable [] afterDnsAnswer(
+      final String hostname,
+      final java.net.InetAddress @Nullable [] answer,
+      final @Nullable Throwable failure)
+      throws Throwable {
+    return dnsDispatch.afterDnsAnswer(hostname, answer, failure);
+  }
+
+  /**
+   * Delegates to {@link NetworkDispatch#beforeSslHandshake}.
    *
    * @param socket the SSL socket
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeSslHandshake(final Object socket) throws Throwable {
-    dispatcher.beforeSslHandshake(socket);
+  public void beforeSslHandshake(final @Nullable Object socket) throws Throwable {
+    networkDispatch.beforeSslHandshake(socket);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeFileIo}.
+   * Delegates to {@link ClientDispatch#beforeClientCall}: a call through a client library.
+   *
+   * @param operation the {@link com.macstab.chaos.jvm.api.OperationType} name of the call
+   * @param client the client object
+   * @param target the topic(s), method, command or AWS operation, or {@code null}
+   * @param detail the AWS service, or {@code null}
+   * @param remoteAddress the peer address of a Netty channel, or {@code null}
+   * @throws Throwable if a scenario rejects the call
+   */
+  public void beforeClientCall(
+      final String operation,
+      final Object client,
+      final @Nullable String target,
+      final @Nullable String detail,
+      final @Nullable Object remoteAddress)
+      throws Throwable {
+    clientDispatch.beforeClientCall(operation, client, target, detail, remoteAddress);
+  }
+
+  /**
+   * Delegates to {@link ClientDispatch#beforeRpcCall}: a gRPC call on a channel with retries, in
+   * two parts (the call's delay and gate, each attempt's reject).
+   *
+   * @param client the stream provider (the call) or the retrying stream (an attempt)
+   * @param method the full method name, or {@code null}
+   * @param attempt {@code true} for an attempt, {@code false} for the call
+   * @throws Throwable if a scenario rejects the attempt
+   */
+  public void beforeRpcCall(
+      final Object client, final @Nullable String method, final boolean attempt) throws Throwable {
+    clientDispatch.beforeRpcCall(client, method, attempt);
+  }
+
+  /**
+   * Delegates to {@link ThreadDispatch#captureSession}.
+   *
+   * @param carrier the fork-join task being submitted or forked
+   */
+  public void captureSession(final Object carrier) {
+    threadDispatch.captureSession(carrier);
+  }
+
+  /**
+   * Delegates to {@link ThreadDispatch#enterSession}.
+   *
+   * @param carrier the task or thread starting to run
+   */
+  public void enterSession(final Object carrier) {
+    threadDispatch.enterSession(carrier);
+  }
+
+  /**
+   * Delegates to {@link ThreadDispatch#exitSession}.
+   *
+   * @param carrier the task or thread that finished
+   */
+  public void exitSession(final Object carrier) {
+    threadDispatch.exitSession(carrier);
+  }
+
+  /**
+   * Delegates to {@link FileDispatch#beforeFileIo(String, Object, String, int)}.
    *
    * @param operation the file I/O operation name
    * @param stream the file stream
+   * @param path the path the stream was opened with, or {@code null}
+   * @param byteCount the bytes read (requested) or written by the call
+   * @return {@code byteCount}, encoded when a read's bytes must be corrupted
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeFileIo(final String operation, final Object stream) throws Throwable {
-    dispatcher.beforeFileIo(operation, stream);
-  }
-
-  Optional<Instrumentation> instrumentation() {
-    return controlPlane.instrumentation();
-  }
-
-  DefaultChaosActivationHandle activateInSession(
-      final DefaultChaosSession session, final ChaosScenario scenario) {
-    return controlPlane.activateInSession(session, scenario);
+  public int beforeFileIo(
+      final String operation,
+      final @Nullable Object stream,
+      final @Nullable String path,
+      final int byteCount)
+      throws Throwable {
+    return fileDispatch.beforeFileIo(operation, stream, path, byteCount);
   }
 
   ScenarioRegistry registry() {

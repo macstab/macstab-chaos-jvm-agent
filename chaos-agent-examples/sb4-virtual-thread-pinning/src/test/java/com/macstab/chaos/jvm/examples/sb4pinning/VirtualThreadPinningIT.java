@@ -1,15 +1,21 @@
 package com.macstab.chaos.jvm.examples.sb4pinning;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
+import com.macstab.chaos.jvm.api.ChaosControlPlane;
+import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.spring.boot4.test.ChaosTest;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
@@ -19,18 +25,41 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestClient;
 
+// The agent keeps one carrier free, so the stressor needs two carriers to hold one: on a single
+// CPU the startup plan's scenario is refused and the application does not start. The condition is
+// checked before the context starts, so such a machine skips the class instead of failing it.
+@EnabledIf(
+    value = "hasACarrierToHold",
+    disabledReason = "fewer than 2 CPUs: the virtual-thread scheduler has no carrier to pin")
 @ChaosTest(
     classes = VirtualThreadPinningApplication.class,
     webEnvironment = WebEnvironment.RANDOM_PORT,
-    properties = "macstab.chaos.contention.enabled=true")
+    properties = "example.pinning.enabled=true")
 class VirtualThreadPinningIT {
 
   private static final Logger log = LoggerFactory.getLogger(VirtualThreadPinningIT.class);
 
   @LocalServerPort private int port;
 
+  private static final String SCENARIO_ID = "virtual-thread-carrier-pinning";
+
   @Test
-  void hundredConcurrentVirtualThreadRecordCallsAllSucceed() throws Exception {
+  void hundredConcurrentVirtualThreadRecordCallsAllSucceed(final ChaosControlPlane chaos)
+      throws Exception {
+    assertThat(chaos.diagnostics().scenario(SCENARIO_ID))
+        .as("ChaosStartupPlan activated the pinning scenario at startup")
+        .hasValueSatisfying(
+            report -> assertThat(report.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE));
+    // ACTIVE alone also holds when the stressor holds nothing (a single carrier skips it): check
+    // that carriers are held. The agent keeps one carrier free, so two need three carriers.
+    final long held = Math.min(2, Runtime.getRuntime().availableProcessors() - 1);
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .untilAsserted(
+            () ->
+                assertThat(carriersRunningAVirtualThread())
+                    .as("carriers held by the pinning scenario")
+                    .isGreaterThanOrEqualTo(held));
     final RestClient client = RestClient.create("http://localhost:" + port);
     int concurrency = 100;
     List<Future<ResponseEntity<Void>>> futures = new ArrayList<>(concurrency);
@@ -64,7 +93,11 @@ class VirtualThreadPinningIT {
         .as("All 100 concurrent virtual-thread requests must succeed (no 5xx)")
         .isZero();
 
-    log.info("100 concurrent POST /metrics under MonitorContention: {} ms wall-clock", wallMillis);
+    log.info("100 concurrent POST /metrics under carrier pinning: {} ms wall-clock", wallMillis);
+    assertThat(chaos.diagnostics().scenario(SCENARIO_ID))
+        .as("the pinning scenario is still active after the burst")
+        .hasValueSatisfying(
+            report -> assertThat(report.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE));
 
     ResponseEntity<Map<String, Long>> snapshot =
         client
@@ -80,5 +113,27 @@ class VirtualThreadPinningIT {
     assertThat(snapshot.getBody().get("test"))
         .as("Recorded count must equal the number of successful requests")
         .isEqualTo((long) concurrency);
+  }
+
+  /** Whether this machine has a carrier the stressor can hold while keeping one free. */
+  static boolean hasACarrierToHold() {
+    return Runtime.getRuntime().availableProcessors() >= 2;
+  }
+
+  /**
+   * The carriers of the virtual-thread scheduler that have a virtual thread mounted. No request is
+   * in flight when this is called, so a mounted virtual thread is one that holds its carrier.
+   */
+  private static long carriersRunningAVirtualThread() {
+    return Thread.getAllStackTraces().entrySet().stream()
+        .filter(e -> e.getKey().getClass().getName().equals("jdk.internal.misc.CarrierThread"))
+        .filter(
+            e ->
+                Arrays.stream(e.getValue())
+                    .anyMatch(
+                        frame ->
+                            frame.getClassName().equals("java.lang.VirtualThread")
+                                && frame.getMethodName().equals("runContinuation")))
+        .count();
   }
 }

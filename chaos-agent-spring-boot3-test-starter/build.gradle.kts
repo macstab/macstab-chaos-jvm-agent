@@ -2,17 +2,21 @@ dependencies {
     api(project(":chaos-agent-api"))
     api(project(":chaos-agent-testkit"))
     implementation(project(":chaos-agent-bootstrap"))
+    implementation(project(":chaos-agent-spring-boot-common"))
 
     compileOnly(platform(libs.spring.boot3.dependencies))
     compileOnly("org.springframework.boot:spring-boot-test")
     compileOnly("org.springframework.boot:spring-boot-test-autoconfigure")
     compileOnly("org.springframework.boot:spring-boot-autoconfigure")
     compileOnly("org.springframework:spring-context")
+    compileOnly(platform(libs.junit.bom))
     compileOnly(libs.junit.jupiter.api)
 
     testImplementation(platform(libs.spring.boot3.dependencies))
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
+    // ParallelExecutionTest runs its fixture classes in a parallel engine of their own.
+    testImplementation(libs.junit.platform.testkit)
     testImplementation(libs.assertj)
     testImplementation("org.springframework.boot:spring-boot-test")
     testImplementation("org.springframework.boot:spring-boot-test-autoconfigure")

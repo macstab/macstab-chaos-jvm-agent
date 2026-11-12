@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Read-only runtime view of all registered chaos scenarios and agent health.
@@ -33,8 +34,10 @@ public interface ChaosDiagnostics {
    *
    * <ul>
    *   <li>one {@link ScenarioReport} per registered scenario with current counters and state
-   *   <li>all {@link ActivationFailure} records accumulated since agent startup
-   *   <li>runtime capability details: JDK version, virtual thread support, JFR availability
+   *   <li>the 256 most recent {@link ActivationFailure} records (older ones are counted in the
+   *       runtime detail {@code droppedActivationFailures})
+   *   <li>runtime details: JDK version, virtual thread support, JFR availability, dropped counts
+   *       and hook health
    * </ul>
    *
    * @return the current diagnostics snapshot
@@ -43,7 +46,9 @@ public interface ChaosDiagnostics {
 
   /**
    * Returns the current report for the scenario with the given ID, or empty if no scenario with
-   * that ID is registered.
+   * that ID is registered. When the ID is registered in several scopes, the JVM scope's report is
+   * returned, else the report of the session with the smallest id, whichever thread asks; a
+   * session's own scenario is reported by its activation handle.
    *
    * @param scenarioId the scenario ID as provided to {@link ChaosScenario.Builder#build()}
    * @return the scenario report, or empty if not found
@@ -78,9 +83,11 @@ public interface ChaosDiagnostics {
     ACTIVE,
 
     /**
-     * The scenario is temporarily inactive. Occurs when {@link ActivationPolicy#activeFor()} has
-     * elapsed, {@link ActivationPolicy#maxApplications()} is exhausted, or a manual stop was
-     * called. No effects fire while inactive.
+     * The scenario has ended on its own. Occurs when {@link ActivationPolicy#activeFor()} has
+     * elapsed, {@link ActivationPolicy#activeUntil()} has passed, {@link
+     * ActivationPolicy#maxApplications()} is exhausted or its stressor stopped (a stop leads to
+     * {@code STOPPED}). Final for the handle: no effects fire again, and {@code start()} does
+     * nothing.
      */
     INACTIVE,
 
@@ -91,8 +98,8 @@ public interface ChaosDiagnostics {
     STOPPED,
 
     /**
-     * The scenario failed to activate due to a configuration or runtime error. See {@link
-     * ActivationFailure} records in the {@link Snapshot} for details.
+     * Reserved; never reported. A scenario that fails to activate is not registered, so it has no
+     * report: its failure is recorded as an {@link ActivationFailure} in the {@link Snapshot}.
      */
     FAILED,
   }
@@ -107,8 +114,9 @@ public interface ChaosDiagnostics {
     INVALID_CONFIGURATION,
 
     /**
-     * The scenario requires a runtime feature not available on the current JVM (e.g., virtual
-     * threads on JDK 17). See {@link ChaosUnsupportedFeatureException}.
+     * The scenario requires more than the current JVM provides (e.g., direct-buffer pressure above
+     * {@code -XX:MaxDirectMemorySize}, heap pressure above the free heap). See {@link
+     * ChaosUnsupportedFeatureException}.
      */
     UNSUPPORTED_RUNTIME,
 
@@ -135,10 +143,14 @@ public interface ChaosDiagnostics {
    * Immutable point-in-time snapshot of the full agent state.
    *
    * @param capturedAt when this snapshot was taken
-   * @param scenarios per-scenario reports ordered by registration time
-   * @param failures all activation failures accumulated since agent startup
-   * @param runtimeDetails capability map: {@code jdkFeatureVersion}, {@code
-   *     virtualThreadsSupported}, {@code jfrSupported}, {@code currentSessionId}
+   * @param scenarios per-scenario reports ordered by id, then scope
+   * @param failures the 256 most recent activation failures, oldest first
+   * @param runtimeDetails runtime details, iterating in the order they were given in: {@code
+   *     jdkFeatureVersion}, {@code virtualThreadsSupported}, {@code jfrSupported}, {@code
+   *     currentSessionId} (the calling thread's session; absent when none is bound), {@code
+   *     droppedEvents} (events an asynchronous listener's full queue dropped), {@code
+   *     droppedActivationFailures} (failures older than the 256 kept), {@code wovenHookGroups},
+   *     {@code unmatchedHooks} and {@code hookFailures}
    */
   record Snapshot(
       Instant capturedAt,
@@ -146,16 +158,21 @@ public interface ChaosDiagnostics {
       List<ActivationFailure> failures,
       Map<String, String> runtimeDetails) {
     /**
-     * Compact constructor — rejects nulls on the required scalar and takes immutable snapshots of
+     * Canonical constructor — rejects nulls on the required scalar and takes immutable snapshots of
      * the list/map fields. Without the copies, a caller who kept the list returned from the
      * registry could mutate it after publishing the snapshot, breaking the "point in time" name.
-     * {@code List.copyOf}/{@code Map.copyOf} additionally reject null elements.
+     * The copies reject null elements, and the runtime details keep the order they were given in.
      */
-    public Snapshot {
+    public Snapshot(
+        final Instant capturedAt,
+        final @Nullable List<ScenarioReport> scenarios,
+        final @Nullable List<ActivationFailure> failures,
+        final @Nullable Map<String, String> runtimeDetails) {
       Objects.requireNonNull(capturedAt, "capturedAt");
-      scenarios = scenarios == null ? List.of() : List.copyOf(scenarios);
-      failures = failures == null ? List.of() : List.copyOf(failures);
-      runtimeDetails = runtimeDetails == null ? Map.of() : Map.copyOf(runtimeDetails);
+      this.scenarios = scenarios == null ? List.of() : List.copyOf(scenarios);
+      this.failures = failures == null ? List.of() : List.copyOf(failures);
+      this.runtimeDetails = ChaosEvent.orderedCopy(runtimeDetails);
+      this.capturedAt = capturedAt;
     }
   }
 
@@ -168,8 +185,10 @@ public interface ChaosDiagnostics {
    *     session-scoped
    * @param scope the scenario scope
    * @param state current lifecycle state
-   * @param matchedCount number of operations that satisfied the selector since the scenario was
-   *     started; includes matches skipped by {@link ActivationPolicy} constraints
+   * @param matchedCount number of operations that satisfied the selector and passed the scenario's
+   *     time bounds since it was started; includes matches skipped by the other {@link
+   *     ActivationPolicy} constraints (probability, warm-up, rate limit, budget), not calls before
+   *     {@code activeFrom}
    * @param appliedCount number of times the effect was actually applied; always {@code <=
    *     matchedCount}
    * @param reason human-readable explanation of the current state (e.g., {@code "max applications

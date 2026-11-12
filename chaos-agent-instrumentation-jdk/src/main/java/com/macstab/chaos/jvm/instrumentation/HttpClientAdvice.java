@@ -1,8 +1,9 @@
 package com.macstab.chaos.jvm.instrumentation;
 
-import com.macstab.chaos.jvm.api.ChaosHttpSuppressException;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import net.bytebuddy.asm.Advice;
+import org.jspecify.annotations.Nullable;
 
 /**
  * ByteBuddy {@link Advice} classes for HTTP client interception points.
@@ -11,11 +12,10 @@ import net.bytebuddy.asm.Advice;
  *
  * <ul>
  *   <li>Java 11+ {@code HttpClient} ({@code jdk.internal.net.http.HttpClientImpl})
- *   <li>OkHttp 3/4 ({@code okhttp3.RealCall})
- *   <li>Apache HttpComponents 4.x ({@code org.apache.http.impl.client.CloseableHttpClient})
- *   <li>Apache HttpComponents 5.x ({@code
- *       org.apache.hc.client5.http.impl.classic.CloseableHttpClient})
- *   <li>Spring WebClient / Reactor Netty ({@code reactor.netty.http.client.HttpClientConnect})
+ *   <li>OkHttp 3/4 ({@code RealCall.execute} and its call chain)
+ *   <li>Apache HttpComponents 4.x and 5.x ({@code doExecute} of the {@code CloseableHttpClient}
+ *       implementations)
+ *   <li>Spring WebClient / Reactor Netty ({@code HttpClientConnect.MonoHttpConnect.subscribe})
  * </ul>
  *
  * <p>Each inner class targets one specific client method. URL extraction uses reflection via {@link
@@ -25,34 +25,48 @@ final class HttpClientAdvice {
   private HttpClientAdvice() {}
 
   /**
-   * Intercepts {@code jdk.internal.net.http.HttpClientImpl.send(HttpRequest, BodyHandler)}.
-   *
-   * <p>When the dispatcher returns {@code true} (SUPPRESS), the advice throws {@link
-   * ChaosHttpSuppressException} to abort the call with a terminal failure.
+   * Intercepts {@code jdk.internal.net.http.HttpClientImpl.send(HttpRequest, BodyHandler)}. A
+   * rejected send fails with the {@link java.io.IOException} the dispatcher throws.
    */
   static final class JavaHttpClientSendAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final Object request) throws Throwable {
+    static void enter(
+        @Advice.Argument(
+                value = 0,
+                readOnly = false,
+                typing = net.bytebuddy.implementation.bytecode.assign.Assigner.Typing.DYNAMIC)
+            Object request)
+        throws Throwable {
+      // Inside a session, a request to an internal host carries its id to the next service. The
+      // session first: outside one (nearly every call) the headers are never read.
+      if (request instanceof java.net.http.HttpRequest httpRequest) {
+        final String session = BootstrapDispatcher.sessionHeaderFor(httpRequest.uri().getHost());
+        if (session != null
+            && httpRequest.headers().firstValue(BootstrapDispatcher.SESSION_HEADER).isEmpty()) {
+          try {
+            request =
+                java.net.http.HttpRequest.newBuilder(httpRequest, BootstrapDispatcher.ALL_HEADERS)
+                    .header(BootstrapDispatcher.SESSION_HEADER, session)
+                    .build();
+          } catch (final RuntimeException uncopyable) {
+            // a custom HttpRequest the builder cannot copy goes out as it is
+          }
+        }
+      }
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
       }
-      final String url;
-      final boolean suppressed;
+      // Inlined into HttpClientImpl (java.net.http), the advice calls HttpRequest.uri() directly:
+      // the request's own class (jdk.internal.net.http) is not open to reflection by the agent.
+      final String url =
+          request instanceof java.net.http.HttpRequest httpRequest
+              ? String.valueOf(httpRequest.uri())
+              : null;
       try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromJavaHttpRequest(request);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
-        suppressed = BootstrapDispatcher.beforeHttpSend(url);
+        BootstrapDispatcher.beforeHttpSend(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP send suppressed by chaos agent: " + url);
       }
     }
 
@@ -63,31 +77,92 @@ final class HttpClientAdvice {
   }
 
   /**
-   * Intercepts {@code jdk.internal.net.http.HttpClientImpl.sendAsync(HttpRequest, BodyHandler)}.
+   * Intercepts {@code jdk.internal.net.http.HttpClientImpl.sendAsync} (2 and 3 arguments; the
+   * 2-argument form delegates, {@code SCOPE_HTTP} evaluates the outermost). A reject skips the send
+   * and returns a future failed with the {@link java.io.IOException} the dispatcher built, as the
+   * client fails an asynchronous exchange: the call itself does not throw.
    */
   static final class JavaHttpClientSendAsyncAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static @Nullable Throwable enter(
+        @Advice.Argument(
+                value = 0,
+                readOnly = false,
+                typing = net.bytebuddy.implementation.bytecode.assign.Assigner.Typing.DYNAMIC)
+            Object request) {
+      // Inside a session, a request to an internal host carries its id to the next service. The
+      // session first: outside one (nearly every call) the headers are never read.
+      if (request instanceof java.net.http.HttpRequest httpRequest) {
+        final String session = BootstrapDispatcher.sessionHeaderFor(httpRequest.uri().getHost());
+        if (session != null
+            && httpRequest.headers().firstValue(BootstrapDispatcher.SESSION_HEADER).isEmpty()) {
+          try {
+            request =
+                java.net.http.HttpRequest.newBuilder(httpRequest, BootstrapDispatcher.ALL_HEADERS)
+                    .header(BootstrapDispatcher.SESSION_HEADER, session)
+                    .build();
+          } catch (final RuntimeException uncopyable) {
+            // a custom HttpRequest the builder cannot copy goes out as it is
+          }
+        }
+      }
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+        return null;
+      }
+      // Inlined into HttpClientImpl (java.net.http), the advice calls HttpRequest.uri() directly:
+      // the request's own class (jdk.internal.net.http) is not open to reflection by the agent.
+      final String url =
+          request instanceof java.net.http.HttpRequest httpRequest
+              ? String.valueOf(httpRequest.uri())
+              : null;
+      try {
+        BootstrapDispatcher.beforeHttpSendAsync(url);
+        return null;
+      } catch (final Throwable rejected) {
+        return rejected;
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(
+        @Advice.Enter final @Nullable Throwable rejected,
+        @Advice.Return(
+                readOnly = false,
+                typing = net.bytebuddy.implementation.bytecode.assign.Assigner.Typing.DYNAMIC)
+            Object response) {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+      if (rejected != null) {
+        response = java.util.concurrent.CompletableFuture.failedFuture(rejected);
+      }
+    }
+  }
+
+  /**
+   * Intercepts {@code sun.net.www.protocol.http.HttpURLConnection.plainConnect0()}: the JDK's
+   * {@link java.net.HttpURLConnection} (and {@code HttpsURLConnection}, which delegates to it). It
+   * runs once per request, when the connection is first used ({@code connect()}, {@code
+   * getInputStream()}, {@code getOutputStream()}, {@code getResponseCode()}), so a request is
+   * evaluated once however it is driven. This is the transport of Spring's {@code
+   * SimpleClientHttpRequestFactory} ({@code RestTemplate}'s default) and of the AWS SDK's URL
+   * connection client.
+   */
+  static final class HttpUrlConnectionConnectAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final Object request) throws Throwable {
+    static void enter(@Advice.FieldValue("url") final java.net.URL url) throws Throwable {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
       }
-      final String url;
-      final boolean suppressed;
+      // The exit advice leaves the scope; the idle check comes before the URL is formatted.
+      if (BootstrapDispatcher.idle(OperationTags.HTTP_CLIENT_SEND)) {
+        return;
+      }
+      // URL.toString() formats the URL; unlike equals()/hashCode() it never resolves the host.
+      final String target = url == null ? null : url.toString();
       try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromJavaHttpRequest(request);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
-        suppressed = BootstrapDispatcher.beforeHttpSendAsync(url);
+        BootstrapDispatcher.beforeHttpSend(target);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP sendAsync suppressed by chaos agent: " + url);
       }
     }
 
@@ -97,194 +172,93 @@ final class HttpClientAdvice {
     }
   }
 
-  /** Intercepts {@code okhttp3.RealCall.execute()}. */
+  /**
+   * Adds {@code X-Chaos-Session} to a {@code sun.net.www.protocol.http.HttpURLConnection} request
+   * made inside a session, on {@code connect()}, {@code getInputStream()} and {@code
+   * getOutputStream()} while the request headers can still change. A connection that already
+   * connected, or that set the header itself, is left alone.
+   */
+  static final class HttpUrlConnectionSessionHeaderAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object connection) {
+      final java.net.URLConnection urlConnection = (java.net.URLConnection) connection;
+      final String session = BootstrapDispatcher.sessionHeaderFor(urlConnection.getURL().getHost());
+      if (session == null) {
+        return;
+      }
+      try {
+        if (urlConnection.getRequestProperty(BootstrapDispatcher.SESSION_HEADER) == null) {
+          urlConnection.setRequestProperty(BootstrapDispatcher.SESSION_HEADER, session);
+        }
+      } catch (final IllegalStateException alreadyConnected) {
+        // headers are fixed once connected; the request went out without the session
+      }
+    }
+  }
+
+  /**
+   * {@code RealCall.execute()} of OkHttp 3 and 4, scope-only ({@link
+   * BootstrapDispatcher#SCOPE_HTTP_SYNC_CALL}): the call is evaluated in its chain ({@link
+   * OkHttpChainAdvice}), which this scope marks synchronous.
+   */
   static final class OkHttpExecuteAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object call) throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
-        return;
-      }
-      final String url;
-      final boolean suppressed;
-      try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromOkHttpCall(call);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
-        suppressed = BootstrapDispatcher.beforeHttpSend(url);
-      } catch (final Throwable throwable) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
-      }
+    static void enter() {
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP_SYNC_CALL);
     }
 
     @Advice.OnMethodExit(onThrowable = Throwable.class)
     static void exit() {
-      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP_SYNC_CALL);
     }
   }
 
-  /** Intercepts {@code okhttp3.RealCall.enqueue(Callback)}. */
-  static final class OkHttpEnqueueAdvice {
+  /**
+   * {@code RealCall.getResponseWithInterceptorChain} (OkHttp 4: {@code ...$okhttp}): every call
+   * runs it once, an {@code execute()} on the caller's thread ({@code HTTP_CLIENT_SEND}), an {@code
+   * enqueue}d call on OkHttp's dispatcher thread ({@code HTTP_CLIENT_SEND_ASYNC}). A reject throws
+   * the {@link java.io.IOException} where OkHttp's own network failures are thrown: {@code
+   * execute()} throws it, an enqueued call hands it to {@code Callback.onFailure}. It is thrown
+   * before the method's body, so the advice first ends the call as that body ends a failed one
+   * ({@link HttpUrlExtractor#okHttpCallFailed}: {@code callFailed}, the timeout's exit). A request
+   * an interceptor sends is a call of its own and is evaluated too.
+   */
+  static final class OkHttpChainAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object call) throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+      final boolean sync = BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_HTTP_SYNC_CALL);
+      if (BootstrapDispatcher.idle(
+          sync ? OperationTags.HTTP_CLIENT_SEND : OperationTags.HTTP_CLIENT_SEND_ASYNC)) {
         return;
       }
       final String url;
-      final boolean suppressed;
+      BootstrapDispatcher.beginInternalCall();
       try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromOkHttpCall(call);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
+        url = HttpUrlExtractor.fromOkHttpCall(call);
+      } finally {
+        BootstrapDispatcher.endInternalCall();
+      }
+      try {
+        if (sync) {
+          BootstrapDispatcher.beforeHttpSend(url);
+        } else {
+          BootstrapDispatcher.beforeHttpSendAsync(url);
         }
-        suppressed = BootstrapDispatcher.beforeHttpSendAsync(url);
-      } catch (final Throwable throwable) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw throwable;
+      } catch (final Throwable rejected) {
+        throw HttpUrlExtractor.okHttpCallFailed(call, rejected);
       }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP enqueue suppressed by chaos agent: " + url);
-      }
-    }
-
-    @Advice.OnMethodExit(onThrowable = Throwable.class)
-    static void exit() {
-      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
     }
   }
 
   /**
-   * Intercepts Apache HttpComponents 4.x {@code CloseableHttpClient.execute(HttpHost, HttpRequest,
-   * ...)} overloads — the HttpHost-first variants. Apache HC 4.x defines four such overloads
-   * (with/without {@code HttpContext}, with/without {@code ResponseHandler}); the installer
-   * restricts the matcher by first-argument type so this advice only binds to those, leaving the
-   * HttpUriRequest-first overloads to {@link ApacheHc4UriExecuteAdvice}.
+   * Intercepts Apache HttpComponents 4.x {@code doExecute(HttpHost, HttpRequest, HttpContext)},
+   * which every public {@code execute} and {@code executeOpen} overload of {@code
+   * CloseableHttpClient} reaches with the caller's host (or {@code null}): one evaluation per
+   * request, with one URL rule ({@link HttpUrlExtractor#fromApacheHc4}). {@code SCOPE_HTTP} spans
+   * {@code doExecute} only: a response handler runs after it returns, so a request the handler
+   * sends is evaluated too.
    */
-  static final class ApacheHc4ExecuteAdvice {
-    @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final Object host, @Advice.Argument(1) final Object req)
-        throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
-        return;
-      }
-      final String url;
-      final boolean suppressed;
-      try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromApacheHc4Request(host, req);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
-        suppressed = BootstrapDispatcher.beforeHttpSend(url);
-      } catch (final Throwable throwable) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
-      }
-    }
-
-    @Advice.OnMethodExit(onThrowable = Throwable.class)
-    static void exit() {
-      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-    }
-  }
-
-  /**
-   * Intercepts Apache HttpComponents 4.x {@code CloseableHttpClient.execute(HttpUriRequest, ...)}
-   * overloads — the variants where the request is the first argument with no separate host. The
-   * previous single {@code takesArguments(2)} matcher bound the HttpHost-first advice to {@code
-   * execute(HttpUriRequest, HttpContext)} and {@code execute(HttpUriRequest, ResponseHandler)} as
-   * well, handing the advice an {@code HttpUriRequest} where it expected an {@code HttpHost} and
-   * producing malformed URL strings (or none at all).
-   */
-  static final class ApacheHc4UriExecuteAdvice {
-    @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final Object request) throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
-        return;
-      }
-      final String url;
-      final boolean suppressed;
-      try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromApacheHc4UriRequest(request);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
-        suppressed = BootstrapDispatcher.beforeHttpSend(url);
-      } catch (final Throwable throwable) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
-      }
-    }
-
-    @Advice.OnMethodExit(onThrowable = Throwable.class)
-    static void exit() {
-      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-    }
-  }
-
-  /**
-   * Intercepts Apache HttpComponents 5.x {@code CloseableHttpClient.execute(ClassicHttpRequest,
-   * HttpClientResponseHandler)}.
-   */
-  static final class ApacheHc5ExecuteAdvice {
-    @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final Object request) throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
-        return;
-      }
-      final String url;
-      final boolean suppressed;
-      try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromApacheHc5Request(request);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
-        suppressed = BootstrapDispatcher.beforeHttpSend(url);
-      } catch (final Throwable throwable) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
-      }
-    }
-
-    @Advice.OnMethodExit(onThrowable = Throwable.class)
-    static void exit() {
-      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-    }
-  }
-
-  /**
-   * Intercepts Apache HttpComponents 5.x {@code CloseableHttpClient.execute(HttpHost,
-   * ClassicHttpRequest, ...)} overloads, where the target host is passed separately from the
-   * request.
-   */
-  static final class ApacheHc5HostExecuteAdvice {
+  static final class ApacheHc4DoExecuteAdvice {
     @Advice.OnMethodEnter
     static void enter(
         @Advice.Argument(0) final Object host, @Advice.Argument(1) final Object request)
@@ -292,23 +266,21 @@ final class HttpClientAdvice {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
       }
+      if (BootstrapDispatcher.idle(OperationTags.HTTP_CLIENT_SEND)) {
+        return;
+      }
       final String url;
-      final boolean suppressed;
       try {
         BootstrapDispatcher.beginInternalCall();
         try {
-          url = HttpUrlExtractor.fromApacheHc5HostRequest(host, request);
+          url = HttpUrlExtractor.fromApacheHc4(host, request);
         } finally {
           BootstrapDispatcher.endInternalCall();
         }
-        suppressed = BootstrapDispatcher.beforeHttpSend(url);
+        BootstrapDispatcher.beforeHttpSend(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
       }
     }
 
@@ -319,38 +291,83 @@ final class HttpClientAdvice {
   }
 
   /**
-   * Intercepts Reactor Netty {@code HttpClientConnect.connect(HttpClientRequest, NettyOutbound,
-   * ...)}. Spring {@code WebClient} internally dispatches through this method.
+   * Intercepts Apache HttpComponents 5.x {@code doExecute(HttpHost, ClassicHttpRequest,
+   * HttpContext)}, which every public {@code execute} and {@code executeOpen} overload of {@code
+   * CloseableHttpClient} reaches with the caller's host (or {@code null}): one evaluation per
+   * request, with one URL rule ({@link HttpUrlExtractor#fromApacheHc5}). {@code SCOPE_HTTP} spans
+   * {@code doExecute} only: a response handler runs after it returns, so a request the handler
+   * sends is evaluated too.
    */
-  static final class ReactorNettyConnectAdvice {
+  static final class ApacheHc5DoExecuteAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object client) throws Throwable {
+    static void enter(
+        @Advice.Argument(0) final Object host, @Advice.Argument(1) final Object request)
+        throws Throwable {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
       }
+      if (BootstrapDispatcher.idle(OperationTags.HTTP_CLIENT_SEND)) {
+        return;
+      }
       final String url;
-      final boolean suppressed;
       try {
         BootstrapDispatcher.beginInternalCall();
         try {
-          url = HttpUrlExtractor.fromReactorNettyClient(client);
+          url = HttpUrlExtractor.fromApacheHc5(host, request);
         } finally {
           BootstrapDispatcher.endInternalCall();
         }
-        suppressed = BootstrapDispatcher.beforeHttpSendAsync(url);
+        BootstrapDispatcher.beforeHttpSend(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP connect suppressed by chaos agent: " + url);
       }
     }
 
     @Advice.OnMethodExit(onThrowable = Throwable.class)
     static void exit() {
       BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+    }
+  }
+
+  /**
+   * Intercepts Reactor Netty {@code HttpClientConnect.MonoHttpConnect.subscribe(CoreSubscriber)}:
+   * once per subscription, so each retry or resubscription is a request of its own, with the URL of
+   * that subscription's configuration ({@link HttpUrlExtractor#fromReactorNettyConfig}; a deferred
+   * {@code uri(Mono)} is resolved by then). Spring {@code WebClient} dispatches through it. A
+   * reject skips the connection and signals the {@link java.io.IOException} to the subscriber
+   * ({@code Operators.error}), as a failed connection does; nothing is thrown from {@code
+   * subscribe}.
+   */
+  static final class ReactorNettySubscribeAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static @Nullable Throwable enter(@Advice.FieldValue("config") final Object config) {
+      if (BootstrapDispatcher.idle(OperationTags.HTTP_CLIENT_SEND_ASYNC)) {
+        return null;
+      }
+      final String url;
+      BootstrapDispatcher.beginInternalCall();
+      try {
+        url = HttpUrlExtractor.fromReactorNettyConfig(config);
+      } finally {
+        BootstrapDispatcher.endInternalCall();
+      }
+      try {
+        BootstrapDispatcher.beforeHttpSendAsync(url);
+        return null;
+      } catch (final Throwable rejected) {
+        return rejected;
+      }
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final @Nullable Throwable rejected,
+        @Advice.Argument(0) final Object subscriber) {
+      if (rejected != null) {
+        reactor.core.publisher.Operators.error(
+            (org.reactivestreams.Subscriber<?>) subscriber, rejected);
+      }
     }
   }
 }

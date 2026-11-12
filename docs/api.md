@@ -17,6 +17,52 @@
 
 # 1. Overview
 
+
+### A complete example
+
+A session-scoped slow database for one test, a plan-wide cap, and a replay of a recorded run.
+
+```java
+import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosControlPlane;
+import com.macstab.chaos.jvm.api.ChaosDecisionRecorder;
+import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.ChaosSession;
+import com.macstab.chaos.jvm.api.OperationType;
+import java.time.Duration;
+
+public final class SlowDatabaseExample {
+  public static void run(final ChaosControlPlane chaos, final Runnable callTheService) {
+    final ChaosScenario slowDb =
+        ChaosScenario.builder("slow-db")
+            .scope(ChaosScenario.ScenarioScope.SESSION)
+            .selector(ChaosSelector.jdbc(OperationType.JDBC_STATEMENT_EXECUTE))
+            .effect(ChaosEffect.delay(Duration.ofMillis(200)))
+            .activationPolicy(ActivationPolicy.builder().probability(0.3).maxApplications(10L).build())
+            .build();
+
+    final ChaosDecisionRecorder recorder = new ChaosDecisionRecorder();
+    chaos.addEventListener(recorder);
+    final String recordedSession;
+    try (ChaosSession session = chaos.openSession("slow-db test")) {
+      recordedSession = session.id();
+      session.activate(slowDb);
+      callTheService.run();
+    }
+    chaos.removeEventListener(recorder);
+
+    // The same decisions again, without drawing (a session scenario replays its session's log;
+    // recorder.replay(scenario) replays the JVM-scoped log):
+    try (ChaosSession replay = chaos.openSession("slow-db replay")) {
+      replay.activate(recorder.replay(slowDb, recordedSession));
+      callTheService.run();
+    }
+  }
+}
+```
+
 ## Purpose
 
 `chaos-agent-api` defines the stable public contract for controlling the chaos agent. It contains:
@@ -31,7 +77,7 @@
 - `ChaosDiagnostics` — read-only inspection of agent state
 - `OperationType` — enum of intercepted JDK operations
 - `ChaosEvent` / `ChaosEventListener` — event bus contract
-- `ChaosMetricsSink` — metrics integration point
+- `ChaosMetricsSink` — metrics integration point, deprecated for removal since 2.0: use `chaos-agent-micrometer`, `chaos-agent-opentelemetry` or a `ChaosEventListener` on `APPLIED` events (`chaos.applications`)
 - All exception types
 
 ## Stability Contract
@@ -39,12 +85,13 @@
 - All public types, methods, and fields in this module have backward-compatible evolution guarantees
 - Additive changes (new methods with defaults, new enum constants) are allowed in minor versions
 - Removals and breaking changes require major version bump with prior deprecation
+- Record constructors: when a record gains a component, its previous canonical signature stays as a delegating constructor until the next major release. Build records through their factories and builders (`ActivationPolicy.count(n)`, `ActivationPolicy.builder()`, `ChaosScenario.builder(id)`) rather than positionally
 
 ---
 
 # 2. ChaosControlPlane
 
-Entry point to the chaos agent, obtained via `ChaosAgentBootstrap.current()` or `ChaosTestKit.install()`.
+Entry point to the chaos agent, obtained via `ChaosPlatform.current()` (or `ChaosPlatform.installed()`, an `Optional` that is empty while no agent is installed) or `ChaosTestKit.install()`. `ChaosPlatform` is the supported entry point of `chaos-agent-bootstrap`.
 
 ```java
 public interface ChaosControlPlane {
@@ -60,9 +107,15 @@ public interface ChaosControlPlane {
     // Inspect current agent state
     ChaosDiagnostics diagnostics();
 
-    // Register event listener. Invoked synchronously for the published event types:
-    //   STARTED, STOPPED, RELEASED, APPLIED
+    // Register an event listener; invoked synchronously (wrap it in ChaosEventListener.async
+    // to receive events on an agent-owned thread)
     void addEventListener(ChaosEventListener listener);
+
+    // Remove a listener as it was registered; true if it was registered
+    boolean removeEventListener(ChaosEventListener listener);
+
+    // Bind the calling thread to the open session with this id (null or unknown: no session)
+    ChaosSession.ScopeBinding bindSession(@Nullable String sessionId);
 
     // Stop and unregister all scenarios (does not uninstall instrumentation);
     // afterwards activate/openSession/addEventListener throw IllegalStateException
@@ -70,11 +123,11 @@ public interface ChaosControlPlane {
 }
 ```
 
-**`activate(ChaosScenario)`**: Requires `scenario.scope() == JVM`. Registers the scenario with `ScenarioRegistry`, starts it if `startMode == AUTOMATIC`, returns a handle. Throws `ChaosActivationException` when a scenario with the same id is still `REGISTERED` or `ACTIVE`, or on incompatible configuration. A previous scenario with the same id that is `STOPPED` or `INACTIVE` is replaced, so re-activating an id after `stop()` or `close()` works.
+**`activate(ChaosScenario)`**: Requires `scenario.scope() == JVM`. Weaves the hook groups serving the selector's operations if they are not woven yet (the first activation of a group pays its one-time retransformation cost; a weaving failure throws `ChaosInstrumentationException` and is recorded as `INSTRUMENTATION_FAILURE`), registers the scenario with `ScenarioRegistry`, starts it if `startMode == AUTOMATIC`, returns a handle. Throws `ChaosActivationException` when a scenario with the same id is still `REGISTERED` or `ACTIVE`, or on incompatible configuration. A previous scenario with the same id that is `STOPPED` or `INACTIVE` is replaced, so re-activating an id after `stop()` or `close()` works.
 
-**`activate(ChaosPlan)`**: Rejects any session-scoped scenario in the plan with `ChaosActivationException`. Activation is atomic: if any scenario fails, the ones already registered are removed again before the exception propagates.
+**`activate(ChaosPlan)`**: Rejects any session-scoped scenario in the plan with `ChaosActivationException`. Every scenario is validated, and every hook the plan needs is woven (the union of its hook groups and all its method selectors, in one call each), before any scenario is registered: a weaving failure starts none of them and is recorded under the plan's handle id (`plan:<name>`). Activation is atomic: if any scenario still fails, the ones already registered are removed again before the exception propagates.
 
-**`openSession(String)`**: Creates a `DefaultChaosSession` with a UUID and the given display name. The opening thread is bound to the session until `session.close()`; call `session.bind()` on other threads that should participate.
+**`openSession(String)`**: Weaves the hook groups needed to propagate the session (executors, schedulers, thread start, fork-join), if not woven yet (a weaving failure throws `ChaosInstrumentationException` and is recorded under `session:<displayName>`), then creates a `DefaultChaosSession` with a UUID and the given display name. The opening thread is bound to the session until `session.close()`; call `session.bind()` on other threads that should participate.
 
 **After `close()`**: `activate`, `openSession` and `addEventListener` throw `IllegalStateException("chaos control plane is closed")`.
 
@@ -88,6 +141,9 @@ Session-scoped chaos isolation. A session represents a logical test or operation
 public interface ChaosSession {
     // Activate a session-scoped scenario (scenario.scope() must be SESSION)
     ChaosActivationHandle activate(ChaosScenario scenario);
+
+    // Activate every scenario of a plan in this session (all must be SESSION-scoped)
+    ChaosActivationHandle activate(ChaosPlan plan);
 
     // Bind this session to the current thread for the duration of the AutoCloseable block
     ScopeBinding bind();
@@ -113,7 +169,7 @@ public interface ChaosSession {
 }
 ```
 
-**Thread propagation**: `bind()` pushes the session ID onto a per-thread stack (plain `ThreadLocal`) on the calling thread. The session ID is automatically propagated to tasks submitted to executors and schedulers (via the `decorateExecutorRunnable/Callable` instrumentation) — the worker run and every scheduled tick of a periodic task execute bound to the session — but only for tasks submitted while the thread is bound. A session-scoped clock skew applies only on bound threads.
+**Thread propagation**: `bind()` pushes the session ID onto a per-thread stack (plain `ThreadLocal`) on the calling thread. The session ID is automatically propagated to work handed off while the thread is bound: tasks submitted to executors and schedulers once the session has a scenario (the worker run and every scheduled tick of a periodic task execute bound to the session; a task submitted before the session's first scenario is activated runs outside it), `ForkJoinPool` submissions and forks (so `CompletableFuture.*Async` and parallel streams), threads started with `Thread.start()` and virtual threads (including `Executors.newVirtualThreadPerTaskExecutor()`) once the session has a scenario, as for executor tasks. The receiving task or thread is bound for the duration of its run, so a long-lived thread started in a session stays in it. A `Thread` subclass that overrides `run()` without calling `super.run()` does not receive the session. A session-scoped clock skew applies only on bound threads.
 
 For tasks submitted to executors outside a `bind()` block, use `session.wrap(task)` to explicitly carry the session context.
 
@@ -140,6 +196,10 @@ public interface ChaosActivationHandle extends AutoCloseable {
     // Current lifecycle state (snapshot; may change concurrently)
     ChaosDiagnostics.ScenarioState state();
 
+    // The diagnostics' matchedCount / appliedCount of the scenario; for a plan handle, the sum
+    long matchedCount();
+    long appliedCount();
+
     // Interface default is stop(); the handles returned by the runtime
     // override it to stop AND unregister the scenario
     @Override default void close() { stop(); }
@@ -148,9 +208,9 @@ public interface ChaosActivationHandle extends AutoCloseable {
 
 **`close()`**: On every handle returned by `activate()` (scenario, session and plan handles), `close()` stops the scenario **and** removes it from the registry, so it disappears from diagnostics and its id can be activated again. Use try-with-resources for automatic cleanup. `stop()` alone leaves a `STOPPED` entry registered (which is still replaced by a later activation of the same id).
 
-**`release()`**: Applicable only to gate-effect scenarios. Unblocks all threads currently waiting in `ManualGate.await()` and re-arms the gate. Does not stop the scenario — subsequent matching invocations will re-enter the gate. A no-op for non-gate scenarios and for scenarios that are not `ACTIVE`.
+**`release()`**: Applicable only to gate-effect scenarios. Unblocks all threads currently waiting in `ManualGate.await()` and re-arms the gate. Does not stop the scenario — subsequent matching invocations will re-enter the gate. On an `INACTIVE` scenario (`maxApplications` spent, or expired) it opens the gate once without re-arming it: a spent `maxApplications` holds its last admitted caller until `release()` or `stop()`, while expiry itself already releases waiters. A no-op for non-gate scenarios and for scenarios that are neither `ACTIVE` nor `INACTIVE`.
 
-**`state()`**: Returns one of `REGISTERED`, `ACTIVE`, `INACTIVE`, `STOPPED`. Useful for assertions in tests (`assertThat(handle.state()).isEqualTo(ACTIVE)`).
+**`state()`**: Returns one of `REGISTERED`, `ACTIVE`, `INACTIVE`, `STOPPED` (`FAILED` is declared but never reported: a failed activation leaves no scenario registered). Useful for assertions in tests (`assertThat(handle.state()).isEqualTo(ACTIVE)`).
 
 **Idempotency**: `stop()` and `close()` are idempotent; calling them multiple times is safe.
 
@@ -179,7 +239,7 @@ ChaosScenario scenario = ChaosScenario.builder("unique-id")  // required; unique
 
 # 6. ChaosSelector
 
-Sealed hierarchy. Each selector is an immutable record built through a static factory. Every factory (except `jdbc()`) takes a `Set<OperationType>` naming the operations the selector targets; pass an empty set to accept every operation the selector understands. Pattern-based filters take `NamePattern` values (`NamePattern.any()`, `NamePattern.prefix("...")`, `NamePattern.regex("...")`).
+Sealed hierarchy. Each selector is an immutable record built through a static factory. Most factories take a `Set<OperationType>` naming the operations the selector targets; the set must not be empty, and an operation the selector does not support is refused with `IllegalArgumentException`. `jdbc()` covers every JDBC operation and `jdbc(OperationType...)` takes them as varargs; `rpc`, `redis`, `awsSdk` and `process` fix their operations, and `stress` takes a `StressTarget`. Pattern-based filters take `NamePattern` values (`NamePattern.any()`, `NamePattern.prefix("...")`, `NamePattern.regex("...")`).
 
 ```java
 // Thread pool task submission and worker execution
@@ -209,10 +269,9 @@ ChaosSelector.nio(
     Set.of(OperationType.NIO_SELECTOR_SELECT),
     NamePattern.regex("sun\\.nio\\.ch\\..*"));
 
-// ClassLoader operations — filter by loader class and target class name
+// ClassLoader operations — filter by the loaded class or resource name
 ChaosSelector.classLoading(
     Set.of(OperationType.CLASS_LOAD),
-    NamePattern.any(),                      // any loader class
     NamePattern.prefix("com.example.plugin"));
 
 // Arbitrary method entry/exit
@@ -221,11 +280,13 @@ ChaosSelector.method(
     NamePattern.exact("com.example.MyService"),
     NamePattern.exact("processOrder"));
 
-// Monitor enter/exit (synchronized)
+// Lock acquisition through AbstractQueuedSynchronizer.acquire (ReentrantLock and the other AQS locks;
+// `synchronized` is not intercepted); THREAD_PARK selects LockSupport.park*
 ChaosSelector.monitor(Set.of(OperationType.MONITOR_ENTER));
 
-// JVM runtime intrinsics (clock, GC, exit, …)
+// JVM runtime operations (clock, GC, System.exit, serialization, JNDI, JMX, …)
 ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_MILLIS));
+ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_EXIT_REQUEST));
 
 // ThreadLocal operations — optionally filter by stored-value type
 ChaosSelector.threadLocal(Set.of(OperationType.THREAD_LOCAL_GET));
@@ -233,8 +294,8 @@ ChaosSelector.threadLocal(
     Set.of(OperationType.THREAD_LOCAL_GET),
     NamePattern.prefix("com.example.tenant"));
 
-// Shutdown hooks and System.exit / Runtime.halt
-ChaosSelector.shutdown(Set.of(OperationType.SYSTEM_EXIT_REQUEST, OperationType.SHUTDOWN_HOOK_REGISTER));
+// Shutdown-hook registration and executor shutdown
+ChaosSelector.shutdown(Set.of(OperationType.SHUTDOWN_HOOK_REGISTER, OperationType.EXECUTOR_SHUTDOWN));
 
 // HTTP client requests — sync and async. Matches both HttpClient#send and #sendAsync.
 ChaosSelector.httpClient(
@@ -269,6 +330,47 @@ ChaosSelector.stress(StressTarget.HEAP);
 
 Sealed hierarchy. Divided into interceptor effects (applied inline on the calling thread) and stressor effects (run as background threads for the scenario lifetime).
 
+## Presets
+
+`ChaosPresets` holds ready-made scenarios for the faults production systems meet, each the JVM counterpart of a native rule. A preset returns a prefilled `ChaosScenario.Builder` (id, description, selector, effect, tag `preset=<name>`), so scope and activation policy stay yours; the id is the preset's.
+
+| Preset | Fault | Native rule |
+|--------|-------|-------------|
+| `ChaosPresets.diskFull(dir)` | writes fail with `ENOSPC` | `/dir:write:ENOSPC` |
+| `ChaosPresets.failingDisk(dir)` | reads, writes, fsyncs fail with `EIO` | `/dir:*:EIO` |
+| `ChaosPresets.fsyncFailure(dir)` | fsyncs fail with `EIO` | `/dir:fsync:EIO` |
+| `ChaosPresets.slowDisk(dir, latency)` | file I/O is slower | `/dir:*:LATENCY` |
+| `ChaosPresets.tooManyOpenFiles(dir)` | opens fail with `EMFILE` | `/dir:open:EMFILE` |
+| `ChaosPresets.connectionRefused(cidr, port)` | connects are refused | `tcp4://…:connect:ECONNREFUSED` |
+| `ChaosPresets.connectionResets(cidr, port)` | reads fail with `ECONNRESET` | `tcp4://…:recv:ECONNRESET` |
+| `ChaosPresets.slowNetwork(cidr, port, latency)` | socket reads and writes are slower | `tcp4://…:*:LATENCY` |
+| `ChaosPresets.trickledResponses(cidr, port, maxBytes)` | reads return few bytes | `tcp4://…:recv:TRICKLE` |
+| `ChaosPresets.packetLoss(cidr, port)` | datagrams are dropped | `udp4://…:sendto:…` |
+| `ChaosPresets.failover(cidr, port, host, targetPort)` | connects go elsewhere | endpoint redirect |
+| `ChaosPresets.dnsOutage(names)` | lookups fail | `dns://…:GAI:EAI_NONAME` |
+| `ChaosPresets.clockJump(offset)` | every `java.time` and `java.util.Date` read is off (not `System.currentTimeMillis()`) | `clock_gettime/realtime:OFFSET` |
+| `ChaosPresets.threadExhaustion()` | platform thread starts fail | `pthread_create:ERRNO:EAGAIN` |
+
+```java
+import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosControlPlane;
+import com.macstab.chaos.jvm.api.ChaosPresets;
+import java.time.Duration;
+
+public final class PresetExample {
+  public static void run(final ChaosControlPlane chaos) {
+    // One write in ten under /var/lib/app hits a full disk.
+    chaos.activate(
+        ChaosPresets.diskFull("/var/lib/app")
+            .activationPolicy(ActivationPolicy.builder().probability(0.1).build())
+            .build());
+    // The database replica answers 200 ms late.
+    chaos.activate(
+        ChaosPresets.slowNetwork("10.0.0.7", 5432, Duration.ofMillis(200)).build());
+  }
+}
+```
+
 ## Interceptor Effects
 
 ```java
@@ -284,15 +386,16 @@ ChaosEffect.gate(Duration.ofSeconds(30));
 // Throw an operation-appropriate exception
 ChaosEffect.reject("connection refused");
 
-// Silently discard; return null/false per operation contract
+// Skip the call: null/false/0 or no work per operation; a thread start
+// throws RejectedExecutionException and System.exit throws SecurityException
 ChaosEffect.suppress();
 
 // Complete a CompletableFuture exceptionally
 ChaosEffect.exceptionalCompletion(
-    ChaosEffect.ExceptionalCompletionEffect.FailureKind.TIMEOUT,
+    ChaosEffect.FailureKind.TIMEOUT,
     "simulated upstream timeout");
 
-// Inject any exception at method entry (fully qualified class name)
+// Inject an exception at method entry: a java./javax. Throwable (MethodSelector, METHOD_ENTER)
 ChaosEffect.injectException("java.io.IOException", "chaos");
 
 // Corrupt a method's return value
@@ -317,8 +420,8 @@ ChaosEffect.metaspacePressure(500, 16);
 ChaosEffect.directBufferPressure(128L * 1024 * 1024, 1024 * 1024);
 ChaosEffect.gcPressure(50L * 1024 * 1024, Duration.ofSeconds(30));
 ChaosEffect.finalizerBacklog(10_000, Duration.ofMillis(50));
-ChaosEffect.deadlock(2);                                  // NON-RECOVERABLE — requires withDestructiveEffects()
-ChaosEffect.threadLeak(4, "chaos-leak-", true);           // NON-RECOVERABLE — requires withDestructiveEffects()
+ChaosEffect.deadlock(2);                                  // destructive — requires withDestructiveEffects()
+ChaosEffect.threadLeak(4, "chaos-leak-", true);           // destructive — requires withDestructiveEffects()
 ChaosEffect.threadLocalLeak(100, 4096);
 ChaosEffect.monitorContention(/* implementation-specific args — see Javadoc */);
 ChaosEffect.codeCachePressure(200, 8);
@@ -327,25 +430,32 @@ ChaosEffect.stringInternPressure(10_000, 64);
 ChaosEffect.referenceQueueFlood(10_000, Duration.ofMillis(50));
 ```
 
-**Warning**: `deadlock()` and `threadLeak()` are non-recoverable within the JVM process. Use only in controlled test environments. `close()` on these scenarios cannot terminate deadlocked or permanently-parked threads.
+**Warning**: `deadlock()` and `threadLeak()` hold deadlocked or leaked threads, with their locks and memory, until the scenario is stopped; leaked non-daemon threads also keep the JVM from exiting until then. `stop()` / `close()` (and the end of `activeFor`) interrupt the threads and wait briefly for them to end: the deadlocked threads wait in `ReentrantLock.lockInterruptibly()`, so the interrupt ends them. Use only in controlled test environments.
 
 ---
 
 # 8. ActivationPolicy
 
-`ActivationPolicy` is a record — there is no builder. Use the canonical constructor directly or one of the static factory methods:
+`ActivationPolicy` is a record. Use one of the static factory methods, `ActivationPolicy.builder()`, or a constructor:
 
 ```java
 // Most common: always fire, start immediately
 ActivationPolicy.always()
 
-// Opt in to non-recoverable effects (deadlock, thread leak)
+// Opt in to destructive effects (deadlock, thread leak)
 ActivationPolicy.withDestructiveEffects()
 
 // Start paused; fire only after handle.start()
 ActivationPolicy.manual()
 
 // Fine-grained: 30% probability, capped at 100 total, seeded for reproducibility
+ActivationPolicy.builder()
+    .probability(0.30)
+    .maxApplications(100L)
+    .randomSeed(42L)
+    .build()
+
+// The same with the 8-argument constructor (kept for 1.x callers; the builder survives new fields)
 new ActivationPolicy(
     StartMode.AUTOMATIC,
     0.30,           // probability
@@ -368,16 +478,20 @@ All guards compose as AND: a scenario fires only if every configured guard passe
 | `probability`             | `double`    | `1.0`       | Fraction of passing matches that fire; must be in `(0.0, 1.0]`. An explicit `0.0` is rejected with `IllegalArgumentException`; omit the scenario activation entirely to disable it. A `null` value in JSON defaults to `1.0`. |
 | `activateAfterMatches`    | `long`      | `0`         | Skip this many initial matches before becoming eligible                                                                                                                                                                       |
 | `maxApplications`         | `Long`      | `null`      | Hard cap on total applications; `null` = unlimited. Only applications that take effect count — a scenario that loses on precedence does not consume budget                                                                    |
-| `activeFor`               | `Duration`  | `null`      | Auto-expire this long after first start (state `INACTIVE`, reason `"expired"`); for stress scenarios this also ends the stressor; `null` = no expiry                                                                          |
+| `activeFor`               | `Duration`  | `null`      | Auto-expire this long after first start (state `INACTIVE`, reason `"expired"`, with the `INACTIVE` event), also without traffic; for stress scenarios this also ends the stressor; `null` = no expiry                    |
 | `rateLimit`               | `RateLimit` | `null`      | Fixed-window permit cap, window anchored at scenario start (up to 2× permits across a window boundary); `null` = unlimited                                                                                                    |
-| `randomSeed`              | `Long`      | `0L`        | Seed for `SplittableRandom`; XOR-ed with `scenario.id().hashCode()` for per-scenario uniqueness                                                                                                                               |
+| `randomSeed`              | `Long`      | see meaning | Seed for `SplittableRandom`; each match draws from `seed ^ rotl(matchNumber, 32) ^ (scenario.id().hashCode() × 0x9E3779B97F4A7C15)`, so scenarios with the same seed draw differently. `null` draws a random seed at activation. `ActivationPolicy.always()` (the policy of a scenario without one), its variants and `builder()` use `0L`; the constructor and a JSON policy that omits `randomSeed` give `null` |
 | `allowDestructiveEffects` | `boolean`   | `false`     | Must be `true` to activate `DeadlockEffect` or `ThreadLeakEffect`; see below                                                                                                                                                  |
+| `activeFrom`              | `Instant`   | `null`      | Wall-clock instant before which the scenario does not fire; such calls are not counted as matches. Read from the real system clock, so an injected clock skew cannot move it. `null` = no lower bound                      |
+| `activeUntil`             | `Instant`   | `null`      | Wall-clock instant from which on the scenario no longer fires (state `INACTIVE`, reason `"expired"`, also without traffic); ends a stressor. Read from the real clock. Must be after `activeFrom`. `null` = no upper bound |
+
+**Factories.** `ActivationPolicy.always()`, `manual()` and `withDestructiveEffects()` cover the common cases; `count(n)` fires on the first `n` matches (`maxApplications = n`, the native library's `@first=N`) and `window(from, until)` fires between two instants (`@from`/`@until`). `ActivationPolicy.builder()` sets any combination and, unlike the canonical constructor, does not break when the record gains a field.
 
 ### Destructive Effects Safeguard
 
-`DeadlockEffect` and `ThreadLeakEffect` create JVM state that cannot be recovered within a running process — deadlocked threads cannot be interrupted; leaked non-daemon threads prevent JVM exit until the process is killed.
+`DeadlockEffect` and `ThreadLeakEffect` hold deadlocked or leaked threads, with their locks and memory, until the scenario is stopped or closed, which interrupts and ends them; leaked non-daemon threads keep the JVM from exiting until then.
 
-`CompatibilityValidator` rejects any scenario using these effects unless `allowDestructiveEffects == true`. The rejection is a `ChaosActivationException` thrown at registration time, not at effect application time. This is an opt-in correctness guard, not a security boundary — the calling code is trusted.
+`CompatibilityValidator` rejects any scenario using these effects unless `allowDestructiveEffects == true`. The rejection is a `ChaosValidationException` thrown at registration time, not at effect application time. This is an opt-in correctness guard, not a security boundary — the calling code is trusted.
 
 ```java
 // Correct: explicit opt-in
@@ -387,7 +501,7 @@ ChaosScenario.builder("deadlock-test")
     .activationPolicy(ActivationPolicy.withDestructiveEffects())
     .build();
 
-// Rejected at activation: throws ChaosActivationException
+// Rejected at activation: throws ChaosValidationException
 ChaosScenario.builder("deadlock-test")
     .selector(ChaosSelector.stress(StressTarget.DEADLOCK))
     .effect(ChaosEffect.deadlock(2))
@@ -395,9 +509,11 @@ ChaosScenario.builder("deadlock-test")
     .build();
 ```
 
-**Stress scenarios** accept only `startMode`, `activeFor` and `allowDestructiveEffects`: `maxApplications`, `rateLimit`, `activateAfterMatches > 0` and `probability < 1.0` are rejected with `ChaosValidationException`, because a stressor runs from start until `stop()`/`close()` or until `activeFor` ends.
+**Stress scenarios** accept only `startMode`, `activeFor`, `activeUntil` and `allowDestructiveEffects`: `maxApplications`, `rateLimit`, `activateAfterMatches > 0`, `probability < 1.0` and `activeFrom` are rejected with `ChaosValidationException`, because a stressor runs from start until `stop()`/`close()` or until `activeFor` or `activeUntil` ends.
 
-**`randomSeed`**: With the same seed, probability sampling is deterministic across runs given the same sequence of `matchedCount` values. Different scenarios with the same seed still produce different samples because the seed is XOR-ed with `scenario.id().hashCode()`.
+**Clock-skew scenarios** apply to every clock read while active. They honour `activeFor`, `activeFrom` and `activeUntil`; `maxApplications`, `rateLimit`, `activateAfterMatches > 0` and `probability < 1.0` are rejected with `ChaosValidationException` (1.x ignored them silently).
+
+**`randomSeed`**: With the same seed, probability sampling is deterministic across runs given the same sequence of `matchedCount` values, and so are the sampled delay, the torn-write length, the corrupted bit and the DNS shuffle order of each match. Different scenarios with the same seed still produce different samples because the seed is mixed with the scenario id's hash.
 
 ---
 
@@ -413,8 +529,8 @@ The `OperationType` enum defines all intercepted JDK operations. Full list:
 | Thread                          | `THREAD_START`, `VIRTUAL_THREAD_START`, `THREAD_SLEEP`                                                                                 |
 | Queue                           | `QUEUE_PUT`, `QUEUE_TAKE`, `QUEUE_OFFER`, `QUEUE_POLL`                                                                                 |
 | Async                           | `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY`, `ASYNC_CANCEL`                                                                       |
-| Clock (auto-wired)              | `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`                                                                |
-| Clock (manual hook — see §11)   | `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`                                                                                            |
+| Clock (auto-wired)              | `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`                                                              |
+| Clock (`clockCallSites` or manual hook — see §9.1) | `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`                                                                                            |
 | GC                              | `SYSTEM_GC_REQUEST`                                                                                                                    |
 | Exit                            | `SYSTEM_EXIT_REQUEST`                                                                                                                  |
 | Reflection                      | `REFLECTION_INVOKE`                                                                                                                    |
@@ -423,32 +539,39 @@ The `OperationType` enum defines all intercepted JDK operations. Full list:
 | Class                           | `CLASS_LOAD`, `CLASS_DEFINE`, `RESOURCE_LOAD`                                                                                          |
 | Synchronization                 | `MONITOR_ENTER`, `THREAD_PARK`                                                                                                         |
 | NIO                             | `NIO_SELECTOR_SELECT`, `NIO_CHANNEL_READ`, `NIO_CHANNEL_WRITE`, `NIO_CHANNEL_CONNECT`, `NIO_CHANNEL_ACCEPT`                            |
-| Network                         | `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`                                                       |
+| Network                         | `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`, `SOCKET_BIND`, `SOCKET_SHUTDOWN`, `DATAGRAM_SEND`, `DATAGRAM_RECEIVE`                                                     |
 | Infrastructure                  | `JNDI_LOOKUP`, `JMX_INVOKE`, `JMX_GET_ATTR`, `NATIVE_LIBRARY_LOAD`                                                                     |
 | Compression                     | `ZIP_INFLATE`, `ZIP_DEFLATE`                                                                                                           |
 | ThreadLocal                     | `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET`                                                                                                 |
 | HTTP client                     | `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`                                                                                           |
 | JDBC                            | `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`, `JDBC_PREPARED_STATEMENT`, `JDBC_TRANSACTION_COMMIT`, `JDBC_TRANSACTION_ROLLBACK` |
-| DNS / TLS                       | `DNS_RESOLVE`, `SSL_HANDSHAKE`                                                                                                         |
-| File I/O                        | `FILE_IO_READ`, `FILE_IO_WRITE`                                                                                                        |
+| DNS / TLS                       | `DNS_RESOLVE`, `DNS_ANSWER`, `DNS_REVERSE`, `SSL_HANDSHAKE`                                                                            |
+| File I/O                        | `FILE_IO_READ`, `FILE_IO_WRITE`, `FILE_IO_SYNC`, `FILE_IO_TRUNCATE`, `FILE_IO_DELETE`, `FILE_IO_MOVE`, `FILE_IO_MOVE_TARGET`, `FILE_IO_OPEN`, `FILE_IO_MAP`, `FILE_IO_CLOSE`                                                                                                      |
+| Processes                       | `PROCESS_START`, `PROCESS_WAIT`                                                                                                        |
+| Messaging (Kafka)               | `MESSAGE_SEND`, `MESSAGE_RECEIVE`                                                                                                      |
+| RPC (gRPC)                      | `RPC_CALL`                                                                                                                             |
+| Redis (Jedis, Lettuce)          | `REDIS_COMMAND`                                                                                                                        |
+| R2DBC                           | `R2DBC_STATEMENT_EXECUTE`                                                                                                              |
+| AWS SDK v2                      | `AWS_SDK_CALL`                                                                                                                         |
+| Netty                           | `NETTY_CHANNEL_WRITE`, `NETTY_CHANNEL_READ`                                                                                            |
 | Shutdown                        | `SHUTDOWN_HOOK_REGISTER`                                                                                                               |
-| Method (manual hook — see §9.1) | `METHOD_ENTER`, `METHOD_EXIT`                                                                                                          |
+| Method (woven per scenario)     | `METHOD_ENTER`, `METHOD_EXIT`                                                                                                          |
 | Stressor                        | `LIFECYCLE` (internal; targets stressor start/stop)                                                                                    |
 
 ## 9.1 Manual hook operation types
 
-Most operation types in §9 are **auto-wired**: the agent installs ByteBuddy advice on a fixed JDK call site at `premain`, the advice fires automatically whenever application code reaches that site, and zero application changes are needed.
+Most operation types in §9 are **auto-wired**: the agent weaves ByteBuddy advice into a fixed JDK call site when a scenario first needs it (the call site's hook group is retransformed on that scenario's activation; `instrumentation=eager` weaves everything at start), the advice fires automatically whenever application code reaches that site, and zero application changes are needed.
 
-Four operation types are **manual-hook only** — fully functional, fully tested, but the agent cannot trigger them automatically and the application must route the event through the agent's public API:
+Two operation types are **not auto-wired** — fully functional, fully tested, but the agent cannot weave the JDK methods themselves. The agent rewrites their call sites in the packages named by `clockCallSites` (below); elsewhere the application routes the reading through the agent's public API. (`METHOD_ENTER` / `METHOD_EXIT` are woven automatically for the methods a `MethodSelector` names; see "Method entry / exit" below.)
 
-| OperationType         | Why it is not auto-wired                                                                                                                                                                                                                            | Public hook                                                      |
+| OperationType         | Why it is not auto-wired                                                                                                                                                                                                                            | Manual hook                                                      |
 |-----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------|
-| `SYSTEM_CLOCK_MILLIS` | `System.currentTimeMillis()` is `native @IntrinsicCandidate`; HotSpot JIT replaces the call with a direct hardware-clock instruction (`RDTSC` / `MRS CNTVCT_EL0`) that bypasses any bytecode wrapper. Hard JVM limitation for `-javaagent:` agents. | `chaosRuntime.adjustClockMillis(real)`                           |
+| `SYSTEM_CLOCK_MILLIS` | `System.currentTimeMillis()` is `native @IntrinsicCandidate`; HotSpot compiles the call into a direct call to the VM clock (`clock_gettime` through the vDSO on Linux), with no bytecode to weave. Hard JVM limitation for `-javaagent:` agents. | `chaosRuntime.adjustClockMillis(real)`                           |
 | `SYSTEM_CLOCK_NANOS`  | Same as above for `System.nanoTime()`.                                                                                                                                                                                                              | `chaosRuntime.adjustClockNanos(real)`                            |
-| `METHOD_ENTER`        | The agent has no engine that takes a `MethodSelector` and dynamically rewrites every matching class on activation. The runtime evaluation is built; the dynamic instrumentation pass is not.                                                        | `chaosRuntime.beforeMethodEnter(class, method)`                  |
-| `METHOD_EXIT`         | Same as above.                                                                                                                                                                                                                                      | `chaosRuntime.afterMethodExit(class, method, returnType, value)` |
 
-Selector matching, effect application, activation policy (probability, schedules, max activations), `ChaosDiagnostics`, and `ChaosEventListener` all behave identically to the auto-wired operation types — once the hook is invoked.
+**Call-site rewrite.** With `clockCallSites=com.example.,org.acme.` (agent arg; `-Dmacstab.chaos.clockCallSites` or `MACSTAB_CHAOS_CLOCK_CALL_SITES`), every `System.currentTimeMillis()` / `System.nanoTime()` call in classes whose names start with one of the prefixes is rewritten, once a `SYSTEM_CLOCK_MILLIS` or `SYSTEM_CLOCK_NANOS` scenario is activated, into a call that reads the real clock and returns it through the clock-skew dispatch. Prefixes naming JDK classes are refused, and calls outside the prefixes keep the real clock (see [configuration-reference.md](configuration-reference.md), "clockCallSites").
+
+Selector matching, effect application, activation policy, `ChaosDiagnostics`, and `ChaosEventListener` all behave identically to the auto-wired operation types — once the hook is invoked.
 
 ### Clock skew via `TimeProvider` wrapper
 
@@ -468,24 +591,26 @@ public final class TimeProvider {
 
 Then any `JvmRuntimeSelector` scenario with `SYSTEM_CLOCK_MILLIS` and a `ClockSkewEffect` skews every `timeProvider.currentTimeMillis()` reading. For zero-config skew of plain `Instant.now()` / `LocalDateTime.now()` / `ZonedDateTime.now()` / `new Date()` call sites, use the auto-wired operations instead.
 
-### Method entry / exit via Spring AOP, AspectJ, or interceptor
+### Method entry / exit
 
-The agent does not auto-rewrite arbitrary user methods. Wire entry / exit hooks from any interception machinery the application already runs — Spring AOP `@Around`, AspectJ, Micronaut / Quarkus interceptors, an annotation processor, or your own ByteBuddy advice:
+With the agent attached, activating a `MethodSelector` scenario weaves entry and exit hooks into the methods it names, and removing the scenario restores them (see `docs/configuration-reference.md`, `method` selector). `signaturePattern` selects overloads by JVM descriptor. JDK classes (those of the bootstrap and platform class loaders) are never woven, whatever the patterns name, and a selector whose class and method patterns both match everything (`ANY`, a `GLOB` of `*` only, the `REGEX` `.*`, `^.*$`, `.*+`) is refused with `IllegalArgumentException`.
+
+Without the agent — a `ChaosRuntime` in a plain unit test — wire the events from interception the application already runs (Spring AOP `@Around`, AspectJ, Micronaut / Quarkus interceptors):
 
 ```java
 @Around("@annotation(com.example.Audited)")
 public Object intercept(ProceedingJoinPoint pjp) throws Throwable {
-    String cls = pjp.getTarget().getClass().getName();
-    String mth = pjp.getSignature().getName();
+    MethodSignature signature = (MethodSignature) pjp.getSignature();
+    Class<?> type = pjp.getTarget().getClass();
+    String method = signature.getName();
+    String descriptor = MethodType.methodType(
+        signature.getReturnType(), signature.getParameterTypes()).toMethodDescriptorString();
 
-    chaosRuntime.beforeMethodEnter(cls, mth);            // may throw injected exception
+    chaosRuntime.beforeMethodEnter(type, method, descriptor);       // may throw injected exception
 
     Object result = pjp.proceed();
 
-    return chaosRuntime.afterMethodExit(
-        cls, mth,
-        ((MethodSignature) pjp.getSignature()).getReturnType(),
-        result);                                          // may corrupt return value
+    return chaosRuntime.afterMethodExit(type, method, descriptor, result);   // may corrupt return value
 }
 ```
 
@@ -500,7 +625,8 @@ public interface ChaosDiagnostics {
     // Full point-in-time snapshot of all registered scenarios
     Snapshot snapshot();
 
-    // Lookup a specific scenario by ID
+    // Lookup a specific scenario by ID; an ID in several scopes answers the JVM scope's,
+    // else the session with the smallest id (a session's own: its activation handle)
     Optional<ScenarioReport> scenario(String id);
 
     // Human-readable multi-line text dump (suitable for logs or JMX inspection)
@@ -530,15 +656,31 @@ public interface ChaosDiagnostics {
         String message
     ) {}
 
-    enum ScenarioState { REGISTERED, ACTIVE, INACTIVE, STOPPED }
+    enum ScenarioState { REGISTERED, ACTIVE, INACTIVE, STOPPED, FAILED }   // FAILED: declared, never reported
 
     enum FailureCategory {
         INVALID_CONFIGURATION,
         UNSUPPORTED_RUNTIME,
-        ACTIVATION_CONFLICT
+        INSTRUMENTATION_FAILURE,   // the hook group the selector needs could not be woven
+        ACTIVATION_CONFLICT,
+        INTERNAL_ERROR
     }
 }
 ```
+
+**Activation failure categories**: every failed activation is recorded once, as an `ActivationFailure` and a `FAILED` event, and the original exception is rethrown. So is a refusal by `ChaosRuntime.validate(scenario)` or a weaving failure of `ChaosRuntime.requireHooks(scenario)`, which register nothing.
+
+| Category | Recorded when | Thrown |
+|----------|---------------|--------|
+| `INVALID_CONFIGURATION` | the scenario breaks a rule of the validator, or a stressor fails to start for another reason | `ChaosValidationException`, `ChaosActivationException`, or the stressor's `RuntimeException` |
+| `UNSUPPORTED_RUNTIME` | the runtime cannot run the scenario: a missing JVM feature, direct-buffer pressure above `-XX:MaxDirectMemorySize` (refused before anything is allocated; the default limit `0` is the maximum heap), a stressor this JVM's flags leave without load (`safepointStorm` without retransforms under `-XX:+DisableExplicitGC`, `finalizerBacklog` under `--finalization=disabled`), or a stressor that could not get its resources at start (an `OutOfMemoryError`, which is also how the JVM reports a thread it cannot start) | `ChaosUnsupportedFeatureException` |
+| `INSTRUMENTATION_FAILURE` | the hooks the selector needs could not be woven | `ChaosInstrumentationException` |
+| `ACTIVATION_CONFLICT` | a running scenario already has the id | `ChaosActivationConflictException` |
+| `INTERNAL_ERROR` | any other `Error` while the scenario registers or starts (a `LinkageError`, for instance) | the `Error` itself |
+
+A failed activation leaves no scenario registered. A failed `start()` of a `MANUAL` scenario is recorded the same way, closes what the stressor had started, and leaves the scenario `REGISTERED`: the handle stays yours to retry or close.
+
+**`runtimeDetails`**: key/value runtime metadata. Includes `wovenHookGroups` — the comma-separated, sorted names of the hook groups woven so far (empty when none; hooks are woven on demand) — and two health keys, both empty when all is well: `unmatchedHooks`, the hooks woven into a type that matched none of its methods (the JDK changed the method and the hook is inactive), and `hookFailures`, the types whose weaving failed (none of their hooks applies).
 
 **`matchedCount`**: total invocations that matched the selector since `start()`. Incremented before activation policy checks.
 
@@ -564,22 +706,23 @@ record ChaosEvent(
     Map<String, String> attributes
 ) {
     enum Type {
-        REGISTERED,  // defined, not currently published
+        REGISTERED,  // scenario registered, before it starts
         STARTED,     // scenario transitioned to ACTIVE
         APPLIED,     // a contribution took effect on a matched operation
-        SKIPPED,     // defined, not currently published
-        FAILED,      // defined, not currently published
+        SKIPPED,     // the selector matched, the policy kept the effect (only while a listener is registered)
+        FAILED,      // an activation failed
         RELEASED,    // gate-effect release() unblocked waiters
-        STOPPED      // scenario transitioned to STOPPED
+        STOPPED,     // scenario transitioned to STOPPED (once per transition)
+        INACTIVE     // scenario ended on its own (expired, max applications reached); attribute reason
     }
 }
 ```
 
-**Published events**: only `STARTED`, `STOPPED`, `RELEASED` and `APPLIED` are published by the runtime. `APPLIED` is published only for contributions that actually take effect on a call — every matching delay, the winning gate and the winning terminal action by precedence. A scenario that loses on precedence publishes nothing and does not consume its `maxApplications` budget. `APPLIED` attributes carry `operation`, `scope`, `effectType` and, for session scenarios, `sessionId`.
+**Published events**: every type is published; when, and with which attributes, is in [observability.md §2](observability.md#2-events). `APPLIED` is published only for contributions that actually take effect on a call — every matching delay, the winning gate and the winning terminal action by precedence. A scenario that loses on precedence publishes nothing and does not consume its `maxApplications` budget. `APPLIED` attributes carry `operation`, `match` (the scenario's 1-based match number), `scope`, `effectType`, `delayNanos` when the contribution added a delay (and `delayMillis`, deprecated: the same delay in whole milliseconds, from 1 ms) and, for session scenarios, `sessionId`.
 
-**Contract**: Listeners are called synchronously on the application thread that triggered the event. Must not block, perform I/O, or throw checked exceptions. Listener exceptions are caught and logged; they do not abort the chaos operation.
+**Contract**: Listeners are called synchronously on the thread that triggered the event, unless wrapped in `ChaosEventListener.async(listener)` (bounded queue of 10 000; overflow is dropped and counted as `droppedEvents`). Must not block, perform I/O, or throw checked exceptions. Listener exceptions are caught and logged (a listener's first at WARNING, later ones at FINE); they do not abort the chaos operation.
 
-**Observability use**: Subscribe a listener to count `APPLIED` events per scenario ID — this is the ground truth for "how many times did my chaos actually fire during this test?". For skipped matches, compare `matchedCount` and `appliedCount` in `diagnostics().snapshot()`.
+**Observability use**: Subscribe a listener to count `APPLIED` events per scenario ID — this is the ground truth for "how many times did my chaos actually fire during this test?". Skipped matches arrive as `SKIPPED` with the policy check as `reason`; `matchedCount` and `appliedCount` in `diagnostics().snapshot()` give the totals.
 
 ---
 
@@ -587,27 +730,36 @@ record ChaosEvent(
 
 | Exception | Module | When thrown |
 |-----------|--------|-------------|
-| `ChaosActivationException` | `chaos-agent-api` | Scenario activation fails: duplicate ID, scope mismatch, invalid configuration |
-| `ChaosUnsupportedFeatureException` | `chaos-agent-api` | Scenario requires a JVM feature not available on the running JVM (e.g., JFR absent on a stripped JRE) |
+| `ChaosActivationException` | `chaos-agent-api` | Scenario activation fails: scope mismatch, invalid configuration |
+| `ChaosActivationConflictException` | `chaos-agent-api` | A `ChaosActivationException`: a scenario with the same id is already active (a retry may succeed once it stops) |
+| `ChaosInstrumentationException` | `chaos-agent-api` | A `ChaosActivationException`: the hooks the scenario needs cannot be woven into the running JVM; the cause is the weaving failure, and the same scenario fails the same way again |
+| `ChaosValidationException` | `chaos-agent-api` | A scenario's effect, selector and policy do not fit together (`CompatibilityValidator`) |
+| `ChaosUnsupportedFeatureException` | `chaos-agent-api` | The running JVM cannot run the scenario (`UNSUPPORTED_RUNTIME`): `heapPressure`, `threadLocalLeak`, `stringInternPressure` or a `referenceQueueFlood` cycle above the free heap, `directBufferPressure` above the direct memory limit, a stressor that could not get its resources at start, or a `threadLocalLeak` whose entries the common pool did not plant in time |
 | `ConfigLoadException` | `chaos-agent-startup-config` | Startup configuration cannot be read or parsed. Not part of the core API surface — only thrown from `StartupConfigLoader.load()` and only visible to code that imports the startup-config module. |
 
-All are `RuntimeException` subclasses. They propagate to the caller of `activate()` or `StartupConfigLoader.load()`.
+All are `RuntimeException` subclasses, with no common chaos-specific base class: `ChaosActivationConflictException` and `ChaosInstrumentationException` extend `ChaosActivationException`, while `ChaosValidationException` and `ChaosUnsupportedFeatureException` extend `RuntimeException` directly. Catch them individually, or as `RuntimeException`. They propagate to the caller of `activate()` or `StartupConfigLoader.load()`.
 
 ---
 
 # 13. ChaosMetricsSink
 
 ```java
+@Deprecated(since = "2.0.0", forRemoval = true)
 public interface ChaosMetricsSink {
-    void increment(String metricName, Map<String, String> tags);
+    void increment(String name, Map<String, String> tags);
 
-    ChaosMetricsSink NOOP = (name, tags) -> {};
+    void recordDuration(String name, Duration duration, Map<String, String> tags);
+
+    // An anonymous class discarding both calls (the interface has two abstract methods)
+    ChaosMetricsSink NOOP = ...;
 }
 ```
 
-Currently emitted metric: `chaos.effect.applied` with tags `scenarioId` and `operation`.
+**Deprecated for removal** (since 2.0): a second metrics API beside the events. The same count is `chaos.applications` of `chaos-agent-micrometer` and `chaos-agent-opentelemetry`; a `ChaosEventListener` on `APPLIED` events produces it for any other backend. `ChaosMetricsSink` and `chaos.effect.applied` will be removed.
 
-Inject a custom sink via `new ChaosRuntime(clock, yourSink)` (bootstrap-level customization; not exposed via the public API currently — this is a known gap in the public API surface).
+Currently emitted metric: `chaos.effect.applied` with tags `scenarioId` and `operation`. `recordDuration` is never called.
+
+Inject a custom sink via `new ChaosRuntime(clock, yourSink)` (`chaos-agent-core`; the agent installed by `-javaagent:` or self-attach uses `NOOP`).
 
 ---
 

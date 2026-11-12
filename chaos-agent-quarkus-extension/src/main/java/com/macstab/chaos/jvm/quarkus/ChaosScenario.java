@@ -26,18 +26,25 @@ import java.lang.annotation.Target;
  * class OrderServiceTest {
  *
  *   @Test
- *   @ChaosScenario(id = "reject-http", selector = "httpClient", effect = "suppress")
+ *   @ChaosScenario(id = "slow-http", selector = "httpClient", effect = "delay:PT0.5S")
  *   void placesOrder() {
- *     // both the class-level slow-jdbc scenario and the method-level reject-http scenario
+ *     // both the class-level slow-jdbc scenario and the method-level slow-http scenario
  *     // are active while this test runs.
  *   }
  * }
  * }</pre>
+ *
+ * @deprecated Use {@link com.macstab.chaos.jvm.testkit.WithChaos}: it takes the full plan JSON
+ *     model (every selector, effect and policy field), works with every test extension, and is
+ *     honoured by {@link ChaosQuarkusExtension} too. This annotation only knows a few selectors and
+ *     effect shorthands and will be removed in 3.0.
  */
 @Target({ElementType.TYPE, ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)
 @Inherited
 @Repeatable(ChaosScenarios.class)
+@Deprecated(since = "2.0", forRemoval = true)
+@SuppressWarnings("removal")
 public @interface ChaosScenario {
 
   /**
@@ -49,8 +56,8 @@ public @interface ChaosScenario {
 
   /**
    * Selector identifier, one of {@code "executor"}, {@code "jvmRuntime"}, {@code "httpClient"}, or
-   * {@code "jdbc"}. The runtime validator enforces compatibility with {@link #effect()} at
-   * activation time.
+   * {@code "jdbc"}. A pair with {@link #effect()} that cannot apply is refused with {@link
+   * IllegalArgumentException} before anything is activated.
    *
    * @return the selector identifier
    */
@@ -64,7 +71,9 @@ public @interface ChaosScenario {
    * <ul>
    *   <li>{@code "delay:<iso-duration>"} — delay for the given ISO-8601 duration (e.g., {@code
    *       "delay:PT0.1S"} for 100 ms).
-   *   <li>{@code "suppress"} — silently discard the matched operation.
+   *   <li>{@code "suppress"} — silently discard the matched operation: with {@code "executor"} the
+   *       task submission only (a worker's task run cannot be skipped); refused for {@code
+   *       "httpClient"} and {@code "jdbc"}, whose calls cannot be skipped (use a delay).
    *   <li>{@code "freeze"} — shorthand for a clock-skew freeze effect (paired with {@code
    *       "jvmRuntime"}).
    * </ul>
@@ -77,9 +86,9 @@ public @interface ChaosScenario {
    * Scope of the scenario, matching {@link com.macstab.chaos.jvm.api.ChaosScenario.ScenarioScope}.
    * Defaults to {@code "JVM"}. JVM-scoped scenarios are activated at JVM scope via {@link
    * com.macstab.chaos.jvm.api.ChaosControlPlane#activate} and are tracked per-class or per-method
-   * for teardown in {@code afterAll}/{@code afterEach}. SESSION-scoped scenarios are activated on
-   * the class-scoped {@link com.macstab.chaos.jvm.api.ChaosSession} and are torn down by {@code
-   * session.close()} in {@code afterAll}.
+   * for teardown in {@code afterAll}/{@code afterTestExecution}. SESSION-scoped scenarios are
+   * activated on the class-scoped {@link com.macstab.chaos.jvm.api.ChaosSession} and are torn down
+   * by {@code session.close()} in {@code afterAll}.
    *
    * @return the scenario scope name
    */

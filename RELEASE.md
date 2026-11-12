@@ -26,12 +26,22 @@ projects, Central Portal inherits that verification automatically.
    gpg --keyserver keyserver.ubuntu.com --send-keys <KEY_ID>
    gpg --export-secret-keys <KEY_ID> > ~/.ssh/mavencentral_gpg_keyring.gpg
    ```
-5. **Gradle signing config** in `~/.gradle/gradle.properties`:
+5. **Gradle signing config** in `~/.gradle/gradle.properties`, either a key ring:
    ```properties
    signing.keyId=<last-8-chars-of-key-id>
    signing.password=<gpg-passphrase>
    signing.secretKeyRingFile=/Users/you/.ssh/mavencentral_gpg_keyring.gpg
    ```
+   or the key itself, in memory (`gpg --armor --export-secret-keys <KEY_ID>`; in CI the
+   `ORG_GRADLE_PROJECT_signingKey` / `ORG_GRADLE_PROJECT_signingPassword` variables):
+   ```properties
+   signingKey=<ASCII-armoured secret key>
+   signingPassword=<gpg-passphrase>
+   ```
+   A release (a version without `-SNAPSHOT`) must be signed, whatever the repository (Maven
+   Central, GitHub Packages, the `build/staging-deploy` directory the release attests): every
+   publish task fails before uploading anything when neither is configured, or the key is empty.
+   Snapshots are never signed.
 
 ## Required GitHub secrets
 
@@ -39,23 +49,35 @@ Configure at `Settings -> Secrets and variables -> Actions`:
 
 | Secret | Used by | Purpose |
 |--------|---------|---------|
-| `BOT_GITHUB_TOKEN` | semantic-release, publish-snapshot | Push tags, create releases, manage GitHub Packages |
-| `BOT_USER_NAME` | semantic-release (main->develop merge) | Git config for bot commits |
-| `BOT_USER_EMAIL` | semantic-release (main->develop merge) | Git config for bot commits |
+| `BOT_GITHUB_TOKEN` | semantic-release, publish-snapshot | Push tags, create releases, merge the release into develop; delete the previous snapshot package version (only that step holds it) |
+| `BOT_USER_NAME` | semantic-release (back-merge of the release to develop) | Git config for bot commits |
+| `BOT_USER_EMAIL` | semantic-release (back-merge of the release to develop) | Git config for bot commits |
 | `NPM_TOKEN` | semantic-release | Optional, only if publishing to npm |
+| `SIGNING_KEY`, `SIGNING_PASSWORD` | publish-release (secrets of the `release` environment) | The in-memory signing key (ASCII-armoured) and its passphrase |
+
+Gradle never sees the bot token: `./gradlew publish` gets the workflow's own `GITHUB_TOKEN`
+(`packages: write`), and every checkout runs with `persist-credentials: false`.
+
+## Required `release` environment
+
+`Settings -> Environments -> New environment -> release`, with required reviewers. The
+`publish-release` job runs in it, so a release publish waits for an approval, and the signing
+secrets are readable only there.
 
 ## Required GitHub Pages setting
 
-`Settings -> Pages -> Build and deployment -> Source: GitHub Actions`.
-The `deploy-javadoc` workflow pushes the aggregated Javadoc on every release.
+`Settings -> Pages -> Build and deployment -> Source: Deploy from a branch`, branch `gh-pages`,
+folder `/ (root)`. The `deploy-javadoc` workflow pushes the aggregated Javadoc of each release to
+`gh-pages` under `<version>/`, and to `latest/` when the release is the newest one. A manual run
+rebuilds `latest/` from the newest release tag; it never publishes a branch.
 
 ## Publishing overview
 
 | Target          | Trigger                        | Version          | Flow      |
 |-----------------|--------------------------------|------------------|-----------|
 | GitHub Packages | Build on `develop` succeeds    | `X.Y.Z-SNAPSHOT` | Automatic |
-| GitHub Packages | Push tag `vX.Y.Z`              | `X.Y.Z`          | Automatic |
-| GitHub Pages    | Push tag `vX.Y.Z`              | `X.Y.Z` Javadoc  | Automatic |
+| GitHub Packages | Push tag `X.Y.Z`               | `X.Y.Z`          | Automatic, after approval in the `release` environment |
+| GitHub Pages    | Push tag `X.Y.Z`               | `X.Y.Z` Javadoc  | Automatic |
 | Maven Central   | Manual checkout of tag + push  | `X.Y.Z`          | Manual    |
 
 ## Branching model
@@ -63,16 +85,38 @@ The `deploy-javadoc` workflow pushes the aggregated Javadoc on every release.
 - `develop` - ongoing work. Every push builds, tests, and publishes a SNAPSHOT.
 - `main` - release branch. Every merge triggers semantic-release, which
   analyses conventional-commit messages since the last tag, bumps the version,
-  creates the tag `vX.Y.Z`, generates `CHANGELOG.md`, and cuts a GitHub
-  release. The tag push then triggers `publish-release.yml` (GitHub Packages)
-  and `deploy-javadoc.yml` (GitHub Pages).
+  creates the tag `X.Y.Z` (bare, no `v`: the tag format comes from the release
+  image's `/configs/.releaserc-gradle.json`), generates `CHANGELOG.md`, and cuts a
+  GitHub release. The tag push then triggers `publish-release.yml` (GitHub
+  Packages) and `deploy-javadoc.yml` (GitHub Pages). The release is then merged
+  back into develop; develop keeps its own `gradle.properties` (its `-SNAPSHOT`
+  version), and any other conflict fails the job for a manual merge.
+
+## CHANGELOG.md
+
+`CHANGELOG.md` is generated by semantic-release (`@semantic-release/changelog`) from the
+conventional-commit messages at each release. Never edit it by hand: describe a change in its
+commit message, with `!` and a `BREAKING CHANGE:` footer for a breaking one, and in the docs.
+
+## API baseline
+
+`japicmp` compares every API module with the release named by `apiBaseline` in
+`gradle.properties` and fails on a binary-incompatible change unless
+`apiBreaksAccepted = true`. After a release, set `apiBaseline` to it; after a
+major release, also set `apiBreaksAccepted = false`.
 
 ## Code coverage (Jacoco)
 
-Every test task is finalized by `jacocoTestReport` (XML + HTML). The
-root-level `jacocoAggregatedReport` task combines coverage from all subprojects
-into `build/reports/jacoco/aggregated/{html,jacoco.xml}`. CI uploads these as
-a workflow artifact named `jacoco-coverage`.
+`jacocoTestReport` writes a module's report (XML + HTML) when it is asked for; it runs the
+module's tests first, but a test run alone does not produce it. `check` enforces each module's
+coverage floor (`coverageFloors` in `build.gradle.kts`). The floors of the modules inside the agent
+jar (api, core, instrumentation-jdk, startup-config, bootstrap) also count what the bootstrap tests'
+child JVMs executed (`childJvmCoverage`), so they are verified by the root project's `check`
+(`<module>CoverageVerification`), and `:<module>:check` runs only the module's own tests. The
+root-level `jacocoAggregatedReport` task combines the reports of the modules with a floor and the
+child JVMs' data into
+`build/reports/jacoco/aggregated/{html,jacoco.xml}`; CI runs it and uploads the result as a
+workflow artifact named `jacoco-coverage`.
 
 Jacoco is restricted to `com.macstab.chaos.jvm.*` so the agent does not try to
 instrument JDK internals (which would break on bytecode versions newer than
@@ -80,14 +124,23 @@ the bundled ASM).
 
 ## Workflows
 
-- `build.yml` - spotless + `./gradlew build jacocoAggregatedReport` on PRs and pushes to main/develop
+- `build.yml` - spotless + `./gradlew build jacocoAggregatedReport` on PRs and pushes to main/develop,
+  the tests on JDK 21 and 25 on amd64 and arm64 (`jdk-matrix`), and the demos (`demos`)
 - `publish-snapshot.yml` - publishes `X.Y.Z-SNAPSHOT` to GitHub Packages
   after a successful build on develop
-- `semantic-release.yml` - tags the release and cherry-picks back to develop
-  after a successful build on main
-- `publish-release.yml` - publishes `X.Y.Z` to GitHub Packages on tag push
-- `deploy-javadoc.yml` - builds the aggregated Javadoc and deploys it to
-  GitHub Pages on tag push
+- `semantic-release.yml` - tags the release after a successful build of a push to main, and
+  merges the tagged release back into develop, keeping develop's `gradle.properties`
+  (`.github/scripts/back-merge.sh`; any other conflict fails the job). The release image is
+  pinned by digest, and the bot token reaches git as a request header, never in a remote URL.
+- `publish-release.yml` - on a tag push, in the `release` environment: `./gradlew check` of the
+  tagged commit with the tag's version, then, as a separate step that runs only after the check
+  passed, `./gradlew publish` (only this step sees the signing key and the token), then the build
+  provenance and SBOM attestations
+- `deploy-javadoc.yml` - builds the aggregated Javadoc read-only, then a separate job deploys
+  it to `gh-pages` on tag push
+
+Every workflow validates the Gradle wrapper, and the wrapper checks the distribution's
+SHA-256 (`distributionSha256Sum`).
 
 ## Commit message format (Conventional Commits)
 
@@ -98,19 +151,21 @@ Semantic-release reads commit messages to pick the version bump:
 | `feat:`  | MINOR        | `feat: add JMX reset hook`      |
 | `fix:`   | PATCH        | `fix: bootstrap resource lookup`|
 | `perf:`  | PATCH        | `perf: reduce advice overhead`  |
-| `chore:` | PATCH        | `chore: bump deps`              |
+| `chore:` | none         | `chore: bump deps`              |
 | `docs:`  | none         | `docs: fix README recipe`       |
 | `feat!:` | MAJOR        | `feat!: remove legacy API`      |
 
 ## Publishing a release to Maven Central (manual)
 
 ```bash
-# After the v1.0.0 tag is on main:
+# After the 1.0.0 tag is on main:
 git fetch --tags
-git checkout v1.0.0
+git checkout 1.0.0
 
-# Stage signed artifacts into the Central Portal
-./gradlew clean build publish
+# Build and test first, then stage signed artifacts into the Central Portal (two calls: one call
+# does not order the uploads after the tests)
+./gradlew clean build
+./gradlew publish
 
 # Trigger the Central Portal upload API
 ./gradlew releaseToCentral
@@ -129,12 +184,16 @@ snapshot workflow only runs after a successful build on `develop`.
 **Release tag exists but no GitHub Release** - semantic-release runs on main,
 not on tag. Check the `Semantic Release` workflow run for failures.
 
-**Javadoc deploy fails with "pages not enabled"** - enable
-`Settings -> Pages -> Source: GitHub Actions` once; subsequent deploys work.
+**Javadoc deploy fails with "pages not enabled"** - set the Pages source to the
+`gh-pages` branch once (`Settings -> Pages -> Source: Deploy from a branch`, see
+"Required GitHub Pages setting"); `deploy-javadoc.yml` pushes to that branch, so the
+"GitHub Actions" source would not serve it.
 
-**`./gradlew publish` fails locally** - expected if OSSRH credentials are
-not in `~/.gradle/gradle.properties`. The build script skips the OSSRH
-repo and signing tasks when credentials are absent.
+**`./gradlew publish` locally** - without OSSRH credentials in
+`~/.gradle/gradle.properties` the OSSRH repository is left out, and without a GitHub token
+(`GITHUB_ACTOR` / `GITHUB_TOKEN`, or `gpr.user` / `gpr.token`) so is GitHub Packages; the
+artifacts then go to `build/staging-deploy` only. A release version (no `-SNAPSHOT`) without a
+signing key fails before anything is uploaded (see "Gradle signing config").
 
 **Maven Central HTTP 401** - regenerate the token at
 https://central.sonatype.com/ -> Account -> Generate User Token.

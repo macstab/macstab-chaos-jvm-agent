@@ -10,9 +10,9 @@ import org.springframework.core.env.MapPropertySource;
  * {@link ApplicationContextInitializer} that ensures the chaos agent is installed before the Spring
  * application context is refreshed.
  *
- * <p>Registered as an initializer via {@code @SpringBootTest(initializers = ...)} or via the Spring
- * Boot 4 initializer discovery so that chaos interception is available for beans instantiated
- * during context startup.
+ * <p>Applied by {@code @ChaosTest} (through its {@code @ContextConfiguration}), or registered with
+ * {@code @SpringBootTest(initializers = ...)}, so that chaos interception is available for beans
+ * instantiated during context startup.
  */
 public final class ChaosAgentInitializer
     implements ApplicationContextInitializer<ConfigurableApplicationContext> {
@@ -28,8 +28,8 @@ public final class ChaosAgentInitializer
     // Install the JVM-wide agent before context refresh; see ChaosAgentInitializer in the
     // Boot 3 starter for the reasoning behind delegating bean exposure to the auto-config
     // rather than calling beanFactory.registerSingleton(...) here.
-    // The flag is added to this context's environment only. A JVM-wide system property leaked
-    // into every later @SpringBootTest context, so bean presence depended on test order.
+    // The flag is added to this context's environment only. A JVM-wide system property would
+    // leak into every later @SpringBootTest context, making bean presence depend on test order.
     applicationContext
         .getEnvironment()
         .getPropertySources()

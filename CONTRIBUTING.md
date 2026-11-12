@@ -2,19 +2,49 @@
 
 ## Prerequisites
 
-- JDK 21 or later at runtime (JDK 25 recommended for building — the toolchain downloads it automatically via Gradle)
+- JDK 25 installed for building (the Gradle toolchain; Gradle finds installed JDKs but does not download one), JDK 21 or later to run the agent; `-PtestJavaVersion=21` needs JDK 21 installed too
 - No other installation required; `./gradlew` bootstraps everything
 
 ## Build & test
 
 ```bash
-./gradlew build                        # compile, format-check, test, Jacoco
+./gradlew build                        # compile, format-check, test, Jacoco and coverage floors
+./gradlew test -PtestJavaVersion=21    # run the tests on another installed JDK (CI: 21 and 25, amd64 and arm64)
 ./gradlew spotlessApply                # auto-fix formatting before committing
 ./gradlew aggregatedJavadoc            # build API docs at build/docs/aggregated-javadoc/
 ./gradlew :chaos-agent-core:test       # run tests for a single module
 ```
 
-Tests for the instrumentation and bootstrap modules start a real agent (self-attach). They require no flags but do need the process to be attachable (`-Djdk.attach.allowAttachSelf=true` is wired automatically by the test extension).
+Tests for the instrumentation and bootstrap modules start a real agent (self-attach). They need no flags; the build's `Test` tasks still add `-Djdk.attach.allowAttachSelf=true` and `-XX:+EnableDynamicAgentLoading`, so the test output carries no JEP 451 warning, and `SelfAttachWithoutFlagsIntegrationTest` checks the launch without them.
+
+## Quality gates
+
+`./gradlew build` runs every gate below; each one fails the build, and each generated file is regenerated with the command shown, so an intended change shows in review as a diff.
+
+| Gate | Guards | Record an intended change |
+|------|--------|---------------------------|
+| `apiCheck` | the public API of every API module (`api/<module>.api`, erased JVM signatures: generic type arguments, annotations and enum constant order are not recorded), and of `chaos-agent-bootstrap` its supported entry point `ChaosPlatform` (its other public types are `@Internal`) | `./gradlew apiDump` |
+| `japicmp` | binary compatibility of every API module (of `chaos-agent-bootstrap`, `ChaosPlatform` only) with the release named by `apiBaseline` (`gradle.properties`); report in `<module>/build/reports/japicmp/`. A baseline that cannot be resolved fails the check, except for the modules listed in `apiBaselineAbsentModules` | a major release that breaks it on purpose sets `apiBreaksAccepted = true`; a module new since the baseline goes into `apiBaselineAbsentModules` |
+| `PlanSchemaTest` | the published plan schema is the parser's; its `required`, `minItems` and non-blank constraints are probed with the samples in `PlanSchemaTest.SAMPLES` | `./gradlew :chaos-agent-startup-config:test --tests '*PlanSchemaTest*' -PupdatePlanSchema`; a new plan-model type needs a sample (the test names it), and a rule that makes a property required in only some shapes needs a sample of each shape |
+| `ArchitectureTest` | the bridge jar is closed, advice uses only public members, the domain dispatchers reach the registry and `ChaosDispatcher` only through `DispatchEngine` (ADR 0006), the layering of the API and the core (class files; its test class path holds the API, the core and the instrumentation only) | — |
+| `ModuleLayeringTest` | the layering of every published module from its production sources' imports: the startup configuration, the bootstrap and the integrations too (an integration imports no core, and of the bootstrap only `ChaosPlatform` and `ChaosManagement`) | — |
+| Error Prone (`-Werror`) | static analysis of every compilation; a finding fails the build | fix it, or suppress it where it stands with the reason |
+| NullAway | every reference is non-null unless `@Nullable` (JSpecify) says otherwise, proven per dereference, inside generic type arguments too (JSpecify mode) | annotate what may be absent; state an invariant with `Objects.requireNonNull` and its reason |
+| `PlanFuzzTest` | the parser and validator never crash or hang | replay a failure with `-PfuzzSeed=<seed> -PfuzzIterations=<n>` |
+| JaCoCo floors | line and branch coverage per module, child JVMs included | raise the floor in `build.gradle.kts`, never lower it |
+
+Not part of `build`, run before a change to evaluation or validation code:
+
+```bash
+./gradlew pitest                    # mutation testing of api, core and startup-config; reports in <module>/build/reports/pitest
+scripts/check-reproducible.sh       # builds every jar twice and fails when any differs
+```
+
+The decisions behind the architecture are recorded in [docs/adr](docs/adr/README.md); a change that reverses one adds a record that supersedes it.
+
+## Record compatibility
+
+A record in `chaos-agent-api` that gains a component keeps its previous canonical signature as a delegating constructor until the next major release (see `ActivationPolicy`'s 8- and 10-argument constructors), and `apiCheck` must show only additions. Inside the project, tests, examples and benchmarks construct records through their factories and builders, never positionally.
 
 ## Code style
 
@@ -44,12 +74,15 @@ The release workflow runs `semantic-release` automatically after a successful bu
 | `chaos-agent-instrumentation-jdk` | ByteBuddy advice classes, bootstrap bridge, `JdkInstrumentationInstaller` |
 | `chaos-agent-bootstrap` | `premain`/`agentmain`, self-attach, MBean, config poller |
 | `chaos-agent-startup-config` | JSON config loading and file-path hardening |
-| `chaos-agent-testkit` | JUnit 5 `@ChaosTest` extension and `ChaosSession` injection |
+| `chaos-agent-testkit` | JUnit 5 `ChaosAgentExtension`, `@WithChaos`, `ChaosAssertions` |
 | `chaos-agent-spring-boot3/4-starter` | Runtime Spring Boot integration and Actuator endpoint |
 | `chaos-agent-spring-boot3/4-test-starter` | `@ChaosTest` for Spring Boot tests |
-| `chaos-agent-spring-boot-common` | Shared Spring logic (one source, two compile targets) |
-| `chaos-agent-micronaut-integration` | Micronaut integration |
+| `chaos-agent-spring-boot-common` | The Spring classes both runtime starters share (`ChaosAutoConfiguration`, `ChaosProperties`, the actuator endpoint, the trust conditions), compiled once against Boot 3 and used on Boot 3 and 4 |
+| `chaos-agent-micronaut-integration` | Micronaut integration and `/chaos` management endpoint |
+| `chaos-agent-micrometer` | `ChaosMeterBinder`: the chaos metrics in Micrometer |
+| `chaos-agent-opentelemetry` | `ChaosOpenTelemetry`: the chaos metrics and span events in OpenTelemetry |
 | `chaos-agent-quarkus-extension` | Quarkus extension (runtime + deployment modules) |
+| `chaos-agent-quarkus-management` | Optional Quarkus `/q/chaos` route (runtime + deployment modules) |
 | `chaos-agent-benchmarks` | JMH benchmarks — not published |
 | `chaos-agent-examples` | Reference applications — not published |
 
@@ -65,22 +98,43 @@ This is the most constrained part of the codebase. Read this section before touc
 
 - **No instance fields** in advice classes. All state must be local variables or statics on `BootstrapDispatcher`.
 - **No references to agent-classloader types** from advice bytecode. The bootstrap classloader cannot see `com.macstab.chaos.jvm.core.*` or any ByteBuddy type except what is explicitly in the bootstrap JAR.
-- **Only `BootstrapDispatcher` methods** may be called from `@Advice` methods. Route everything through one of its `before*` / `after*` / `decorate*` / `adjust*` methods.
+- **Only bridge classes** may be referenced from `@Advice` methods: the classes listed in `BridgeInjector.BRIDGE_CLASSES` (`BootstrapDispatcher`, `ChannelBuffers`, `OperationTags`, the scheduled task wrappers, `HttpUrlExtractor`, `JdbcTargetExtractor`, `ClientCallExtractor`, `SessionHeaderPolicy` and their nested classes), which are injected into the bootstrap class loader (ADR 0003). `ArchitectureTest.adviceReferencesOnlyBridgeClasses` enforces it. Route the dispatch itself through one of `BootstrapDispatcher`'s `before*` / `after*` / `decorate*` / `adjust*` methods. A new class the advice must reach goes into `BRIDGE_CLASSES` and into the `bridgeClasses` pattern of `chaos-agent-bootstrap/build.gradle.kts`.
 - **`@Advice` methods must be `static`** — ByteBuddy inlines them; instance dispatch is impossible.
 
 ### 2. Add the operation tag
 
-Add a constant to the appropriate enum or constant class in `chaos-agent-api` (e.g., `JvmOperation`). This is the string your selector will match.
+Add a constant to `OperationType` in `chaos-agent-api`, next to its family, and add it to the `VALID_OPS` of the selector that matches it.
 
 ### 3. Implement the `BootstrapDispatcher` entry point
 
-Add a `static` method to `BootstrapDispatcher` that:
-1. Checks the reentrancy guard (`DEPTH.get() > 0 → return immediately`)
-2. Increments depth in a `try/finally`
-3. Delegates to the bridge: `delegate.beforeXxx(operationTag, ...)`
-4. Decrements depth in `finally`
+A new entry point needs a handle slot of its own (ADR 0001). Every step is required; `buildMethodHandles` refuses the install when one is missing:
+1. Append a `public static final int BEFORE_XXX = <next index>;` slot constant to `BootstrapDispatcher`, after the last one. Slot numbers are hand-written and contiguous: never reuse or renumber an index.
+2. Raise `BootstrapDispatcher.HANDLE_COUNT` by one, and update the slot count in ADR 0001 and the table in `docs/instrumentation.md` §7.
+3. Add the method to `BridgeDelegate`, named after the slot (`BEFORE_XXX` → `beforeXxx`), and implement it in `ChaosBridge`, which forwards to `ChaosRuntime`.
+4. Add the `public static` method to `BootstrapDispatcher`. Its body is the pattern of every existing entry point (here `beforeSocketClose`'s, with the slot and the arguments renamed): the depth is raised before the handles are read, so a bridge that is not installed yet is a raised-and-lowered no-op:
 
-Copy the pattern from any existing `before*` method exactly. The reentrancy guard is not optional — omitting it causes infinite recursion when your advice fires inside a method the agent itself calls.
+```java
+public static void beforeXxx(final Object target, final int arg) throws Throwable {
+  final int[] depth = DEPTH.get();
+  if (depth[0] > 0) {
+    return;
+  }
+  depth[0]++;
+  try {
+    final MethodHandle[] h = handles;
+    final Object d = delegate;
+    if (d != null && h != null) {
+      h[BEFORE_XXX].invoke(d, target, arg);
+    }
+  } catch (final Throwable throwable) {
+    sneakyThrow(throwable);
+  } finally {
+    depth[0]--;
+  }
+}
+```
+
+The reentrancy guard (`depth[0] > 0`, where `DEPTH` is a `ThreadLocal<int[]>`) is not optional — omitting it causes infinite recursion when your advice fires inside a method the agent itself calls. If the advice references a class other than `BootstrapDispatcher`, add it to `BridgeInjector.BRIDGE_CLASSES` as well (§1).
 
 ### 4. Write the advice class
 
@@ -102,9 +156,9 @@ Rules:
 - To modify an argument, add `readOnly = false` to `@Advice.Argument` and assign to it
 - Never call anything that could trigger the advice you're installing (causes reentrancy)
 
-### 5. Register the transformation in `JdkInstrumentationInstaller`
+### 5. Register the transformation in its hook group
 
-In `install()`, add a `.type(...).transform(...)` entry to the `AgentBuilder` chain:
+In the `*Hooks` class of the domain (`NetworkHooks`, `ConcurrencyHooks`, …), add a `.type(...).transform(...)` entry to the `AgentBuilder` chain:
 
 ```java
 .type(ElementMatchers.named("java.some.TargetClass"))
@@ -114,20 +168,20 @@ In `install()`, add a `.type(...).transform(...)` entry to the `AgentBuilder` ch
             .and(ElementMatchers.takesArguments(MyParam.class)))))
 ```
 
-Phase 1 points (always installed) go before the `if (premainMode)` check. Phase 2 points (require retransformation of already-loaded classes) go inside it.
+List the new operation in the `JdkInstrumentationInstaller.HookGroup` whose transformations contain the entry. A group is woven on the first activation that names one of its operations, or at start with `instrumentation=eager`.
 
-### 6. Handle the dispatch in `ChaosDispatcher`
+### 6. Handle the dispatch in the domain dispatcher
 
-Add the corresponding `beforeMyOperation(...)` method that receives the call from `ChaosBridge` and routes it through `ScenarioRegistry` → `ScenarioController` evaluation. Follow the pattern of any existing `before*` method in `ChaosDispatcher`.
+Add the corresponding `beforeMyOperation(...)` method to the domain dispatcher (`NetworkDispatch`, `ExecutorDispatch`, …) and expose it through `ChaosRuntime`, which `ChaosBridge` calls. Follow the pattern of any existing `before*` method there, including its `engine.idle(operation)` check: return the unmodified result before building the `InvocationContext`, so a call without a scenario for its operation allocates nothing.
 
 ### 7. Test it
 
-Add an integration test in `chaos-agent-bootstrap/src/test/` that:
-1. Activates a scenario targeting `MY_OPERATION_TAG`
-2. Calls the instrumented JDK method
-3. Asserts the effect was applied (delay, exception, suppression, etc.)
+Add a test of the woven hook in `chaos-agent-bootstrap/src/test/` (`InstrumentationIntegrationTest` and its probe `AgentProcessProbeMain`), which:
+1. Writes a plan with a scenario for `MY_OPERATION_TAG` to a file
+2. Starts a child JVM with `-javaagent:` (the shaded agent jar) and `configFile=` that plan, and calls the instrumented JDK method there
+3. Asserts the effect was applied (delay, exception, suppression, etc.) from the child's output
 
-The `ChaosAgentExtension` handles self-attach — no `-javaagent` flag needed in tests.
+Also add the advice to the expected hooks of `HookCoverageIntegrationTest`, and unit-test the dispatch in the domain dispatcher's test in `chaos-agent-core`. Applications test with the testkit instead (`ChaosAgentExtension` self-attaches, no flag needed; see [user-guide.md](docs/user-guide.md)); the bootstrap module does not depend on the testkit.
 
 ---
 
@@ -135,12 +189,11 @@ The `ChaosAgentExtension` handles self-attach — no `-javaagent` flag needed in
 
 Stressors are simpler — they live entirely in `chaos-agent-core` and have no ByteBuddy involvement.
 
-1. Implement `ManagedStressor` in `chaos-agent-core`
-2. Allocate resources in `start()`, release them in `stop()`
-3. For destructive stressors (deadlock, thread leak, permanent memory pressure), check `ChaosRuntime.isDestructiveEffectsEnabled()` and throw `IllegalStateException` if not enabled
-4. Register the stressor type in the sealed effect hierarchy in `chaos-agent-api`
-5. Wire activation in `ScenarioController`
-6. Add a lifecycle test: verify `isActive()` transitions and that `stop()` releases resources
+1. Add the effect record to the sealed `ChaosEffect` hierarchy in `chaos-agent-api`
+2. Implement `ManagedStressor` in `chaos-agent-core`: start the work in the constructor, stop it and release every resource in `close()` (idempotent)
+3. Register the effect type and its stressor in the `StressorFactory` constructor, and add the effect to `CompatibilityValidator.STRESSOR_EFFECTS` (stressors need a `StressSelector`)
+4. For a destructive stressor (deadlock, thread leak, permanent memory pressure), add the effect to the `allowDestructiveEffects` check in `CompatibilityValidator.validateDestructiveEffectGuard`
+5. Add a lifecycle test: the stressor runs, and `close()` stops its threads and releases what it holds
 
 ---
 
@@ -148,5 +201,6 @@ Stressors are simpler — they live entirely in `chaos-agent-core` and have no B
 
 - One logical change per PR
 - Tests required for new interception points and stressors
-- `./gradlew build` must pass locally before opening a PR
+- `./gradlew build` must pass locally before opening a PR. It enforces a line and branch coverage floor per module (`coverageFloors` in `build.gradle.kts`; the floors of the agent jar's modules count the bootstrap tests' child JVMs and are checked by the root project's `check`, not by `:<module>:check`); raise a floor when your tests raise coverage, never lower one to make a change pass
+- A change to the dispatch path is compared against its base with `BridgeDispatchBenchmark` (`docs/benchmarks.md` §8.3)
 - For breaking API changes, add a `BREAKING CHANGE:` footer to the commit message

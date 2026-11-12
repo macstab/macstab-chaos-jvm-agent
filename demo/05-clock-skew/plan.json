@@ -1,0 +1,3 @@
+{"scenarios": [{"id": "clock-ahead", "scope": "JVM",
+  "selector": {"type": "jvmRuntime", "operations": ["INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW"]},
+  "effect": {"type": "clockSkew", "skewAmount": "PT1H", "mode": "FIXED"}}]}

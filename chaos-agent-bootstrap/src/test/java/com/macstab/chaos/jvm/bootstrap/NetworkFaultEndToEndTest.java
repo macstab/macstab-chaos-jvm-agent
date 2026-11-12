@@ -1,0 +1,208 @@
+package com.macstab.chaos.jvm.bootstrap;
+
+import static org.assertj.core.api.SoftAssertions.assertSoftly;
+
+import java.nio.file.Path;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+/**
+ * Injected network failures on real sockets and channels in a child JVM: the endpoint and the
+ * threads using it must end up as the real failure leaves them (ADR 0005).
+ */
+@DisplayName("Network failures on real endpoints")
+class NetworkFaultEndToEndTest {
+
+  @TempDir Path tempDir;
+
+  private ChildJvmProbe.ProbeResult run(final String mode) throws Exception {
+    return new ChildJvmProbe(tempDir).runWithoutPlan(NetworkFaultProbeMain.class, mode);
+  }
+
+  @Nested
+  @DisplayName("a failing close")
+  class FailingClose {
+
+    @Test
+    @DisplayName("closes the socket or channel first: a blocked reader ends and the peer reads EOF")
+    void closesBeforeItFails() throws Exception {
+      final ChildJvmProbe.ProbeResult result = run("close-reject");
+
+      assertSoftly(
+          softly -> {
+            softly.assertThat(result.value("socket.close")).isEqualTo("java.io.IOException");
+            softly.assertThat(result.value("socket.closed")).isEqualTo("true");
+            softly.assertThat(result.value("socket.readerEnded")).isEqualTo("true");
+            softly.assertThat(result.value("socket.reader")).isEqualTo("java.net.SocketException");
+            softly.assertThat(result.value("socket.peerRead")).isEqualTo("-1");
+            // A subclass's own close() runs once, as without the agent.
+            softly.assertThat(result.value("subclass.close")).isEqualTo("java.io.IOException");
+            softly.assertThat(result.value("subclass.closed")).isEqualTo("true");
+            softly.assertThat(result.longValue("subclass.closes")).isEqualTo(1L);
+            softly.assertThat(result.value("channel.close")).isEqualTo("java.io.IOException");
+            softly.assertThat(result.value("channel.closed")).isEqualTo("true");
+            softly.assertThat(result.value("channel.readerEnded")).isEqualTo("true");
+            softly
+                .assertThat(result.value("channel.reader"))
+                .isEqualTo("java.nio.channels.AsynchronousCloseException");
+            softly.assertThat(result.value("channel.peerRead")).isEqualTo("-1");
+            // JDK 25 closes an interrupted reader's channel through close(), the hooked method.
+            softly.assertThat(result.value("interrupt.readerEnded")).isEqualTo("true");
+            softly
+                .assertThat(result.value("interrupt.reader"))
+                .isEqualTo("java.nio.channels.ClosedByInterruptException");
+            softly.assertThat(result.value("interrupt.closed")).isEqualTo("true");
+          });
+    }
+  }
+
+  @Nested
+  @DisplayName("a failing connect or handshake")
+  class FailingConnect {
+
+    @Test
+    @DisplayName("closes the socket or channel, so a second connect fails as on a real failure")
+    void connectFailureCloses() throws Exception {
+      final ChildJvmProbe.ProbeResult result = run("connect-reject");
+
+      assertSoftly(
+          softly -> {
+            softly.assertThat(result.value("real.type")).isEqualTo("java.net.ConnectException");
+            softly.assertThat(result.value("socket.type")).isEqualTo("java.net.ConnectException");
+            // As a real failed connect leaves the socket: JDK 21 closes only its implementation,
+            // later JDKs close the socket through close().
+            softly.assertThat(result.value("socket.open")).isEqualTo(result.value("real.open"));
+            softly.assertThat(result.value("socket.retry")).isEqualTo("java.net.SocketException");
+            softly.assertThat(result.value("real.retry")).isEqualTo("java.net.SocketException");
+            softly.assertThat(result.value("subclass.type")).isEqualTo("java.net.ConnectException");
+            softly.assertThat(result.value("subclass.open")).isEqualTo(result.value("real.open"));
+            softly
+                .assertThat(result.longValue("subclass.closes"))
+                .isEqualTo(result.longValue("real.closes"));
+            softly.assertThat(result.value("channel.type")).isEqualTo("java.net.ConnectException");
+            softly.assertThat(result.value("channel.open")).isEqualTo("false");
+            // What the JDK throws for a connect of a closed channel: JDK 21 reports it as an
+            // asynchronous close, a ClosedChannelException too.
+            softly
+                .assertThat(result.value("channel.retry"))
+                .isIn(
+                    "java.nio.channels.ClosedChannelException",
+                    "java.nio.channels.AsynchronousCloseException");
+            softly.assertThat(result.value("adaptor.type")).isEqualTo("java.net.ConnectException");
+            softly.assertThat(result.value("adaptor.open")).isEqualTo("false");
+            softly.assertThat(result.value("nio.type")).isNotEqualTo("none");
+            softly.assertThat(result.value("nio.open")).isEqualTo("false");
+            softly
+                .assertThat(result.value("timeout.type"))
+                .isEqualTo("java.net.SocketTimeoutException");
+            softly.assertThat(result.value("timeout.open")).isEqualTo(result.value("real.open"));
+            // A connect of a connected, connecting or closed channel: the JDK's own refusal, not
+            // evaluated, and the live channel stays open.
+            for (final String row :
+                new String[] {
+                  "chConnected",
+                  "adConnected",
+                  "chPending",
+                  "chClosed",
+                  "nioConnected",
+                  "nioPending"
+                }) {
+              softly.assertThat(result.longValue(row + ".matched")).as(row).isZero();
+              softly
+                  .assertThat(result.value(row + ".open"))
+                  .as(row)
+                  .isEqualTo(String.valueOf(!"chClosed".equals(row)));
+            }
+            softly
+                .assertThat(result.value("chConnected.outcome"))
+                .isEqualTo("java.nio.channels.AlreadyConnectedException");
+            softly
+                .assertThat(result.value("nioConnected.outcome"))
+                .isEqualTo("java.nio.channels.AlreadyConnectedException");
+            // The adaptor reports it as the channel's exception or as a SocketException.
+            softly
+                .assertThat(result.value("adConnected.outcome"))
+                .isIn("java.nio.channels.AlreadyConnectedException", "java.net.SocketException");
+            for (final String row : new String[] {"chPending", "nioPending"}) {
+              // Pending, or connected at once on a fast loopback.
+              softly
+                  .assertThat(result.value(row + ".outcome"))
+                  .as(row)
+                  .isIn(
+                      "java.nio.channels.ConnectionPendingException",
+                      "java.nio.channels.AlreadyConnectedException");
+            }
+            softly
+                .assertThat(result.value("chClosed.outcome"))
+                .isIn(
+                    "java.nio.channels.ClosedChannelException",
+                    "java.nio.channels.AsynchronousCloseException");
+          });
+    }
+
+    @Test
+    @DisplayName("a failing TLS handshake closes the socket and the engine")
+    void handshakeFailureCloses() throws Exception {
+      final ChildJvmProbe.ProbeResult result = run("handshake-reject");
+
+      assertSoftly(
+          softly -> {
+            softly
+                .assertThat(result.value("socket.type"))
+                .isEqualTo("javax.net.ssl.SSLHandshakeException");
+            softly.assertThat(result.value("socket.closed")).isEqualTo("true");
+            softly.assertThat(result.value("socket.retry")).isEqualTo("java.net.SocketException");
+            softly
+                .assertThat(result.value("engine.type"))
+                .isEqualTo("javax.net.ssl.SSLHandshakeException");
+            softly.assertThat(result.value("engine.outboundDone")).isEqualTo("true");
+          });
+    }
+  }
+
+  @Nested
+  @DisplayName("a timeout() stall")
+  class TimeoutStall {
+
+    @Test
+    @DisplayName("ends on a selector wakeup or close, and on a close of the socket or channel")
+    void endsAsTheRealWaitDoes() throws Exception {
+      final ChildJvmProbe.ProbeResult result = run("stall-ends");
+
+      assertSoftly(
+          softly -> {
+            for (final String row :
+                new String[] {"selectWakeup", "selectClose", "read", "adaptorRead", "connect"}) {
+              // The stall applied once, and held the call until the other thread ended it 200 ms
+              // after the call entered the stall (the other thread ends nothing before that).
+              softly.assertThat(result.longValue(row + ".applied")).as(row).isEqualTo(1L);
+              softly.assertThat(result.longValue(row + ".millis")).as(row).isBetween(150L, 1_499L);
+            }
+            softly.assertThat(result.value("selectWakeup.outcome")).isEqualTo("ok");
+            // A wakeup made before the select: the select returns at once, as the JDK's does.
+            softly.assertThat(result.longValue("selectWakeupBefore.millis")).isLessThan(500L);
+            softly.assertThat(result.value("selectWakeupBefore.outcome")).isEqualTo("ok");
+            // A wakeup that ended a real select running when the scenario was activated is not
+            // kept: the next select is stalled for its own 3 s.
+            softly
+                .assertThat(result.longValue("selectActivatedDuring.millis"))
+                .isBetween(2_900L, 6_000L);
+            softly.assertThat(result.longValue("selectActivatedDuring.applied")).isEqualTo(1L);
+            softly.assertThat(result.longValue("selectClosed.millis")).isLessThan(500L);
+            softly
+                .assertThat(result.value("selectClosed.outcome"))
+                .isEqualTo("java.nio.channels.ClosedSelectorException");
+            softly.assertThat(result.value("read.outcome")).isEqualTo("java.net.SocketException");
+            // The adaptor's stream reports the channel's asynchronous close as it is.
+            softly
+                .assertThat(result.value("adaptorRead.outcome"))
+                .isEqualTo("java.nio.channels.AsynchronousCloseException");
+            softly
+                .assertThat(result.value("connect.outcome"))
+                .isEqualTo("java.net.SocketException");
+          });
+    }
+  }
+}

@@ -15,11 +15,13 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.Set;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Activation-policy arithmetic")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class PolicyArithmeticTest {
 
   @Nested
@@ -28,6 +30,11 @@ class PolicyArithmeticTest {
 
     private final MutableClock clock = new MutableClock(Instant.ofEpochMilli(10_500L));
     private final ChaosRuntime runtime = new ChaosRuntime(clock, ChaosMetricsSink.NOOP);
+
+    @AfterEach
+    void closeRuntime() {
+      runtime.close();
+    }
 
     @Test
     @DisplayName("the first window starts when the scenario starts, not at an epoch boundary")
@@ -96,7 +103,7 @@ class PolicyArithmeticTest {
         ChaosScenario.builder("independent")
             .scope(ChaosScenario.ScenarioScope.JVM)
             .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-            .effect(ChaosEffect.delay(Duration.ZERO, Duration.ofMillis(1_000)))
+            .effect(ChaosEffect.delay(Duration.ZERO, Duration.ofSeconds(1)))
             .activationPolicy(
                 new ActivationPolicy(
                     ActivationPolicy.StartMode.AUTOMATIC, 0.5d, 0L, null, null, null, 42L, false))
@@ -120,7 +127,7 @@ class PolicyArithmeticTest {
       final ScenarioContribution contribution = controller.evaluate(context);
       if (contribution != null) {
         applied++;
-        if (contribution.delayMillis() > 500L) {
+        if (contribution.delayNanos() > Duration.ofMillis(500).toNanos()) {
           upperHalf++;
         }
         contribution.release();

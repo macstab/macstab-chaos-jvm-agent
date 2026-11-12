@@ -2,8 +2,10 @@ package com.macstab.chaos.jvm.spring.boot3.test;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
+import com.macstab.chaos.jvm.spring.boot.common.ChaosAutoConfiguration;
+import com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane;
+import org.springframework.beans.factory.DisposableBean;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -14,16 +16,18 @@ import org.springframework.context.annotation.Bean;
  *
  * <p>Registered via {@code
  * META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports} — the standard
- * Spring Boot auto-configuration SPI. The earlier {@code
+ * Spring Boot auto-configuration SPI. The {@code
  * org.springframework.boot.test.autoconfigure.ImportAutoConfiguration.imports} layout is only
  * consulted when the test class carries {@code @ImportAutoConfiguration} (directly or via a slice
- * annotation like {@code @DataJpaTest}/{@code @WebMvcTest}), so the bean was silently absent from
- * plain {@code @SpringBootTest} and {@code @ChaosTest} contexts. Standard auto-config discovery
- * runs on every {@code @SpringBootTest}-driven context regardless of slice annotations, so the bean
- * is now reliably present for test code using {@code @Autowired ChaosControlPlane}.
+ * annotation like {@code @DataJpaTest}/{@code @WebMvcTest}), so registered there the bean would be
+ * silently absent from plain {@code @SpringBootTest} and {@code @ChaosTest} contexts. Standard
+ * auto-config discovery runs on every {@code @SpringBootTest}-driven context regardless of slice
+ * annotations, so the bean is reliably present for test code using {@code @Autowired
+ * ChaosControlPlane}.
  */
-@AutoConfiguration
-@ConditionalOnClass(ChaosAgentExtension.class)
+// Before the application starter's ChaosAutoConfiguration: both declare chaosControlPlane with
+// @ConditionalOnMissingBean, and in a chaos test the tracked plane must be the one registered.
+@AutoConfiguration(before = ChaosAutoConfiguration.class)
 public class ChaosTestAutoConfiguration {
 
   /**
@@ -36,9 +40,11 @@ public class ChaosTestAutoConfiguration {
   public ChaosTestAutoConfiguration() {}
 
   /**
-   * Exposes the installed {@link ChaosControlPlane} as a Spring bean.
+   * Exposes the installed {@link ChaosControlPlane} as a Spring bean. Scenarios activated through
+   * it are tracked and released when the last running chaos test class ends: a cached context
+   * serves several classes.
    *
-   * @return the JVM-wide control plane
+   * @return the JVM-wide control plane, tracked
    */
   // destroyMethod = "": the control plane is the JVM-wide runtime shared by every test context;
   // Spring's inferred destroy method would close() it whenever any context shuts down.
@@ -46,8 +52,24 @@ public class ChaosTestAutoConfiguration {
   @ConditionalOnMissingBean(ChaosControlPlane.class)
   @ConditionalOnProperty(name = TEST_ENABLED_PROPERTY, havingValue = "true")
   public ChaosControlPlane chaosControlPlane() {
-    // ChaosAgentInitializer.initialize() has already called installLocally() and set
-    // the guard property; current() returns the same singleton without a second attach.
-    return ChaosPlatform.installLocally();
+    // ChaosAgentInitializer.initialize() has already installed the agent and set the guard
+    // property; installLocally() returns the same singleton without a second attach.
+    return ChaosAgentExtension.contextPlane(ChaosPlatform.installLocally());
+  }
+
+  /**
+   * Releases the context's control plane when the context closes: what it activated stops.
+   *
+   * @param chaosControlPlane the context's control plane
+   * @return the release, run by Spring when it destroys the context
+   */
+  @Bean
+  @ConditionalOnProperty(name = TEST_ENABLED_PROPERTY, havingValue = "true")
+  DisposableBean chaosControlPlaneRelease(final ChaosControlPlane chaosControlPlane) {
+    return () -> {
+      if (chaosControlPlane instanceof TrackingChaosControlPlane tracked) {
+        ChaosAgentExtension.releaseContextPlane(tracked);
+      }
+    };
   }
 }

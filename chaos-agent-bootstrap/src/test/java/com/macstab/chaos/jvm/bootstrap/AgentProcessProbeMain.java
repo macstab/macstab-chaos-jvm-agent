@@ -36,7 +36,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RecursiveAction;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -50,6 +49,9 @@ import javax.naming.InitialContext;
 
 public final class AgentProcessProbeMain {
   private AgentProcessProbeMain() {}
+
+  /** The number of application shutdown hooks {@link #appHooks()} registers. */
+  static final int APP_HOOKS = 40;
 
   // Expose defineClass for the CLASS_DEFINE probe.
   private static final class DefineTestLoader extends ClassLoader {
@@ -65,15 +67,19 @@ public final class AgentProcessProbeMain {
   // Simple serializable value for OBJECT_SERIALIZE / OBJECT_DESERIALIZE probes.
   private static final class ProbeValue implements Serializable {
     private static final long serialVersionUID = 1L;
+
+    @SuppressWarnings("UnusedVariable") // read back through serialization
     final String v = "chaos";
   }
 
   public static void main(final String[] args) throws Exception {
     switch (args[0]) {
-      // ── legacy / non-timing probes ──────────────────────────────────────────
+      // ── behaviour probes ──────────────────────────────────────────────────────────
       case "executor" -> executor();
       case "resource" -> resource();
       case "thread" -> thread();
+      case "reflection-first" -> reflectionFirst();
+      case "app-hooks" -> appHooks();
       case "classload" -> classload();
       case "gc" -> gc();
       case "exit" -> exit();
@@ -106,10 +112,10 @@ public final class AgentProcessProbeMain {
       case "reflection-invoke-delay" -> reflectionInvokeDelay();
       case "zip-deflate-delay" -> zipDeflateDelay();
       case "zip-inflate-delay" -> zipInflateDelay();
-      case "instant-now-delay" -> instantNowDelay();
-      case "local-datetime-now-delay" -> localDateTimeNowDelay();
-      case "zoned-datetime-now-delay" -> zonedDateTimeNowDelay();
-      case "date-new-delay" -> dateNewDelay();
+      case "instant-now-skew" -> instantNowSkew();
+      case "local-datetime-now-skew" -> localDateTimeNowSkew();
+      case "zoned-datetime-now-skew" -> zonedDateTimeNowSkew();
+      case "date-new-skew" -> dateNewSkew();
       case "system-gc-delay" -> systemGcDelay();
       case "system-exit-suppress" -> systemExitSuppress();
       case "direct-buffer-delay" -> directBufferDelay();
@@ -155,11 +161,29 @@ public final class AgentProcessProbeMain {
       case "jdbc-commit-delay" -> jdbcCommitDelay();
       case "jdbc-rollback-delay" -> jdbcRollbackDelay();
       case "jdbc-connection-acquire-delay" -> jdbcConnectionAcquireDelay();
+      // A child that never ends, for the bounded run's own test.
+      case "sleep-forever" -> Thread.sleep(Long.MAX_VALUE);
       default -> throw new IllegalArgumentException("unknown mode " + args[0]);
+    }
+    printApplied();
+  }
+
+  /**
+   * Prints {@code applied.<id>=<count>} for each scenario of the installed runtime, so a test sees
+   * whether the probed call applied its effect, not only how long it took.
+   */
+  private static void printApplied() {
+    final com.macstab.chaos.jvm.core.ChaosRuntime runtime = ChaosAgentBootstrap.installedRuntime();
+    if (runtime == null) {
+      return;
+    }
+    for (final com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioReport report :
+        runtime.diagnostics().snapshot().scenarios()) {
+      System.out.println("applied." + report.id() + "=" + report.appliedCount());
     }
   }
 
-  // ── legacy / non-timing probes ──────────────────────────────────────────────
+  // ── behaviour probes ──────────────────────────────────────────────────────────────
 
   private static void executor() throws Exception {
     final ThreadPoolExecutor executor =
@@ -185,11 +209,58 @@ public final class AgentProcessProbeMain {
       t.start();
       t.join();
       System.out.println("thread=started");
-    } catch (final RejectedExecutionException e) {
+    } catch (final OutOfMemoryError e) {
+      // a rejected platform thread start fails as the JVM's own "unable to create native thread"
       System.out.println("thread=rejected");
     } catch (final InterruptedException e) {
       Thread.currentThread().interrupt();
     }
+  }
+
+  /**
+   * The application's first reflective call under a startup plan whose {@code REFLECTION_INVOKE}
+   * reject applies once: prints {@code before.matched.<id>} for each scenario before the
+   * application reflects, initialises {@code java.util.logging} and prints whether the agent's
+   * deferred MBean registration followed within 10 s, then prints whether the call was rejected.
+   */
+  private static void reflectionFirst() throws Exception {
+    final com.macstab.chaos.jvm.core.ChaosRuntime runtime = ChaosAgentBootstrap.installedRuntime();
+    if (runtime != null) {
+      for (final com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioReport report :
+          runtime.diagnostics().snapshot().scenarios()) {
+        System.out.println("before.matched." + report.id() + "=" + report.matchedCount());
+      }
+    }
+    java.util.logging.Logger.getLogger("chaos-probe");
+    final ObjectName name = new ObjectName("com.macstab.chaos.jvm:type=ChaosDiagnostics");
+    final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+    boolean registered = false;
+    while (!registered && System.nanoTime() - deadline < 0) {
+      registered = ManagementFactory.getPlatformMBeanServer().isRegistered(name);
+      if (!registered) {
+        Thread.sleep(20);
+      }
+    }
+    System.out.println("mbeanRegistered=" + registered);
+    try {
+      String.class.getMethod("length").invoke("hello");
+      System.out.println("reflection=invoked");
+    } catch (final java.lang.reflect.InvocationTargetException rejected) {
+      System.out.println("reflection=rejected");
+    }
+  }
+
+  /**
+   * Registers {@link #APP_HOOKS} application shutdown hooks, each printing {@code app-hook=ran} at
+   * exit. The JDK starts the hooks in an order of its own, the agent's among them: many hooks make
+   * it all but certain that some start after the agent's.
+   */
+  private static void appHooks() {
+    for (int i = 0; i < APP_HOOKS; i++) {
+      Runtime.getRuntime()
+          .addShutdownHook(new Thread(() -> System.out.println("app-hook=ran"), "app-hook-" + i));
+    }
+    System.out.println("app-hooks=" + APP_HOOKS);
   }
 
   private static void classload() {
@@ -202,9 +273,20 @@ public final class AgentProcessProbeMain {
     }
   }
 
+  /** Prints how many collections {@code System.gc()} ran: 0 when it is suppressed. */
   private static void gc() {
+    final long before = gcCollections();
     System.gc();
-    System.out.println("gc=returned");
+    System.out.println("gcCollections=" + (gcCollections() - before));
+  }
+
+  private static long gcCollections() {
+    long collections = 0L;
+    for (final java.lang.management.GarbageCollectorMXBean collector :
+        ManagementFactory.getGarbageCollectorMXBeans()) {
+      collections += Math.max(0L, collector.getCollectionCount());
+    }
+    return collections;
   }
 
   private static void exit() {
@@ -251,6 +333,10 @@ public final class AgentProcessProbeMain {
 
   private static void fileWriteDelay() throws Exception {
     final String targetFile = System.getProperty("probe.file");
+    // The write path loaded and woven before the timed write.
+    try (final FileOutputStream warm = new FileOutputStream(targetFile + ".warm")) {
+      warm.write(0);
+    }
     final long start = System.nanoTime();
     try (final FileOutputStream fos = new FileOutputStream(targetFile, true)) {
       fos.write(0);
@@ -263,7 +349,8 @@ public final class AgentProcessProbeMain {
   private static void dnsDelay() {
     final long start = System.nanoTime();
     try {
-      InetAddress.getByName("127.0.0.1");
+      // A name, not an IP literal: a literal is not looked up and never evaluated.
+      InetAddress.getByName("localhost");
     } catch (final Exception ignored) {
     }
     System.out.println("elapsedMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
@@ -346,6 +433,7 @@ public final class AgentProcessProbeMain {
 
   // ── Queue ─────────────────────────────────────────────────────────────────────
 
+  @SuppressWarnings("ModifiedButNotUsed") // the put is the measured operation
   private static void queuePutDelay() throws Exception {
     final LinkedBlockingQueue<String> queue = new LinkedBlockingQueue<>();
     final long start = System.nanoTime();
@@ -421,7 +509,10 @@ public final class AgentProcessProbeMain {
   }
 
   private static void zipInflateDelay() throws Exception {
-    final byte[] raw = "chaos probe data chaos probe data chaos probe data".repeat(5).getBytes();
+    final byte[] raw =
+        "chaos probe data chaos probe data chaos probe data"
+            .repeat(5)
+            .getBytes(java.nio.charset.StandardCharsets.UTF_8);
     final byte[] compressed = new byte[4096];
     final Deflater deflater = new Deflater();
     deflater.setInput(raw);
@@ -438,14 +529,14 @@ public final class AgentProcessProbeMain {
     inflater.end();
   }
 
-  private static void instantNowDelay() {
+  private static void instantNowSkew() {
     // Clock skew is applied to the returned Instant value, not wall-clock time.
     final long realMillis = System.currentTimeMillis();
     final long returnedMillis = Instant.now().toEpochMilli();
     System.out.println("skewSeconds=" + ((returnedMillis - realMillis) / 1000));
   }
 
-  private static void localDateTimeNowDelay() {
+  private static void localDateTimeNowSkew() {
     // LocalDateTime has no zone; compare against the same zone as System.currentTimeMillis.
     final java.time.Instant realInstant =
         java.time.Instant.ofEpochMilli(System.currentTimeMillis());
@@ -456,13 +547,13 @@ public final class AgentProcessProbeMain {
         "skewSeconds=" + java.time.temporal.ChronoUnit.SECONDS.between(real, returned));
   }
 
-  private static void zonedDateTimeNowDelay() {
+  private static void zonedDateTimeNowSkew() {
     final long realMillis = System.currentTimeMillis();
     final long returnedMillis = ZonedDateTime.now().toInstant().toEpochMilli();
     System.out.println("skewSeconds=" + ((returnedMillis - realMillis) / 1000));
   }
 
-  private static void dateNewDelay() {
+  private static void dateNewSkew() {
     final long realMillis = System.currentTimeMillis();
     final long returnedMillis = new Date().getTime();
     System.out.println("skewSeconds=" + ((returnedMillis - realMillis) / 1000));
@@ -799,7 +890,7 @@ public final class AgentProcessProbeMain {
   // ── Sockets ───────────────────────────────────────────────────────────────────
 
   private static void socketConnectDelay() throws Exception {
-    try (final ServerSocket server = new ServerSocket(0)) {
+    try (final ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
       final Thread acceptor =
           new Thread(
               () -> {
@@ -821,7 +912,7 @@ public final class AgentProcessProbeMain {
   }
 
   private static void socketAcceptDelay() throws Exception {
-    try (final ServerSocket server = new ServerSocket(0)) {
+    try (final ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
       final Thread connector =
           new Thread(
               () -> {
@@ -843,7 +934,7 @@ public final class AgentProcessProbeMain {
   }
 
   private static void socketReadDelay() throws Exception {
-    try (final ServerSocket server = new ServerSocket(0)) {
+    try (final ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
       final Thread sender =
           new Thread(
               () -> {
@@ -869,7 +960,7 @@ public final class AgentProcessProbeMain {
   }
 
   private static void socketWriteDelay() throws Exception {
-    try (final ServerSocket server = new ServerSocket(0)) {
+    try (final ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
       final Thread acceptor =
           new Thread(
               () -> {
@@ -893,7 +984,7 @@ public final class AgentProcessProbeMain {
   }
 
   private static void socketCloseDelay() throws Exception {
-    try (final ServerSocket server = new ServerSocket(0)) {
+    try (final ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
       final Thread acceptor =
           new Thread(
               () -> {
@@ -929,7 +1020,7 @@ public final class AgentProcessProbeMain {
                   ch.write(
                       ByteBuffer.wrap(
                           "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
-                              .getBytes()));
+                              .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
                   ch.close();
                 } catch (final Exception ignored) {
                 }
@@ -962,7 +1053,7 @@ public final class AgentProcessProbeMain {
                   ch.write(
                       ByteBuffer.wrap(
                           "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
-                              .getBytes()));
+                              .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
                   ch.close();
                 } catch (final Exception ignored) {
                 }

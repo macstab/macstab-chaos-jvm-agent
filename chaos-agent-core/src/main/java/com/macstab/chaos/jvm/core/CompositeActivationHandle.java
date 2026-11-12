@@ -27,20 +27,22 @@ import java.util.List;
 final class CompositeActivationHandle implements ChaosActivationHandle {
   private final String id;
   private final List<ChaosActivationHandle> delegates;
+  private final Runnable onClose;
+  private final java.util.concurrent.atomic.AtomicBoolean closed =
+      new java.util.concurrent.atomic.AtomicBoolean();
 
   /**
-   * Creates a composite handle with the given logical ID and delegate handles.
+   * Creates a composite handle that runs {@code onClose} after closing its delegates.
    *
-   * <p>The delegate list is defensively copied at construction time via {@link List#copyOf}.
-   *
-   * @param id a logical identifier for this composite, typically combining the source context and
-   *     the plan name (e.g. {@code "session-plan:myPlan"})
-   * @param delegates the individual handles to which all operations will be broadcast; must not be
-   *     {@code null} or contain {@code null} elements
+   * @param id the logical identifier
+   * @param delegates the individual handles
+   * @param onClose run once the delegates are closed, even if one of them failed
    */
-  CompositeActivationHandle(final String id, final List<ChaosActivationHandle> delegates) {
+  CompositeActivationHandle(
+      final String id, final List<ChaosActivationHandle> delegates, final Runnable onClose) {
     this.id = id;
     this.delegates = List.copyOf(delegates);
+    this.onClose = onClose;
   }
 
   /**
@@ -56,62 +58,91 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
   /** Broadcasts {@link ChaosActivationHandle#start()} to all delegate handles. */
   @Override
   public void start() {
-    broadcast("start", ChaosActivationHandle::start);
+    broadcast(ChaosActivationHandle::start);
   }
 
   /** Broadcasts {@link ChaosActivationHandle#stop()} to all delegate handles. */
   @Override
   public void stop() {
-    broadcast("stop", ChaosActivationHandle::stop);
+    broadcast(ChaosActivationHandle::stop);
   }
 
   /** Closes every scenario of the plan, removing each from the registry. */
   @Override
   public void close() {
-    broadcast("close", ChaosActivationHandle::close);
+    // Idempotent: a second close (try-with-resources plus framework teardown) must not run
+    // onClose again after another plan took over the same ids.
+    if (!closed.compareAndSet(false, true)) {
+      return;
+    }
+    try {
+      broadcast(ChaosActivationHandle::close);
+    } finally {
+      onClose.run();
+    }
   }
 
   /** Broadcasts {@link ChaosActivationHandle#release()} to all delegate handles. */
   @Override
   public void release() {
-    broadcast("release", ChaosActivationHandle::release);
+    broadcast(ChaosActivationHandle::release);
   }
 
   /**
    * Applies the given action to every delegate, collecting failures rather than letting the first
    * failure short-circuit the rest. {@code delegates.forEach(...)} stops on the first thrown
    * exception, leaking any delegate that came after it — for {@code stop} and {@code release} that
-   * means leaked scenarios / unrestored state. Aggregate via {@code addSuppressed} so the caller
-   * sees every failure, not just the one that happened to throw first.
+   * means leaked scenarios / unrestored state. The first failure, an exception or an error, is
+   * thrown as it is (a caller catching the API exception type of a scenario handle catches it from
+   * a plan handle too), with the later ones added to it as suppressed.
    */
-  private void broadcast(
-      final String op, final java.util.function.Consumer<ChaosActivationHandle> action) {
-    RuntimeException aggregate = null;
+  private void broadcast(final java.util.function.Consumer<ChaosActivationHandle> action) {
+    Throwable first = null;
     for (final ChaosActivationHandle delegate : delegates) {
       try {
         action.accept(delegate);
-      } catch (final RuntimeException perDelegate) {
-        if (aggregate == null) {
-          aggregate =
-              new RuntimeException(
-                  "one or more delegates failed during composite " + op, perDelegate);
-        } else {
-          aggregate.addSuppressed(perDelegate);
+      } catch (final RuntimeException | Error perDelegate) {
+        if (first == null) {
+          first = perDelegate;
+        } else if (!first.equals(perDelegate)) {
+          first.addSuppressed(perDelegate);
         }
       }
     }
-    if (aggregate != null) {
-      throw aggregate;
+    if (first instanceof RuntimeException runtimeFailure) {
+      throw runtimeFailure;
     }
+    if (first instanceof Error error) {
+      throw error;
+    }
+  }
+
+  @Override
+  public long matchedCount() {
+    long total = 0L;
+    for (final ChaosActivationHandle handle : delegates) {
+      total += handle.matchedCount();
+    }
+    return total;
+  }
+
+  @Override
+  public long appliedCount() {
+    long total = 0L;
+    for (final ChaosActivationHandle handle : delegates) {
+      total += handle.appliedCount();
+    }
+    return total;
   }
 
   /**
    * Returns the aggregated state across all delegates.
    *
    * <p>{@code ACTIVE} if any delegate is active, {@code STOPPED} if every delegate has reached the
-   * terminal {@code STOPPED} state, otherwise {@code INACTIVE}. Collapsing post-teardown state to
-   * {@code INACTIVE} would violate the {@link ChaosActivationHandle} contract: callers asserting
-   * {@code handle.state() == STOPPED} after {@code destroy()} would never see the transition.
+   * terminal {@code STOPPED} state, {@code REGISTERED} if none has started yet (a manually started
+   * plan), otherwise {@code INACTIVE}. Collapsing post-teardown state to {@code INACTIVE} would
+   * violate the {@link ChaosActivationHandle} contract: callers asserting {@code handle.state() ==
+   * STOPPED} after {@code destroy()} would never see the transition.
    *
    * @return the aggregated state across all delegates
    */
@@ -119,6 +150,7 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
   public ChaosDiagnostics.ScenarioState state() {
     boolean anyActive = false;
     boolean allStopped = !delegates.isEmpty();
+    boolean allRegistered = !delegates.isEmpty();
     for (final ChaosActivationHandle handle : delegates) {
       final ChaosDiagnostics.ScenarioState delegateState = handle.state();
       if (delegateState == ChaosDiagnostics.ScenarioState.ACTIVE) {
@@ -127,12 +159,18 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
       if (delegateState != ChaosDiagnostics.ScenarioState.STOPPED) {
         allStopped = false;
       }
+      if (delegateState != ChaosDiagnostics.ScenarioState.REGISTERED) {
+        allRegistered = false;
+      }
     }
     if (anyActive) {
       return ChaosDiagnostics.ScenarioState.ACTIVE;
     }
     if (allStopped) {
       return ChaosDiagnostics.ScenarioState.STOPPED;
+    }
+    if (allRegistered) {
+      return ChaosDiagnostics.ScenarioState.REGISTERED;
     }
     return ChaosDiagnostics.ScenarioState.INACTIVE;
   }

@@ -24,7 +24,7 @@ import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.function.Supplier;
-import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Produces corrupted return values according to a {@link ChaosEffect.ReturnValueStrategy}.
@@ -39,7 +39,7 @@ import java.util.logging.Logger;
  */
 final class ReturnValueCorruptor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   private static final Map<Class<?>, Object> ZERO_VALUES =
       Map.ofEntries(
@@ -107,22 +107,19 @@ final class ReturnValueCorruptor {
    * @param scenarioId the scenario ID, used in fallback log messages
    * @return the corrupted value, or {@code null} when NULL strategy is applied to a reference type
    */
-  static Object corrupt(
+  static @Nullable Object corrupt(
       final ChaosEffect.ReturnValueStrategy strategy,
-      final Class<?> returnType,
-      final Object actualValue,
+      final @Nullable Class<?> returnType,
+      final @Nullable Object actualValue,
       final String scenarioId) {
-    // ByteBuddy cannot always statically bind a declared return class at the advice site: void
-    // methods, bridge methods, and dynamically-generated lambdas arrive here with returnType ==
-    // null. Every strategy below dereferences returnType (isPrimitive, getName, map lookup), so
-    // without this guard we NPE from inside chaos advice — indistinguishable from a bug in the
-    // instrumented method. Pass the value through unchanged: nothing to corrupt for a void
-    // return, and the caller sees "no chaos applied" rather than an inexplicable crash.
+    // The dispatch decides a void or unknown return type is not applicable before it counts the
+    // corruption (DispatchEngine.terminalActionFor), so no such call reaches here; a direct caller
+    // passing null gets the value back unchanged instead of a NullPointerException.
     if (returnType == null) {
       return actualValue;
     }
     return switch (strategy) {
-      case NULL -> corruptNull(returnType, actualValue, scenarioId);
+      case NULL -> corruptNull(returnType, scenarioId);
       case ZERO -> corruptZero(returnType);
       case EMPTY -> corruptEmpty(returnType, scenarioId);
       case BOUNDARY_MAX ->
@@ -132,12 +129,11 @@ final class ReturnValueCorruptor {
     };
   }
 
-  private static Object corruptNull(
-      final Class<?> returnType, final Object actualValue, final String scenarioId) {
+  private static @Nullable Object corruptNull(final Class<?> returnType, final String scenarioId) {
     if (returnType.isPrimitive()) {
       LOGGER.fine(
           () ->
-              "ReturnValueCorruption NULL is inapplicable to primitive "
+              "[chaos-agent] ReturnValueCorruption NULL is inapplicable to primitive "
                   + returnType.getName()
                   + " in scenario "
                   + scenarioId
@@ -147,14 +143,23 @@ final class ReturnValueCorruptor {
     return null;
   }
 
-  private static Object corruptZero(final Class<?> returnType) {
+  private static @Nullable Object corruptZero(final Class<?> returnType) {
     // Reference types not in the map return null — the closest representation of zero
     return ZERO_VALUES.getOrDefault(returnType, null);
   }
 
-  private static Object corruptEmpty(final Class<?> returnType, final String scenarioId) {
+  private static @Nullable Object corruptEmpty(final Class<?> returnType, final String scenarioId) {
     Object result;
     if ((result = tryEmptyString(returnType)) != null) {
+      return result;
+    }
+    if (returnType.isArray()) {
+      return java.lang.reflect.Array.newInstance(returnType.getComponentType(), 0);
+    }
+    if ((result = EMPTY_VALUES.get(returnType)) != null) {
+      return result;
+    }
+    if ((result = tryEmptyStream(returnType)) != null) {
       return result;
     }
     if ((result = tryEmptyContainer(returnType)) != null) {
@@ -167,7 +172,7 @@ final class ReturnValueCorruptor {
     // safely substitute use ZERO.
     LOGGER.fine(
         () ->
-            "ReturnValueCorruption EMPTY is inapplicable to "
+            "[chaos-agent] ReturnValueCorruption EMPTY is inapplicable to "
                 + returnType.getName()
                 + " in scenario "
                 + scenarioId
@@ -175,13 +180,23 @@ final class ReturnValueCorruptor {
     return corruptZero(returnType);
   }
 
-  /** Empty String fallback. Returns {@code ""} for {@code String.class}, else {@code null}. */
-  private static Object tryEmptyString(final Class<?> returnType) {
-    if (returnType == String.class) {
+  /**
+   * Empty String fallback. Returns {@code ""} for {@code String} and {@code CharSequence}, else
+   * {@code null}.
+   */
+  private static @Nullable Object tryEmptyString(final Class<?> returnType) {
+    if (returnType == String.class || returnType == CharSequence.class) {
       return "";
     }
     return null;
   }
+
+  /** The empty primitive optionals: final value types, so one shared instance each. */
+  private static final Map<Class<?>, Object> EMPTY_VALUES =
+      Map.of(
+          java.util.OptionalInt.class, java.util.OptionalInt.empty(),
+          java.util.OptionalLong.class, java.util.OptionalLong.empty(),
+          java.util.OptionalDouble.class, java.util.OptionalDouble.empty());
 
   /**
    * Fresh, mutable, empty containers in order of preference. For an interface or abstract return
@@ -190,6 +205,8 @@ final class ReturnValueCorruptor {
    * only an instance of exactly that type or a subtype fits. Mutable instances are used because
    * callers may add to the result.
    */
+  // Every concrete container type a method may declare; LinkedList is one of them.
+  @SuppressWarnings("JdkObsolete")
   private static final List<Supplier<Object>> EMPTY_CONTAINERS =
       List.of(
           ArrayList::new,
@@ -215,13 +232,13 @@ final class ReturnValueCorruptor {
    * Returns an empty collection or map that is assignable to {@code returnType}, or {@code null}.
    *
    * <p>ByteBuddy emits a checkcast to the declared type where the corrupted value is written, so
-   * the substitute must be an instance of that type. An earlier version tested the opposite
-   * direction ({@code ArrayList.class.isAssignableFrom(returnType)}), which is true for subclasses:
-   * a method declared to return {@code javax.management.AttributeList} got a plain {@code
-   * ArrayList}, and {@code BlockingQueue} or {@code ConcurrentNavigableMap} got a {@code
+   * the substitute must be an instance of that type. The test runs in this direction because the
+   * opposite one ({@code ArrayList.class.isAssignableFrom(returnType)}) is also true for
+   * subclasses: a method declared to return {@code javax.management.AttributeList} would get a
+   * plain {@code ArrayList}, and {@code BlockingQueue} or {@code ConcurrentNavigableMap} a {@code
    * LinkedList} or {@code TreeMap}, all failing with {@code ClassCastException} at the call site.
    */
-  private static Object tryEmptyContainer(final Class<?> returnType) {
+  private static @Nullable Object tryEmptyContainer(final Class<?> returnType) {
     if (!Collection.class.isAssignableFrom(returnType)
         && !Map.class.isAssignableFrom(returnType)
         && returnType != Iterable.class) {
@@ -236,15 +253,32 @@ final class ReturnValueCorruptor {
     return null;
   }
 
+  /** A fresh empty stream for each stream type, or {@code null}. */
+  private static @Nullable Object tryEmptyStream(final Class<?> returnType) {
+    if (returnType == java.util.stream.Stream.class) {
+      return java.util.stream.Stream.empty();
+    }
+    if (returnType == java.util.stream.IntStream.class) {
+      return java.util.stream.IntStream.empty();
+    }
+    if (returnType == java.util.stream.LongStream.class) {
+      return java.util.stream.LongStream.empty();
+    }
+    if (returnType == java.util.stream.DoubleStream.class) {
+      return java.util.stream.DoubleStream.empty();
+    }
+    return null;
+  }
+
   /** Optional is a value type; {@link Optional#empty()} is always assignable-compatible. */
-  private static Object tryEmptyOptional(final Class<?> returnType) {
+  private static @Nullable Object tryEmptyOptional(final Class<?> returnType) {
     if (Optional.class.isAssignableFrom(returnType)) {
       return Optional.empty();
     }
     return null;
   }
 
-  private static Object corruptBoundary(
+  private static @Nullable Object corruptBoundary(
       final Map<Class<?>, Object> boundaryValues,
       final String strategyName,
       final Class<?> returnType,
@@ -255,7 +289,7 @@ final class ReturnValueCorruptor {
     }
     LOGGER.fine(
         () ->
-            "ReturnValueCorruption "
+            "[chaos-agent] ReturnValueCorruption "
                 + strategyName
                 + " is inapplicable to "
                 + returnType.getName()

@@ -60,6 +60,25 @@ visible on the [releases page](https://github.com/macstab/macstab-chaos-jvm-agen
 - Issues that require an attacker to already control the JVM-launching
   process — the agent is not a trust boundary against the launcher itself
 
+## Where enabling switches may come from
+
+Plan authors are trusted: whoever writes a chaos plan may inject faults. A
+switch that enables fault injection or a management endpoint
+(`macstab.chaos.enabled`, `macstab.chaos.actuator.enabled`,
+`macstab.chaos.management.enabled`, `macstab.chaos.management.allow-anonymous`,
+`macstab.chaos.config-file`) is honoured only when it comes from a
+launch-time local source: system properties, environment variables, the
+command line, the application's own config files and test properties. From
+any other source (Spring Cloud Config, Consul, Vault, a Kubernetes config
+client) it is ignored with a log line naming the source, unless
+`macstab.chaos.allow-remote-enable=true` itself comes from a launch-time local
+source. A source the agent does not know, including one a future framework
+release renames, is ignored the same way. The management endpoints are
+authenticated. Booleans accept `true|false|1|0|yes|no|on|off`; any other value
+leaves the switch off with a warning. The sources each framework counts as
+local are listed in
+[configuration-reference §10.1](docs/configuration-reference.md#101-configuration-trust).
+
 ## Credit
 
 Researchers are credited in the published advisory and in the release notes.

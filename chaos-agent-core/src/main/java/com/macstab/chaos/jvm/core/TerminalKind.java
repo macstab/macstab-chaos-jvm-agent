@@ -1,31 +1,49 @@
 package com.macstab.chaos.jvm.core;
 
-import com.macstab.chaos.jvm.api.ChaosEffect;
-
+/** What a {@link TerminalAction} does; each kind has its own record carrying its payload. */
 enum TerminalKind {
-  /** Throw the enclosed {@link TerminalAction#throwable()} from the interception site. */
+  /** Throw from the interception site: {@link TerminalAction.Throw}. */
   THROW,
   /**
-   * Return a specific value from the interception site. When {@link TerminalAction#returnValue()}
-   * is {@link Boolean#FALSE} and the call site uses {@link ChaosRuntime#applyPreDecision}, a {@link
-   * java.util.concurrent.RejectedExecutionException} is thrown instead.
+   * Return a specific value from the interception site: {@link TerminalAction.Return}. Only the
+   * operations whose call sites return it (queue offer and poll, future completion, resource
+   * lookup) produce one.
    */
   RETURN,
   /**
-   * Complete a {@link java.util.concurrent.CompletableFuture} exceptionally with the enclosed
-   * throwable.
+   * Complete a {@link java.util.concurrent.CompletableFuture} exceptionally: {@link
+   * TerminalAction.CompleteExceptionally}.
    */
   COMPLETE_EXCEPTIONALLY,
   /**
-   * Silently suppress the operation by substituting a no-op wrapper. Used exclusively for executor
-   * and fork-join task decoration — the original task is replaced with an empty lambda so the
-   * executor continues to function normally while the submitted work is discarded.
+   * Silently suppress the operation: {@link TerminalAction.Suppress}. For executor and fork-join
+   * task decoration the original task is replaced with an empty one, so the executor keeps working
+   * while the submitted work is discarded.
    */
   SUPPRESS,
   /**
-   * Corrupt the return value of an instrumented method on exit. The actual corruption is computed
-   * by {@link ReturnValueCorruptor} using the strategy from {@link
-   * ChaosEffect.ReturnValueCorruptionEffect}.
+   * Corrupt the return value of an instrumented method on exit, computed by {@link
+   * ReturnValueCorruptor}: {@link TerminalAction.CorruptReturn}.
    */
   CORRUPT_RETURN,
+  /** Cap the byte count of a read or write: {@link TerminalAction.CapLength}. */
+  CAP_LENGTH,
+  /** Flip one bit in the bytes the read returns: {@link TerminalAction.CorruptRead}. */
+  CORRUPT_READ,
+  /** Close the socket abortively ({@code SO_LINGER} 0): {@link TerminalAction.AbortiveClose}. */
+  ABORTIVE_CLOSE,
+  /** Wait out the call's own timeout, then fail it: {@link TerminalAction.Timeout}. */
+  TIMEOUT,
+  /**
+   * The effect does not apply to this call (a {@code TimeoutEffect} on a socket without a timeout):
+   * the scenario neither takes effect nor counts an application. {@link
+   * TerminalAction.NotApplicable}.
+   */
+  NOT_APPLICABLE,
+  /** Reshape a DNS answer: {@link TerminalAction.DnsAnswer}. */
+  DNS_SHAPE,
+  /** Resolve another host instead: {@link TerminalAction.DnsRewrite}. */
+  REWRITE,
+  /** Connect to another endpoint instead: {@link TerminalAction.Redirect}. */
+  REDIRECT,
 }

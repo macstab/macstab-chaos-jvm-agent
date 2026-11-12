@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.spring.boot3;
 
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import com.macstab.chaos.jvm.spring.boot.common.TrustedChaosEnablement;
+import com.macstab.chaos.jvm.startup.LogText;
 import java.util.Collections;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -26,22 +27,30 @@ import org.springframework.core.env.MapPropertySource;
  * macstab.chaos.enabled=true} is present in the resolved environment.
  *
  * <p>On successful attach a single-entry property source named {@value #ATTACH_MARKER_SOURCE} is
- * prepended to the environment exposing {@link #ATTACH_MARKER_PROPERTY}{@code = spring-boot-3}.
- * This lets integration tests assert the EPP actually fired rather than a later {@code
- * ChaosAutoConfiguration} bean.
+ * prepended to the environment exposing {@link #ATTACH_MARKER_PROPERTY}{@code = spring-boot-3}. It
+ * shows in the environment (e.g. {@code /actuator/env}) that the agent attached during environment
+ * preparation, before any bean was created.
+ *
+ * <p>A failed attach ({@link RuntimeException} or {@link LinkageError}) is logged once and does not
+ * abort startup: a property source named {@value #ATTACH_FAILED_SOURCE} sets {@link
+ * TrustedChaosEnablement#ATTACH_FAILED_PROPERTY}{@code =true}, so the auto-configuration creates no
+ * chaos bean and does not attach again.
  */
 public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
 
   /** Name of the property source registered when this EPP attaches the agent. */
   public static final String ATTACH_MARKER_SOURCE = "macstabChaosAgentAttachMarker";
 
+  /** Name of the property source registered when the agent failed to attach. */
+  static final String ATTACH_FAILED_SOURCE = "macstabChaosAgentAttachFailure";
+
   /** Key whose presence proves this EPP ran and attached the agent. */
   public static final String ATTACH_MARKER_PROPERTY = "macstab.chaos.agent.attach-phase";
 
   /**
-   * Runs directly after config data processing. An earlier version ran at {@code
-   * HIGHEST_PRECEDENCE}, before {@code application.properties} / {@code .yml} were loaded, so a
-   * flag set there never triggered the early attach.
+   * Runs directly after config data processing, so a flag set in {@code application.properties} /
+   * {@code .yml} is already loaded and triggers the early attach; at {@code HIGHEST_PRECEDENCE} it
+   * would not be.
    */
   static final int ORDER = ConfigDataEnvironmentPostProcessor.ORDER + 1;
 
@@ -50,8 +59,21 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
   private static final Logger LOGGER =
       Logger.getLogger(ChaosAgentEnvironmentPostProcessor.class.getName());
 
+  private final Runnable install;
+
   /** Default constructor invoked by Spring Boot via SPI. */
-  public ChaosAgentEnvironmentPostProcessor() {}
+  public ChaosAgentEnvironmentPostProcessor() {
+    this(ChaosPlatform::installLocally);
+  }
+
+  /**
+   * Test seam: runs {@code install} instead of {@link ChaosPlatform#installLocally()}.
+   *
+   * @param install the agent installation
+   */
+  ChaosAgentEnvironmentPostProcessor(final Runnable install) {
+    this.install = install;
+  }
 
   @Override
   public void postProcessEnvironment(
@@ -61,7 +83,7 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
       LOGGER.log(
           Level.WARNING,
           () ->
-              "chaos-agent: ignoring macstab.chaos.enabled=true because it did not originate from a"
+              "[chaos-agent] ignoring macstab.chaos.enabled=true because it did not originate from a"
                   + " trusted property source; set macstab.chaos.allow-remote-enable=true via a"
                   + " trusted source to opt in");
       return;
@@ -70,13 +92,25 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
       return;
     }
     try {
-      ChaosPlatform.installLocally();
+      install.run();
       environment.getPropertySources().addFirst(buildAttachMarkerSource());
-    } catch (final RuntimeException exception) {
+    } catch (final RuntimeException | LinkageError failure) {
+      // LinkageError: the attach mechanism or a class the agent needs is missing; that must not
+      // abort application startup. The marker keeps the auto-configuration from attaching again.
       LOGGER.log(
           Level.WARNING,
-          exception,
-          () -> "chaos-agent: failed to self-attach during Spring Boot startup");
+          () ->
+              "[chaos-agent] failed to self-attach during Spring Boot startup; chaos stays off"
+                  + " (reason: "
+                  + LogText.sanitize(failure.toString())
+                  + ")");
+      environment
+          .getPropertySources()
+          .addFirst(
+              new MapPropertySource(
+                  ATTACH_FAILED_SOURCE,
+                  Collections.singletonMap(
+                      TrustedChaosEnablement.ATTACH_FAILED_PROPERTY, Boolean.TRUE.toString())));
     }
   }
 

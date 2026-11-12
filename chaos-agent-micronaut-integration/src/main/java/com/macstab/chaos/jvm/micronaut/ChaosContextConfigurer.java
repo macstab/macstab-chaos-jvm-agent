@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.micronaut;
 
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
+import com.macstab.chaos.jvm.startup.TrustedSources;
 import io.micronaut.context.ApplicationContextBuilder;
 import io.micronaut.context.ApplicationContextConfigurer;
 import java.util.logging.Level;
@@ -19,14 +20,15 @@ import java.util.logging.Logger;
  * <p>Installation is gated on the {@value #ENABLED_PROPERTY} system property / environment variable
  * (see {@link #chaosEnabled()}). When the application leaves this unset or sets it to {@code
  * false}, the configurer is a no-op — the integration jar can be left on the classpath in
- * production without triggering byte-code instrumentation. This mirrors the {@code
- * macstab.chaos.enabled} gate used by the Spring Boot starters.
+ * production without triggering byte-code instrumentation. The property is read from system
+ * properties and the environment only, because the configurer runs before Micronaut's own
+ * configuration is available.
  *
  * <p>{@link ChaosPlatform#installLocally()} is idempotent; invoking this configurer on a JVM that
  * already has the chaos agent installed (for example, via {@code -javaagent:}) is a no-op. Any
- * {@link RuntimeException} thrown by the installation path is logged and swallowed so a failure to
- * attach does not abort Micronaut startup — production traffic must be able to serve even when the
- * chaos platform is unavailable.
+ * {@link RuntimeException} or {@link LinkageError} thrown by the installation path is logged and
+ * swallowed so a failure to attach does not abort Micronaut startup — production traffic must be
+ * able to serve even when the chaos platform is unavailable.
  */
 public class ChaosContextConfigurer implements ApplicationContextConfigurer {
 
@@ -37,12 +39,21 @@ public class ChaosContextConfigurer implements ApplicationContextConfigurer {
    */
   public static final String ENABLED_PROPERTY = "macstab.chaos.enabled";
 
-  private static final String ENABLED_ENV_VAR = ENABLED_PROPERTY.replace('.', '_').toUpperCase();
+  private static final String ENABLED_ENV_VAR =
+      ENABLED_PROPERTY.replace('.', '_').toUpperCase(java.util.Locale.ROOT);
 
   private static final Logger LOGGER = Logger.getLogger(ChaosContextConfigurer.class.getName());
 
+  private final Runnable install;
+
   /** Default constructor invoked by Micronaut when the configurer is discovered. */
-  public ChaosContextConfigurer() {}
+  public ChaosContextConfigurer() {
+    this(ChaosPlatform::installLocally);
+  }
+
+  ChaosContextConfigurer(final Runnable install) {
+    this.install = install;
+  }
 
   @Override
   public void configure(final ApplicationContextBuilder builder) {
@@ -50,12 +61,14 @@ public class ChaosContextConfigurer implements ApplicationContextConfigurer {
       return;
     }
     try {
-      ChaosPlatform.installLocally();
-    } catch (final RuntimeException exception) {
+      install.run();
+    } catch (final RuntimeException | LinkageError exception) {
+      // LinkageError: the attach mechanism or a class the agent needs is missing; that must not
+      // abort the context bootstrap.
       LOGGER.log(
           Level.WARNING,
           exception,
-          () -> "chaos-agent: failed to self-attach during Micronaut context bootstrap");
+          () -> "[chaos-agent] failed to self-attach during Micronaut context bootstrap");
     }
   }
 
@@ -64,12 +77,10 @@ public class ChaosContextConfigurer implements ApplicationContextConfigurer {
    * environment variable. The environment fallback uses upper-snake-case ({@code
    * MACSTAB_CHAOS_ENABLED}) to match the twelve-factor convention Micronaut itself adopts.
    */
-  private static boolean chaosEnabled() {
+  static boolean chaosEnabled() {
     final String sysProp = System.getProperty(ENABLED_PROPERTY);
-    if (sysProp != null) {
-      return Boolean.parseBoolean(sysProp);
-    }
-    final String envVar = System.getenv(ENABLED_ENV_VAR);
-    return Boolean.parseBoolean(envVar);
+    return sysProp != null
+        ? TrustedSources.isTrue(ENABLED_PROPERTY, sysProp)
+        : TrustedSources.isTrue(ENABLED_ENV_VAR, System.getenv(ENABLED_ENV_VAR));
   }
 }

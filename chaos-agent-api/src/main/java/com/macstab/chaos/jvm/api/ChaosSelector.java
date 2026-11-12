@@ -1,9 +1,8 @@
 package com.macstab.chaos.jvm.api;
 
-import com.fasterxml.jackson.annotation.JsonSubTypes;
-import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import java.util.EnumSet;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Defines the targeting predicate for a chaos scenario.
@@ -20,28 +19,6 @@ import java.util.Set;
  *       any specific operation. Used with stressor effects (HeapPressure, Deadlock, etc.).
  * </ul>
  */
-@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
-@JsonSubTypes({
-  @JsonSubTypes.Type(value = ChaosSelector.ThreadSelector.class, name = "thread"),
-  @JsonSubTypes.Type(value = ChaosSelector.ExecutorSelector.class, name = "executor"),
-  @JsonSubTypes.Type(value = ChaosSelector.QueueSelector.class, name = "queue"),
-  @JsonSubTypes.Type(value = ChaosSelector.AsyncSelector.class, name = "async"),
-  @JsonSubTypes.Type(value = ChaosSelector.SchedulingSelector.class, name = "scheduling"),
-  @JsonSubTypes.Type(value = ChaosSelector.ShutdownSelector.class, name = "shutdown"),
-  @JsonSubTypes.Type(value = ChaosSelector.ClassLoadingSelector.class, name = "classLoading"),
-  @JsonSubTypes.Type(value = ChaosSelector.MethodSelector.class, name = "method"),
-  @JsonSubTypes.Type(value = ChaosSelector.MonitorSelector.class, name = "monitor"),
-  @JsonSubTypes.Type(value = ChaosSelector.JvmRuntimeSelector.class, name = "jvmRuntime"),
-  @JsonSubTypes.Type(value = ChaosSelector.NioSelector.class, name = "nio"),
-  @JsonSubTypes.Type(value = ChaosSelector.NetworkSelector.class, name = "network"),
-  @JsonSubTypes.Type(value = ChaosSelector.ThreadLocalSelector.class, name = "threadLocal"),
-  @JsonSubTypes.Type(value = ChaosSelector.HttpClientSelector.class, name = "httpClient"),
-  @JsonSubTypes.Type(value = ChaosSelector.JdbcSelector.class, name = "jdbc"),
-  @JsonSubTypes.Type(value = ChaosSelector.DnsSelector.class, name = "dns"),
-  @JsonSubTypes.Type(value = ChaosSelector.SslSelector.class, name = "ssl"),
-  @JsonSubTypes.Type(value = ChaosSelector.FileIoSelector.class, name = "fileIo"),
-  @JsonSubTypes.Type(value = ChaosSelector.StressSelector.class, name = "stress"),
-})
 public sealed interface ChaosSelector
     permits ChaosSelector.ThreadSelector,
         ChaosSelector.ExecutorSelector,
@@ -61,15 +38,21 @@ public sealed interface ChaosSelector
         ChaosSelector.DnsSelector,
         ChaosSelector.SslSelector,
         ChaosSelector.FileIoSelector,
+        ChaosSelector.MessagingSelector,
+        ChaosSelector.RpcSelector,
+        ChaosSelector.RedisSelector,
+        ChaosSelector.AwsSdkSelector,
+        ChaosSelector.NettySelector,
+        ChaosSelector.ProcessSelector,
         ChaosSelector.StressSelector {
 
   // ── Factory methods ────────────────────────────────────────────────────────
 
   /**
-   * Returns a selector that matches thread start operations of the given {@link ThreadKind}.
+   * Returns a selector that matches thread starts and sleeps of the given {@link ThreadKind}.
    *
    * <p>Valid operations: {@link OperationType#THREAD_START}, {@link
-   * OperationType#VIRTUAL_THREAD_START}.
+   * OperationType#VIRTUAL_THREAD_START}, {@link OperationType#THREAD_SLEEP}.
    *
    * @param operations set of thread operations to intercept; must not be empty
    * @param kind {@link ThreadKind#ANY} matches all threads; use {@link ThreadKind#VIRTUAL} to
@@ -86,7 +69,7 @@ public sealed interface ChaosSelector
    *
    * <p>Valid operations: {@link OperationType#EXECUTOR_SUBMIT}, {@link
    * OperationType#EXECUTOR_WORKER_RUN}, {@link OperationType#EXECUTOR_SHUTDOWN}, {@link
-   * OperationType#EXECUTOR_AWAIT_TERMINATION}.
+   * OperationType#EXECUTOR_AWAIT_TERMINATION}, {@link OperationType#FORK_JOIN_TASK_RUN}.
    *
    * @param operations set of executor operations to intercept; must not be empty
    * @return an ExecutorSelector
@@ -109,11 +92,11 @@ public sealed interface ChaosSelector
   }
 
   /**
-   * Returns a selector that matches {@link java.util.concurrent.CompletableFuture} completion
-   * operations.
+   * Returns a selector that matches {@link java.util.concurrent.CompletableFuture} completions and
+   * cancellations.
    *
    * <p>Valid operations: {@link OperationType#ASYNC_COMPLETE}, {@link
-   * OperationType#ASYNC_COMPLETE_EXCEPTIONALLY}.
+   * OperationType#ASYNC_COMPLETE_EXCEPTIONALLY}, {@link OperationType#ASYNC_CANCEL}.
    *
    * @param operations set of async operations to intercept; must not be empty
    * @return an AsyncSelector
@@ -123,8 +106,10 @@ public sealed interface ChaosSelector
   }
 
   /**
-   * Returns a selector that matches scheduled task submission and tick operations across any {@link
-   * java.util.concurrent.ScheduledExecutorService}.
+   * Returns a selector that matches scheduled task submission and tick operations of a {@link
+   * java.util.concurrent.ScheduledThreadPoolExecutor} (the class behind {@code
+   * Executors.newScheduledThreadPool}); another {@link
+   * java.util.concurrent.ScheduledExecutorService} is not woven.
    *
    * <p>Valid operations: {@link OperationType#SCHEDULE_SUBMIT}, {@link
    * OperationType#SCHEDULE_TICK}.
@@ -161,7 +146,7 @@ public sealed interface ChaosSelector
    * @return a ClassLoadingSelector
    */
   static ClassLoadingSelector classLoading(
-      final Set<OperationType> operations, final NamePattern targetPattern) {
+      final Set<OperationType> operations, final @Nullable NamePattern targetPattern) {
     return new ClassLoadingSelector(operations, targetPattern, NamePattern.any());
   }
 
@@ -189,9 +174,9 @@ public sealed interface ChaosSelector
    */
   static MethodSelector method(
       final Set<OperationType> operations,
-      final NamePattern classPattern,
-      final NamePattern methodNamePattern) {
-    return new MethodSelector(operations, classPattern, methodNamePattern, null);
+      final @Nullable NamePattern classPattern,
+      final @Nullable NamePattern methodNamePattern) {
+    return new MethodSelector(operations, classPattern, methodNamePattern, NamePattern.any());
   }
 
   /**
@@ -213,14 +198,14 @@ public sealed interface ChaosSelector
    *
    * <p>Valid operations: {@link OperationType#SYSTEM_CLOCK_MILLIS}, {@link
    * OperationType#SYSTEM_CLOCK_NANOS}, {@link OperationType#INSTANT_NOW}, {@link
-   * OperationType#LOCAL_DATE_TIME_NOW}, {@link OperationType#ZONED_DATE_TIME_NOW}, {@link
-   * OperationType#DATE_NEW}, {@link OperationType#SYSTEM_GC_REQUEST}, {@link
-   * OperationType#SYSTEM_EXIT_REQUEST}, {@link OperationType#REFLECTION_INVOKE}, {@link
-   * OperationType#DIRECT_BUFFER_ALLOCATE}, {@link OperationType#OBJECT_DESERIALIZE}, {@link
-   * OperationType#OBJECT_SERIALIZE}, {@link OperationType#NATIVE_LIBRARY_LOAD}, {@link
-   * OperationType#JNDI_LOOKUP}, {@link OperationType#JMX_INVOKE}, {@link
-   * OperationType#JMX_GET_ATTR}, {@link OperationType#ZIP_INFLATE}, {@link
-   * OperationType#ZIP_DEFLATE}.
+   * OperationType#CLOCK_READ}, {@link OperationType#LOCAL_DATE_TIME_NOW}, {@link
+   * OperationType#ZONED_DATE_TIME_NOW}, {@link OperationType#DATE_NEW}, {@link
+   * OperationType#SYSTEM_GC_REQUEST}, {@link OperationType#SYSTEM_EXIT_REQUEST}, {@link
+   * OperationType#REFLECTION_INVOKE}, {@link OperationType#DIRECT_BUFFER_ALLOCATE}, {@link
+   * OperationType#OBJECT_DESERIALIZE}, {@link OperationType#OBJECT_SERIALIZE}, {@link
+   * OperationType#NATIVE_LIBRARY_LOAD}, {@link OperationType#JNDI_LOOKUP}, {@link
+   * OperationType#JMX_INVOKE}, {@link OperationType#JMX_GET_ATTR}, {@link
+   * OperationType#ZIP_INFLATE}, {@link OperationType#ZIP_DEFLATE}.
    *
    * @param operations set of JVM runtime operations to intercept; must not be empty
    * @return a JvmRuntimeSelector
@@ -252,7 +237,7 @@ public sealed interface ChaosSelector
    * @return a NioSelector
    */
   static NioSelector nio(
-      final Set<OperationType> operations, final NamePattern channelClassPattern) {
+      final Set<OperationType> operations, final @Nullable NamePattern channelClassPattern) {
     return new NioSelector(operations, channelClassPattern);
   }
 
@@ -261,7 +246,9 @@ public sealed interface ChaosSelector
    *
    * <p>Valid operations: {@link OperationType#SOCKET_CONNECT}, {@link OperationType#SOCKET_ACCEPT},
    * {@link OperationType#SOCKET_READ}, {@link OperationType#SOCKET_WRITE}, {@link
-   * OperationType#SOCKET_CLOSE}.
+   * OperationType#SOCKET_CLOSE}, {@link OperationType#SOCKET_BIND}, {@link
+   * OperationType#SOCKET_SHUTDOWN}, {@link OperationType#DATAGRAM_SEND}, {@link
+   * OperationType#DATAGRAM_RECEIVE}.
    *
    * @param operations set of socket operations to intercept; must not be empty
    * @return a NetworkSelector
@@ -278,7 +265,7 @@ public sealed interface ChaosSelector
    * @return a NetworkSelector
    */
   static NetworkSelector network(
-      final Set<OperationType> operations, final NamePattern remoteHostPattern) {
+      final Set<OperationType> operations, final @Nullable NamePattern remoteHostPattern) {
     return new NetworkSelector(operations, remoteHostPattern);
   }
 
@@ -305,7 +292,7 @@ public sealed interface ChaosSelector
    * @return a ThreadLocalSelector
    */
   static ThreadLocalSelector threadLocal(
-      final Set<OperationType> operations, final NamePattern threadLocalClassPattern) {
+      final Set<OperationType> operations, final @Nullable NamePattern threadLocalClassPattern) {
     return new ThreadLocalSelector(operations, threadLocalClassPattern);
   }
 
@@ -332,7 +319,7 @@ public sealed interface ChaosSelector
    * @return an HttpClientSelector
    */
   static HttpClientSelector httpClient(
-      final Set<OperationType> operations, final NamePattern urlPattern) {
+      final Set<OperationType> operations, final @Nullable NamePattern urlPattern) {
     return new HttpClientSelector(operations, urlPattern);
   }
 
@@ -361,6 +348,9 @@ public sealed interface ChaosSelector
    * Returns a selector that matches the given JDBC operations across all supported pool and JDBC
    * implementations without target-name filtering.
    *
+   * <p>The one selector factory that takes its operations as varargs: the others fix their
+   * operations or take a {@code Set}, as the selector constructors do.
+   *
    * @param operations the JDBC operations to intercept; must not be empty
    * @return a JdbcSelector
    */
@@ -378,7 +368,8 @@ public sealed interface ChaosSelector
   /**
    * Returns a selector that matches DNS resolution calls across all hostname patterns.
    *
-   * <p>Valid operations: {@link OperationType#DNS_RESOLVE}.
+   * <p>Valid operations: {@link OperationType#DNS_RESOLVE}, {@link OperationType#DNS_ANSWER},
+   * {@link OperationType#DNS_REVERSE}.
    *
    * @param operations set of DNS operations to intercept; must not be empty
    * @return a DnsSelector
@@ -391,15 +382,18 @@ public sealed interface ChaosSelector
    * Returns a selector that matches DNS resolution calls whose resolved hostname matches {@code
    * hostnamePattern}.
    *
-   * <p>Valid operations: {@link OperationType#DNS_RESOLVE}.
+   * <p>Valid operations: {@link OperationType#DNS_RESOLVE}, {@link OperationType#DNS_ANSWER},
+   * {@link OperationType#DNS_REVERSE}.
    *
    * @param operations set of DNS operations to intercept; must not be empty
-   * @param hostnamePattern pattern matched against the hostname being resolved; {@code null}
-   *     matches {@code InetAddress.getLocalHost()} (which has no hostname argument)
+   * @param hostnamePattern pattern matched against the hostname being resolved; {@code null} for
+   *     any host, including {@code InetAddress.getLocalHost()}, which names none
    * @return a DnsSelector
    */
-  static DnsSelector dns(final Set<OperationType> operations, final NamePattern hostnamePattern) {
-    return new DnsSelector(operations, hostnamePattern);
+  static DnsSelector dns(
+      final Set<OperationType> operations, final @Nullable NamePattern hostnamePattern) {
+    return new DnsSelector(
+        operations, hostnamePattern == null ? NamePattern.any() : hostnamePattern);
   }
 
   /**
@@ -415,16 +409,84 @@ public sealed interface ChaosSelector
   }
 
   /**
-   * Returns a selector that matches file I/O read and write operations across any {@link
-   * java.io.FileInputStream} or {@link java.io.FileOutputStream} instance.
+   * Returns a selector that matches file I/O operations on any path: the {@code java.io} streams
+   * and {@code RandomAccessFile}, the {@code java.nio} channels and {@code Files}.
    *
-   * <p>Valid operations: {@link OperationType#FILE_IO_READ}, {@link OperationType#FILE_IO_WRITE}.
+   * <p>Valid operations: {@link OperationType#FILE_IO_READ}, {@link OperationType#FILE_IO_WRITE},
+   * {@link OperationType#FILE_IO_SYNC}, {@link OperationType#FILE_IO_TRUNCATE}, {@link
+   * OperationType#FILE_IO_DELETE}, {@link OperationType#FILE_IO_MOVE}, {@link
+   * OperationType#FILE_IO_OPEN}, {@link OperationType#FILE_IO_MAP}, {@link
+   * OperationType#FILE_IO_CLOSE}, {@link OperationType#FILE_IO_MOVE_TARGET}.
    *
    * @param operations set of file I/O operations to intercept; must not be empty
    * @return a FileIoSelector
    */
   static FileIoSelector fileIo(final Set<OperationType> operations) {
     return new FileIoSelector(operations);
+  }
+
+  /**
+   * Returns a selector that matches Kafka sends and polls whose topic matches {@code
+   * destinationPattern}.
+   *
+   * @param operations {@link OperationType#MESSAGE_SEND} and/or {@link
+   *     OperationType#MESSAGE_RECEIVE}
+   * @param destinationPattern pattern matched against the topic
+   * @return a new {@link MessagingSelector}
+   */
+  static MessagingSelector messaging(
+      final Set<OperationType> operations, final @Nullable NamePattern destinationPattern) {
+    return new MessagingSelector(operations, destinationPattern);
+  }
+
+  /**
+   * Returns a selector that matches gRPC client calls whose full method name matches {@code
+   * methodPattern}.
+   *
+   * @param methodPattern pattern matched against {@code package.Service/Method}
+   * @return a new {@link RpcSelector}
+   */
+  static RpcSelector rpc(final @Nullable NamePattern methodPattern) {
+    return new RpcSelector(Set.of(OperationType.RPC_CALL), methodPattern);
+  }
+
+  /**
+   * Returns a selector that matches Redis commands whose name matches {@code commandPattern}.
+   *
+   * @param commandPattern pattern matched against the upper-case command name
+   * @return a new {@link RedisSelector}
+   */
+  static RedisSelector redis(final @Nullable NamePattern commandPattern) {
+    return new RedisSelector(Set.of(OperationType.REDIS_COMMAND), commandPattern);
+  }
+
+  /**
+   * Returns a selector that matches AWS SDK v2 operations.
+   *
+   * @param servicePattern pattern matched against the service ({@code s3})
+   * @param operationPattern pattern matched against the operation ({@code GetObject})
+   * @return a new {@link AwsSdkSelector}
+   */
+  static AwsSdkSelector awsSdk(
+      final @Nullable NamePattern servicePattern, final @Nullable NamePattern operationPattern) {
+    return new AwsSdkSelector(Set.of(OperationType.AWS_SDK_CALL), servicePattern, operationPattern);
+  }
+
+  /**
+   * Returns a selector that matches the start of child processes whose program matches {@code
+   * commandPattern}.
+   *
+   * <p>It selects {@link OperationType#PROCESS_START} only; waiting for a process ({@link
+   * OperationType#PROCESS_WAIT}) is selected through the {@link ProcessSelector} constructor, which
+   * takes the operations.
+   *
+   * @param commandPattern pattern matched against the program, the first element of the command
+   *     (for example {@code NamePattern.exact("git")} or {@code
+   *     NamePattern.exact("/usr/bin/ffmpeg")})
+   * @return a new {@link ProcessSelector}
+   */
+  static ProcessSelector process(final @Nullable NamePattern commandPattern) {
+    return new ProcessSelector(Set.of(OperationType.PROCESS_START), commandPattern);
   }
 
   /**
@@ -517,7 +579,10 @@ public sealed interface ChaosSelector
    *     matches both
    */
   record ThreadSelector(
-      Set<OperationType> operations, ThreadKind kind, NamePattern threadNamePattern, Boolean daemon)
+      Set<OperationType> operations,
+      ThreadKind kind,
+      NamePattern threadNamePattern,
+      @Nullable Boolean daemon)
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
         EnumSet.of(
@@ -526,10 +591,15 @@ public sealed interface ChaosSelector
             OperationType.THREAD_SLEEP);
 
     /** Validates the ThreadSelector parameters. */
-    public ThreadSelector {
-      operations = validatedOperations(operations, VALID_OPS, "ThreadSelector");
-      kind = kind == null ? ThreadKind.ANY : kind;
-      threadNamePattern = threadNamePattern == null ? NamePattern.any() : threadNamePattern;
+    public ThreadSelector(
+        final Set<OperationType> operations,
+        final @Nullable ThreadKind kind,
+        final @Nullable NamePattern threadNamePattern,
+        final @Nullable Boolean daemon) {
+      this.operations = validatedOperations(operations, VALID_OPS, "ThreadSelector");
+      this.kind = kind == null ? ThreadKind.ANY : kind;
+      this.threadNamePattern = threadNamePattern == null ? NamePattern.any() : threadNamePattern;
+      this.daemon = daemon;
     }
   }
 
@@ -540,14 +610,16 @@ public sealed interface ChaosSelector
    * @param operations operation types this selector matches
    * @param executorClassPattern pattern matched against the executor's runtime class name
    * @param taskClassPattern pattern matched against the submitted task's class name
-   * @param scheduledOnly when {@code true}, match only scheduled executor invocations; {@code null}
-   *     matches both
+   * @param scheduledOnly when {@code true}, match only calls on a {@link
+   *     java.util.concurrent.ScheduledThreadPoolExecutor} (a user {@code ScheduledExecutorService}
+   *     of another class, or a {@code ForkJoinPool}, is not scheduled); {@code FORK_JOIN_TASK_RUN}
+   *     carries no executor and never matches; {@code null} matches both
    */
   record ExecutorSelector(
       Set<OperationType> operations,
       NamePattern executorClassPattern,
       NamePattern taskClassPattern,
-      Boolean scheduledOnly)
+      @Nullable Boolean scheduledOnly)
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
         EnumSet.of(
@@ -558,11 +630,16 @@ public sealed interface ChaosSelector
             OperationType.FORK_JOIN_TASK_RUN);
 
     /** Validates the ExecutorSelector parameters. */
-    public ExecutorSelector {
-      operations = validatedOperations(operations, VALID_OPS, "ExecutorSelector");
-      executorClassPattern =
+    public ExecutorSelector(
+        final Set<OperationType> operations,
+        final @Nullable NamePattern executorClassPattern,
+        final @Nullable NamePattern taskClassPattern,
+        final @Nullable Boolean scheduledOnly) {
+      this.operations = validatedOperations(operations, VALID_OPS, "ExecutorSelector");
+      this.executorClassPattern =
           executorClassPattern == null ? NamePattern.any() : executorClassPattern;
-      taskClassPattern = taskClassPattern == null ? NamePattern.any() : taskClassPattern;
+      this.taskClassPattern = taskClassPattern == null ? NamePattern.any() : taskClassPattern;
+      this.scheduledOnly = scheduledOnly;
     }
   }
 
@@ -582,9 +659,10 @@ public sealed interface ChaosSelector
             OperationType.QUEUE_POLL);
 
     /** Validates the QueueSelector parameters. */
-    public QueueSelector {
-      operations = validatedOperations(operations, VALID_OPS, "QueueSelector");
-      queueClassPattern = queueClassPattern == null ? NamePattern.any() : queueClassPattern;
+    public QueueSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern queueClassPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "QueueSelector");
+      this.queueClassPattern = queueClassPattern == null ? NamePattern.any() : queueClassPattern;
     }
   }
 
@@ -611,19 +689,27 @@ public sealed interface ChaosSelector
    *
    * @param operations operation types this selector matches
    * @param executorClassPattern pattern matched against the executor's runtime class name
-   * @param periodicOnly when {@code true}, match only periodic schedules; {@code null} matches both
+   * @param periodicOnly when {@code true}, match only periodic schedules ({@code
+   *     scheduleAtFixedRate} / {@code scheduleWithFixedDelay}, for {@code SCHEDULE_SUBMIT} and each
+   *     {@code SCHEDULE_TICK} of their task); {@code null} matches both
    */
   record SchedulingSelector(
-      Set<OperationType> operations, NamePattern executorClassPattern, Boolean periodicOnly)
+      Set<OperationType> operations,
+      NamePattern executorClassPattern,
+      @Nullable Boolean periodicOnly)
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
         EnumSet.of(OperationType.SCHEDULE_SUBMIT, OperationType.SCHEDULE_TICK);
 
     /** Validates the SchedulingSelector parameters. */
-    public SchedulingSelector {
-      operations = validatedOperations(operations, VALID_OPS, "SchedulingSelector");
-      executorClassPattern =
+    public SchedulingSelector(
+        final Set<OperationType> operations,
+        final @Nullable NamePattern executorClassPattern,
+        final @Nullable Boolean periodicOnly) {
+      this.operations = validatedOperations(operations, VALID_OPS, "SchedulingSelector");
+      this.executorClassPattern =
           executorClassPattern == null ? NamePattern.any() : executorClassPattern;
+      this.periodicOnly = periodicOnly;
     }
   }
 
@@ -642,9 +728,10 @@ public sealed interface ChaosSelector
             OperationType.EXECUTOR_AWAIT_TERMINATION);
 
     /** Validates the ShutdownSelector parameters. */
-    public ShutdownSelector {
-      operations = validatedOperations(operations, VALID_OPS, "ShutdownSelector");
-      targetClassPattern = targetClassPattern == null ? NamePattern.any() : targetClassPattern;
+    public ShutdownSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern targetClassPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "ShutdownSelector");
+      this.targetClassPattern = targetClassPattern == null ? NamePattern.any() : targetClassPattern;
     }
   }
 
@@ -663,10 +750,13 @@ public sealed interface ChaosSelector
             OperationType.CLASS_LOAD, OperationType.CLASS_DEFINE, OperationType.RESOURCE_LOAD);
 
     /** Validates the ClassLoadingSelector parameters. */
-    public ClassLoadingSelector {
-      operations = validatedOperations(operations, VALID_OPS, "ClassLoadingSelector");
-      targetNamePattern = targetNamePattern == null ? NamePattern.any() : targetNamePattern;
-      loaderClassPattern = loaderClassPattern == null ? NamePattern.any() : loaderClassPattern;
+    public ClassLoadingSelector(
+        final Set<OperationType> operations,
+        final @Nullable NamePattern targetNamePattern,
+        final @Nullable NamePattern loaderClassPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "ClassLoadingSelector");
+      this.targetNamePattern = targetNamePattern == null ? NamePattern.any() : targetNamePattern;
+      this.loaderClassPattern = loaderClassPattern == null ? NamePattern.any() : loaderClassPattern;
     }
   }
 
@@ -679,15 +769,23 @@ public sealed interface ChaosSelector
    * ChaosEffect.ReturnValueCorruptionEffect} and {@link OperationType#METHOD_EXIT} it corrupts
    * return values on exit.
    *
-   * <p><b>Safety constraint:</b> at least one of classPattern or methodNamePattern must be non-ANY.
-   * A fully wildcard selector would instrument every method in the JVM.
+   * <p><b>Automatic weaving.</b> With the agent attached, activating a scenario with this selector
+   * weaves entry and exit hooks into every concrete method the patterns name, in classes already
+   * loaded and in classes loaded later; removing the scenario (closing its handle, or replacing it)
+   * removes them. Constructors, static initialisers, abstract, native, synthetic and bridge methods
+   * are never woven, nor are the agent's own classes. Without the agent (a plain {@code
+   * ChaosRuntime} in a unit test) the events must come from the application's own interception
+   * through {@code ChaosRuntime.beforeMethodEnter} / {@code afterMethodExit}.
    *
-   * <p>signaturePattern is reserved: the runtime does not currently propagate the JVM method
-   * descriptor through to the matcher, so a non-null value here would silently never match any
-   * invocation. To prevent scenarios from being silently inert, the canonical constructor rejects
-   * any non-null {@code signaturePattern} other than {@link NamePattern#any()}. Support for
-   * descriptor-based filtering is tracked as a follow-up feature — construct with {@code null} or
-   * {@link NamePattern#any()} until it ships.
+   * <p><b>Safety constraint:</b> at least one of classPattern or methodNamePattern must be non-ANY.
+   * A fully wildcard selector would instrument every method in the JVM. Prefer {@link
+   * NamePattern#exact} or {@link NamePattern#prefix} class patterns: every class loaded while the
+   * scenario is active is tested against the class pattern.
+   *
+   * <p>{@code signaturePattern} is matched against the method's JVM descriptor, e.g. {@code
+   * (Ljava/lang/String;I)V} for {@code void m(String, int)}, so it can pick one overload: {@code
+   * NamePattern.prefix("(Ljava/lang/String;)")}. Events raised through the manual hooks carry no
+   * descriptor and never match a non-ANY signature pattern.
    *
    * <p><b>Valid operations:</b> {@link OperationType#METHOD_ENTER}, {@link
    * OperationType#METHOD_EXIT}.
@@ -695,8 +793,7 @@ public sealed interface ChaosSelector
    * @param operations operation types this selector matches
    * @param classPattern pattern matched against the declaring class name
    * @param methodNamePattern pattern matched against the method name
-   * @param signaturePattern reserved; must be {@code null} or {@link NamePattern#any()} until
-   *     descriptor-based filtering ships
+   * @param signaturePattern pattern matched against the JVM method descriptor; {@code null} for any
    */
   record MethodSelector(
       Set<OperationType> operations,
@@ -708,25 +805,28 @@ public sealed interface ChaosSelector
         EnumSet.of(OperationType.METHOD_ENTER, OperationType.METHOD_EXIT);
 
     /** Validates the MethodSelector parameters. */
-    public MethodSelector {
-      operations = validatedOperations(operations, VALID_OPS, "MethodSelector");
-      classPattern = classPattern == null ? NamePattern.any() : classPattern;
-      methodNamePattern = methodNamePattern == null ? NamePattern.any() : methodNamePattern;
-      if (classPattern.mode() == NamePattern.MatchMode.ANY
-          && methodNamePattern.mode() == NamePattern.MatchMode.ANY) {
+    public MethodSelector(
+        final Set<OperationType> operations,
+        final @Nullable NamePattern classPattern,
+        final @Nullable NamePattern methodNamePattern,
+        final @Nullable NamePattern signaturePattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "MethodSelector");
+      this.classPattern = classPattern == null ? NamePattern.any() : classPattern;
+      this.methodNamePattern = methodNamePattern == null ? NamePattern.any() : methodNamePattern;
+      if (this.classPattern.matchesEverything() && this.methodNamePattern.matchesEverything()) {
         throw new IllegalArgumentException(
-            "MethodSelector requires at least one non-ANY pattern to prevent "
-                + "accidental global method instrumentation");
+            "MethodSelector requires a class or method pattern that does not match everything"
+                + " (class "
+                + this.classPattern.mode()
+                + " '"
+                + this.classPattern.value()
+                + "', method "
+                + this.methodNamePattern.mode()
+                + " '"
+                + this.methodNamePattern.value()
+                + "'), to prevent accidental global method instrumentation");
       }
-      if (signaturePattern != null && signaturePattern.mode() != NamePattern.MatchMode.ANY) {
-        // A non-ANY signature pattern would silently never match: the InvocationContext fed to
-        // SelectorMatcher does not carry the JVM method descriptor for METHOD_ENTER/METHOD_EXIT
-        // advice, so the matcher would dereference a null subjectClassName and fail to match
-        // every call. Fail loud at plan-build time rather than ship a zero-activation scenario.
-        throw new IllegalArgumentException(
-            "MethodSelector.signaturePattern is not yet implemented in the runtime; use "
-                + "NamePattern.any() or null. Filter by classPattern/methodNamePattern for now.");
-      }
+      this.signaturePattern = signaturePattern == null ? NamePattern.any() : signaturePattern;
     }
   }
 
@@ -746,9 +846,11 @@ public sealed interface ChaosSelector
         EnumSet.of(OperationType.MONITOR_ENTER, OperationType.THREAD_PARK);
 
     /** Validates the MonitorSelector parameters. */
-    public MonitorSelector {
-      operations = validatedOperations(operations, VALID_OPS, "MonitorSelector");
-      monitorClassPattern = monitorClassPattern == null ? NamePattern.any() : monitorClassPattern;
+    public MonitorSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern monitorClassPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "MonitorSelector");
+      this.monitorClassPattern =
+          monitorClassPattern == null ? NamePattern.any() : monitorClassPattern;
     }
   }
 
@@ -777,6 +879,7 @@ public sealed interface ChaosSelector
             OperationType.SYSTEM_CLOCK_MILLIS,
             OperationType.SYSTEM_CLOCK_NANOS,
             OperationType.INSTANT_NOW,
+            OperationType.CLOCK_READ,
             OperationType.LOCAL_DATE_TIME_NOW,
             OperationType.ZONED_DATE_TIME_NOW,
             OperationType.DATE_NEW,
@@ -820,9 +923,11 @@ public sealed interface ChaosSelector
             OperationType.NIO_CHANNEL_ACCEPT);
 
     /** Validates the NioSelector parameters. */
-    public NioSelector {
-      operations = validatedOperations(operations, VALID_OPS, "NioSelector");
-      channelClassPattern = channelClassPattern == null ? NamePattern.any() : channelClassPattern;
+    public NioSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern channelClassPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "NioSelector");
+      this.channelClassPattern =
+          channelClassPattern == null ? NamePattern.any() : channelClassPattern;
     }
   }
 
@@ -831,16 +936,45 @@ public sealed interface ChaosSelector
    *
    * <p><b>Valid operations:</b> {@link OperationType#SOCKET_CONNECT}, {@link
    * OperationType#SOCKET_ACCEPT}, {@link OperationType#SOCKET_READ}, {@link
-   * OperationType#SOCKET_WRITE}, {@link OperationType#SOCKET_CLOSE}.
+   * OperationType#SOCKET_WRITE}, {@link OperationType#SOCKET_CLOSE}, {@link
+   * OperationType#SOCKET_BIND}, {@link OperationType#SOCKET_SHUTDOWN}, {@link
+   * OperationType#DATAGRAM_SEND}, {@link OperationType#DATAGRAM_RECEIVE}.
    *
    * <p>For {@link OperationType#SOCKET_CONNECT} the {@code remoteHostPattern} is matched against
    * the {@link java.net.InetSocketAddress} host string. For other operations the pattern is matched
    * against the remote host recorded at connect time.
    *
+   * <p>The optional filters narrow the match further; a {@code null} filter does not restrict:
+   *
+   * <ul>
+   *   <li>{@code remoteCidr} — the peer address lies in this block ({@link CidrBlock}, e.g. {@code
+   *       "10.0.0.0/8"}). An unresolved peer never matches.
+   *   <li>{@code remotePort} — the peer port.
+   *   <li>{@code minBytes} / {@code maxBytes} — the byte count of a read or write lies in this
+   *       inclusive range (for a read, the number of bytes requested). Only {@link
+   *       OperationType#SOCKET_READ}, {@link OperationType#SOCKET_WRITE}, {@link
+   *       OperationType#DATAGRAM_SEND} and {@link OperationType#DATAGRAM_RECEIVE} carry a byte
+   *       count, so a size filter requires that the selector names only those operations.
+   * </ul>
+   *
+   * <p>{@link OperationType#SOCKET_ACCEPT} has no peer when it is evaluated (the connection is not
+   * yet accepted), so a host, CIDR or port filter on a selector that names it is refused at
+   * activation ({@link ChaosValidationException}).
+   *
    * @param operations operation types this selector matches
    * @param remoteHostPattern pattern matched against the remote host name or IP string
+   * @param remoteCidr CIDR block the peer address must lie in; {@code null} for any
+   * @param remotePort the peer port; {@code null} for any
+   * @param minBytes the smallest byte count matched, inclusive; {@code null} for no lower bound
+   * @param maxBytes the largest byte count matched, inclusive; {@code null} for no upper bound
    */
-  record NetworkSelector(Set<OperationType> operations, NamePattern remoteHostPattern)
+  record NetworkSelector(
+      Set<OperationType> operations,
+      NamePattern remoteHostPattern,
+      @Nullable String remoteCidr,
+      @Nullable Integer remotePort,
+      @Nullable Long minBytes,
+      @Nullable Long maxBytes)
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
         EnumSet.of(
@@ -848,12 +982,51 @@ public sealed interface ChaosSelector
             OperationType.SOCKET_ACCEPT,
             OperationType.SOCKET_READ,
             OperationType.SOCKET_WRITE,
-            OperationType.SOCKET_CLOSE);
+            OperationType.SOCKET_CLOSE,
+            OperationType.SOCKET_BIND,
+            OperationType.SOCKET_SHUTDOWN,
+            OperationType.DATAGRAM_SEND,
+            OperationType.DATAGRAM_RECEIVE);
+
+    private static final Set<OperationType> SIZED_OPS =
+        EnumSet.of(
+            OperationType.SOCKET_READ,
+            OperationType.SOCKET_WRITE,
+            OperationType.DATAGRAM_SEND,
+            OperationType.DATAGRAM_RECEIVE);
 
     /** Validates the NetworkSelector parameters. */
-    public NetworkSelector {
-      operations = validatedOperations(operations, VALID_OPS, "NetworkSelector");
-      remoteHostPattern = remoteHostPattern == null ? NamePattern.any() : remoteHostPattern;
+    public NetworkSelector(
+        final Set<OperationType> operations,
+        final @Nullable NamePattern remoteHostPattern,
+        final @Nullable String remoteCidr,
+        final @Nullable Integer remotePort,
+        final @Nullable Long minBytes,
+        final @Nullable Long maxBytes) {
+      this.operations = validatedOperations(operations, VALID_OPS, "NetworkSelector");
+      this.remoteHostPattern = remoteHostPattern == null ? NamePattern.any() : remoteHostPattern;
+      if (remoteCidr != null) {
+        CidrBlock.parse(remoteCidr);
+      }
+      if (remotePort != null && (remotePort < 0 || remotePort > 65_535)) {
+        throw new IllegalArgumentException("remotePort must be in [0, 65535], got " + remotePort);
+      }
+      validateSizeRange(minBytes, maxBytes, this.operations, SIZED_OPS, "NetworkSelector");
+      this.remoteCidr = remoteCidr;
+      this.remotePort = remotePort;
+      this.minBytes = minBytes;
+      this.maxBytes = maxBytes;
+    }
+
+    /**
+     * Creates a selector filtering only by host.
+     *
+     * @param operations operation types this selector matches
+     * @param remoteHostPattern pattern matched against the remote host name or IP string
+     */
+    public NetworkSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern remoteHostPattern) {
+      this(operations, remoteHostPattern, null, null, null, null);
     }
   }
 
@@ -879,9 +1052,10 @@ public sealed interface ChaosSelector
         EnumSet.of(OperationType.THREAD_LOCAL_GET, OperationType.THREAD_LOCAL_SET);
 
     /** Validates the ThreadLocalSelector parameters. */
-    public ThreadLocalSelector {
-      operations = validatedOperations(operations, VALID_OPS, "ThreadLocalSelector");
-      threadLocalClassPattern =
+    public ThreadLocalSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern threadLocalClassPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "ThreadLocalSelector");
+      this.threadLocalClassPattern =
           threadLocalClassPattern == null ? NamePattern.any() : threadLocalClassPattern;
     }
   }
@@ -906,9 +1080,10 @@ public sealed interface ChaosSelector
         EnumSet.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC);
 
     /** Validates the HttpClientSelector parameters. */
-    public HttpClientSelector {
-      operations = validatedOperations(operations, VALID_OPS, "HttpClientSelector");
-      urlPattern = urlPattern == null ? NamePattern.any() : urlPattern;
+    public HttpClientSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern urlPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "HttpClientSelector");
+      this.urlPattern = urlPattern == null ? NamePattern.any() : urlPattern;
     }
   }
 
@@ -930,7 +1105,8 @@ public sealed interface ChaosSelector
    *
    * <p><b>Valid operations:</b> {@link OperationType#JDBC_CONNECTION_ACQUIRE}, {@link
    * OperationType#JDBC_STATEMENT_EXECUTE}, {@link OperationType#JDBC_PREPARED_STATEMENT}, {@link
-   * OperationType#JDBC_TRANSACTION_COMMIT}, {@link OperationType#JDBC_TRANSACTION_ROLLBACK}.
+   * OperationType#JDBC_TRANSACTION_COMMIT}, {@link OperationType#JDBC_TRANSACTION_ROLLBACK}, {@link
+   * OperationType#R2DBC_STATEMENT_EXECUTE}.
    *
    * @param operations operation types this selector matches
    * @param targetPattern pattern matched against the pool identifier or SQL snippet
@@ -943,12 +1119,14 @@ public sealed interface ChaosSelector
             OperationType.JDBC_STATEMENT_EXECUTE,
             OperationType.JDBC_PREPARED_STATEMENT,
             OperationType.JDBC_TRANSACTION_COMMIT,
-            OperationType.JDBC_TRANSACTION_ROLLBACK);
+            OperationType.JDBC_TRANSACTION_ROLLBACK,
+            OperationType.R2DBC_STATEMENT_EXECUTE);
 
     /** Validates the JdbcSelector parameters. */
-    public JdbcSelector {
-      operations = validatedOperations(operations, VALID_OPS, "JdbcSelector");
-      targetPattern = targetPattern == null ? NamePattern.any() : targetPattern;
+    public JdbcSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern targetPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "JdbcSelector");
+      this.targetPattern = targetPattern == null ? NamePattern.any() : targetPattern;
     }
   }
 
@@ -960,19 +1138,23 @@ public sealed interface ChaosSelector
    * For {@link java.net.InetAddress#getLocalHost()} the hostname is {@code null}; a {@link
    * NamePattern#any()} pattern matches all DNS calls including {@code getLocalHost()}.
    *
-   * <p><b>Valid operations:</b> {@link OperationType#DNS_RESOLVE}.
+   * <p><b>Valid operations:</b> {@link OperationType#DNS_RESOLVE}, {@link
+   * OperationType#DNS_ANSWER}, {@link OperationType#DNS_REVERSE} (whose pattern matches the IP
+   * literal looked up).
    *
    * @param operations operation types this selector matches
    * @param hostnamePattern pattern matched against the hostname being resolved
    */
   record DnsSelector(Set<OperationType> operations, NamePattern hostnamePattern)
       implements ChaosSelector {
-    static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.DNS_RESOLVE);
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(OperationType.DNS_RESOLVE, OperationType.DNS_ANSWER, OperationType.DNS_REVERSE);
 
     /** Validates the DnsSelector parameters. */
-    public DnsSelector {
-      operations = validatedOperations(operations, VALID_OPS, "DnsSelector");
-      hostnamePattern = hostnamePattern == null ? NamePattern.any() : hostnamePattern;
+    public DnsSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern hostnamePattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "DnsSelector");
+      this.hostnamePattern = hostnamePattern == null ? NamePattern.any() : hostnamePattern;
     }
   }
 
@@ -994,21 +1176,208 @@ public sealed interface ChaosSelector
   }
 
   /**
-   * Matches file I/O read and write operations on {@link java.io.FileInputStream} and {@link
-   * java.io.FileOutputStream}.
+   * Matches file operations: reads and writes of streams, {@code RandomAccessFile} and {@code
+   * FileChannel}, fsync, truncation, deletion and moves.
    *
    * <p><b>Valid operations:</b> {@link OperationType#FILE_IO_READ}, {@link
-   * OperationType#FILE_IO_WRITE}.
+   * OperationType#FILE_IO_WRITE}, {@link OperationType#FILE_IO_SYNC}, {@link
+   * OperationType#FILE_IO_TRUNCATE}, {@link OperationType#FILE_IO_DELETE}, {@link
+   * OperationType#FILE_IO_MOVE}, {@link OperationType#FILE_IO_OPEN}, {@link
+   * OperationType#FILE_IO_MAP}, {@link OperationType#FILE_IO_CLOSE}, {@link
+   * OperationType#FILE_IO_MOVE_TARGET}. Only reads, writes and maps carry a byte count.
+   *
+   * <p>The optional filters narrow the match further; a {@code null} filter does not restrict:
+   * {@code pathPattern} matches the path the stream was opened with (a stream created from a {@link
+   * java.io.FileDescriptor} has none and never matches it), and {@code minBytes} / {@code maxBytes}
+   * bound the byte count of the call, inclusive (1 for single-byte calls; for a read, the number of
+   * bytes requested).
    *
    * @param operations operation types this selector matches
+   * @param pathPattern the files matched; {@code null} for any
+   * @param minBytes the smallest byte count matched, inclusive; {@code null} for no lower bound
+   * @param maxBytes the largest byte count matched, inclusive; {@code null} for no upper bound
    */
-  record FileIoSelector(Set<OperationType> operations) implements ChaosSelector {
+  record FileIoSelector(
+      Set<OperationType> operations,
+      @Nullable PathPattern pathPattern,
+      @Nullable Long minBytes,
+      @Nullable Long maxBytes)
+      implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
-        EnumSet.of(OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE);
+        EnumSet.of(
+            OperationType.FILE_IO_READ,
+            OperationType.FILE_IO_WRITE,
+            OperationType.FILE_IO_SYNC,
+            OperationType.FILE_IO_TRUNCATE,
+            OperationType.FILE_IO_DELETE,
+            OperationType.FILE_IO_MOVE,
+            OperationType.FILE_IO_OPEN,
+            OperationType.FILE_IO_MAP,
+            OperationType.FILE_IO_CLOSE,
+            OperationType.FILE_IO_MOVE_TARGET);
+
+    private static final Set<OperationType> SIZED_OPS =
+        EnumSet.of(
+            OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE, OperationType.FILE_IO_MAP);
 
     /** Validates the FileIoSelector parameters. */
     public FileIoSelector {
       operations = validatedOperations(operations, VALID_OPS, "FileIoSelector");
+      validateSizeRange(minBytes, maxBytes, operations, SIZED_OPS, "FileIoSelector");
+    }
+
+    /**
+     * Creates a selector without filters.
+     *
+     * @param operations operation types this selector matches
+     */
+    public FileIoSelector(final Set<OperationType> operations) {
+      this(operations, null, null, null);
+    }
+  }
+
+  /**
+   * Matches messages sent and received through Kafka clients, optionally by topic.
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#MESSAGE_SEND}, {@link
+   * OperationType#MESSAGE_RECEIVE}. A receive is matched when the pattern matches any of the
+   * consumer's subscribed topics.
+   *
+   * @param operations operation types this selector matches
+   * @param destinationPattern pattern matched against the topic; {@code null} for any
+   */
+  record MessagingSelector(Set<OperationType> operations, NamePattern destinationPattern)
+      implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(OperationType.MESSAGE_SEND, OperationType.MESSAGE_RECEIVE);
+
+    /** Validates the MessagingSelector parameters. */
+    public MessagingSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern destinationPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "MessagingSelector");
+      this.destinationPattern = destinationPattern == null ? NamePattern.any() : destinationPattern;
+    }
+  }
+
+  /**
+   * Matches gRPC client calls, optionally by full method name ({@code package.Service/Method}).
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#RPC_CALL}.
+   *
+   * @param operations operation types this selector matches
+   * @param methodPattern pattern matched against the full method name; {@code null} for any
+   */
+  record RpcSelector(Set<OperationType> operations, NamePattern methodPattern)
+      implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.RPC_CALL);
+
+    /** Validates the RpcSelector parameters. */
+    public RpcSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern methodPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "RpcSelector");
+      this.methodPattern = methodPattern == null ? NamePattern.any() : methodPattern;
+    }
+  }
+
+  /**
+   * Matches Redis commands sent through Jedis or Lettuce, optionally by command name.
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#REDIS_COMMAND}. Command names are upper case
+   * ({@code GET}, {@code HSET}).
+   *
+   * @param operations operation types this selector matches
+   * @param commandPattern pattern matched against the command name; {@code null} for any
+   */
+  record RedisSelector(Set<OperationType> operations, NamePattern commandPattern)
+      implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.REDIS_COMMAND);
+
+    /** Validates the RedisSelector parameters. */
+    public RedisSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern commandPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "RedisSelector");
+      this.commandPattern = commandPattern == null ? NamePattern.any() : commandPattern;
+    }
+  }
+
+  /**
+   * Matches AWS SDK for Java v2 operations, optionally by service and operation.
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#AWS_SDK_CALL}. The service is the request's
+   * package name under {@code software.amazon.awssdk.services} ({@code s3}, {@code dynamodb},
+   * {@code sqs}); the operation is the SDK operation name ({@code GetObject}, {@code PutItem}).
+   *
+   * @param operations operation types this selector matches
+   * @param servicePattern pattern matched against the service; {@code null} for any
+   * @param operationPattern pattern matched against the operation; {@code null} for any
+   */
+  record AwsSdkSelector(
+      Set<OperationType> operations, NamePattern servicePattern, NamePattern operationPattern)
+      implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.AWS_SDK_CALL);
+
+    /** Validates the AwsSdkSelector parameters. */
+    public AwsSdkSelector(
+        final Set<OperationType> operations,
+        final @Nullable NamePattern servicePattern,
+        final @Nullable NamePattern operationPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "AwsSdkSelector");
+      this.servicePattern = servicePattern == null ? NamePattern.any() : servicePattern;
+      this.operationPattern = operationPattern == null ? NamePattern.any() : operationPattern;
+    }
+  }
+
+  /**
+   * Matches Netty channel reads and writes on any transport, optionally by the peer.
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#NETTY_CHANNEL_WRITE}, {@link
+   * OperationType#NETTY_CHANNEL_READ}. Use it for libraries built on Netty with native transports
+   * (epoll, kqueue) that bypass {@code java.nio}; on the NIO transport the {@link NioSelector}
+   * operations fire as well.
+   *
+   * @param operations operation types this selector matches
+   * @param remoteCidr CIDR block the peer address must lie in ({@link CidrBlock}); {@code null} for
+   *     any
+   * @param remotePort the peer port; {@code null} for any
+   */
+  record NettySelector(
+      Set<OperationType> operations, @Nullable String remoteCidr, @Nullable Integer remotePort)
+      implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(OperationType.NETTY_CHANNEL_WRITE, OperationType.NETTY_CHANNEL_READ);
+
+    /** Validates the NettySelector parameters. */
+    public NettySelector {
+      operations = validatedOperations(operations, VALID_OPS, "NettySelector");
+      if (remoteCidr != null) {
+        CidrBlock.parse(remoteCidr);
+      }
+      if (remotePort != null && (remotePort < 0 || remotePort > 65_535)) {
+        throw new IllegalArgumentException("remotePort must be in [0, 65535], got " + remotePort);
+      }
+    }
+  }
+
+  /**
+   * Matches the start of child processes and waits for them, optionally by program.
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#PROCESS_START}, {@link
+   * OperationType#PROCESS_WAIT}.
+   *
+   * @param operations operation types this selector matches
+   * @param commandPattern pattern matched against the program, the first element of the command as
+   *     the application passed it; {@code null} for any
+   */
+  record ProcessSelector(Set<OperationType> operations, NamePattern commandPattern)
+      implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(OperationType.PROCESS_START, OperationType.PROCESS_WAIT);
+
+    /** Validates the ProcessSelector parameters. */
+    public ProcessSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern commandPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "ProcessSelector");
+      this.commandPattern = commandPattern == null ? NamePattern.any() : commandPattern;
     }
   }
 
@@ -1033,6 +1402,35 @@ public sealed interface ChaosSelector
 
   // ── Internal utilities ─────────────────────────────────────────────────────
 
+  /**
+   * Validates an inclusive byte-count range and that every selected operation carries a byte count.
+   * Shared by the selectors with a size filter.
+   */
+  private static void validateSizeRange(
+      final @Nullable Long minBytes,
+      final @Nullable Long maxBytes,
+      final Set<OperationType> operations,
+      final Set<OperationType> sizedOperations,
+      final String selectorName) {
+    if (minBytes == null && maxBytes == null) {
+      return;
+    }
+    if ((minBytes != null && minBytes < 0) || (maxBytes != null && maxBytes < 0)) {
+      throw new IllegalArgumentException(selectorName + " byte bounds must be >= 0");
+    }
+    if (minBytes != null && maxBytes != null && minBytes > maxBytes) {
+      throw new IllegalArgumentException(
+          selectorName + " minBytes " + minBytes + " exceeds maxBytes " + maxBytes);
+    }
+    if (!sizedOperations.containsAll(operations)) {
+      throw new IllegalArgumentException(
+          selectorName
+              + " size filter applies only to "
+              + sizedOperations
+              + "; other operations carry no byte count");
+    }
+  }
+
   private static Set<OperationType> validatedOperations(
       final Set<OperationType> operations,
       final Set<OperationType> validOps,
@@ -1050,10 +1448,9 @@ public sealed interface ChaosSelector
                 + validOps);
       }
     }
-    // Set.copyOf returns a truly unmodifiable snapshot — prevents callers (and the record's
-    // auto-generated accessor) from leaking a reference the caller can mutate behind our back.
-    // We accept the loss of EnumSet bulk-op speed on the hot path; the selector's `contains`
-    // checks remain O(1) against the compact ImmutableCollections set.
-    return Set.copyOf(operations);
+    // An unmodifiable snapshot — callers (and the record's accessor) cannot mutate it behind our
+    // back — that iterates in declaration order, so a selector prints and serialises its
+    // operations the same way in every JVM (Set.copyOf's order depends on a per-JVM salt).
+    return java.util.Collections.unmodifiableSet(java.util.EnumSet.copyOf(operations));
   }
 }

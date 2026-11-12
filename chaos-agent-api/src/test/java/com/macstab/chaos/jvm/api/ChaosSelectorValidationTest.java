@@ -30,6 +30,47 @@ class ChaosSelectorValidationTest {
     }
 
     @Test
+    @DisplayName("a match-all GLOB or REGEX counts as ANY, and the message names it")
+    void matchAllPatternsThrow() {
+      for (final NamePattern[] patterns :
+          new NamePattern[][] {
+            {NamePattern.glob("*"), NamePattern.any()},
+            {NamePattern.any(), NamePattern.glob("**")},
+            {NamePattern.regex(".*"), NamePattern.glob("*")},
+            {NamePattern.regex("^.*$"), NamePattern.regex(".*+")},
+          }) {
+        assertThatThrownBy(
+                () ->
+                    new ChaosSelector.MethodSelector(
+                        Set.of(OperationType.METHOD_ENTER), patterns[0], patterns[1], null))
+            .as("%s / %s", patterns[0], patterns[1])
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining(patterns[0].value());
+      }
+    }
+
+    @Test
+    @DisplayName("a match-all pattern beside a narrowing one is valid")
+    void matchAllBesideNarrowingIsValid() {
+      assertThatCode(
+              () ->
+                  new ChaosSelector.MethodSelector(
+                      Set.of(OperationType.METHOD_ENTER),
+                      NamePattern.exact("com.example.Foo"),
+                      NamePattern.glob("*"),
+                      null))
+          .doesNotThrowAnyException();
+      assertThatCode(
+              () ->
+                  new ChaosSelector.MethodSelector(
+                      Set.of(OperationType.METHOD_ENTER),
+                      NamePattern.glob("com.example.*"),
+                      NamePattern.regex(".*"),
+                      null))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
     @DisplayName("non-ANY class pattern is valid")
     void nonAnyClassPatternIsValid() {
       assertThatCode(

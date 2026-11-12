@@ -17,16 +17,37 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("ChaosRuntime — ActivationPolicy")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class ChaosRuntimeActivationPolicyTest {
 
-  private static final long DELAY_MIN_MS = 48L;
-  private static final long NO_DELAY_MAX_MS = 150L;
+  /**
+   * The delay of the timed scenarios. Each check asserts the applied count first; the elapsed time
+   * is checked against the delay itself: a delayed call takes at least all of it, an undelayed one
+   * less than half of it.
+   */
+  private static final Duration DELAY = Duration.ofMillis(200);
+
+  private static final long DELAY_NANOS = DELAY.toNanos();
+
+  /** Loads and runs the evaluation path once, so no first call pays for class loading. */
+  @BeforeAll
+  static void warmUp() {
+    try (ChaosRuntime runtime = new ChaosRuntime()) {
+      runtime.activate(
+          ChaosScenario.builder("warm-up")
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(ChaosEffect.delay(Duration.ZERO))
+              .build());
+      runtime.decorateExecutorRunnable(
+          "EXECUTOR_SUBMIT", ChaosRuntimeActivationPolicyTest.class, () -> {});
+    }
+  }
 
   @Nested
   @DisplayName("activateAfterMatches")
@@ -35,27 +56,34 @@ class ChaosRuntimeActivationPolicyTest {
     @Test
     @DisplayName("activateAfterMatches=3 skips first three matches")
     void activateAfterMatchesThreeSkipsFirstThreeMatches() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("warm-up")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(80)))
-              .activationPolicy(
-                  new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 3, null, null, null, null, false))
-              .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("warm-up")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(DELAY))
+                .activationPolicy(
+                    new ActivationPolicy(
+                        ActivationPolicy.StartMode.AUTOMATIC,
+                        1.0d,
+                        3,
+                        null,
+                        null,
+                        null,
+                        null,
+                        false))
+                .build());
 
-      for (int i = 0; i < 3; i++) {
-        long elapsed =
-            measureMillis(
-                () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-        assertThat(elapsed).as("match %d should not be delayed", i).isLessThan(NO_DELAY_MAX_MS);
+        // Counted, not timed: a slow runner can make an undelayed submit take as long as a delay.
+        for (int i = 0; i < 3; i++) {
+          submitNanos(runtime);
+          assertThat(applied(runtime, "warm-up")).as("match %d is not applied", i).isZero();
+        }
+
+        final long elapsed = submitNanos(runtime);
+        assertThat(applied(runtime, "warm-up")).as("the 4th match is applied").isEqualTo(1L);
+        assertThat(elapsed).as("the 4th match is delayed").isGreaterThanOrEqualTo(DELAY_NANOS);
       }
-
-      long elapsed =
-          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      assertThat(elapsed).as("4th match should incur delay").isGreaterThanOrEqualTo(60);
     }
   }
 
@@ -66,27 +94,26 @@ class ChaosRuntimeActivationPolicyTest {
     @Test
     @DisplayName("maxApplications=2 fires exactly twice")
     void maxApplicationsTwoFiresExactlyTwice() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("max-two")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(60)))
-              .activationPolicy(
-                  new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, 2L, null, null, null, false))
-              .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("max-two")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(DELAY))
+                .activationPolicy(
+                    new ActivationPolicy(
+                        ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, 2L, null, null, null, false))
+                .build());
 
-      long first =
-          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      long second =
-          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      long third =
-          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+        final long first = submitNanos(runtime);
+        final long second = submitNanos(runtime);
+        final long third = submitNanos(runtime);
 
-      assertThat(first).as("first should be delayed").isGreaterThanOrEqualTo(DELAY_MIN_MS);
-      assertThat(second).as("second should be delayed").isGreaterThanOrEqualTo(DELAY_MIN_MS);
-      assertThat(third).as("third should not be delayed").isLessThan(NO_DELAY_MAX_MS);
+        assertThat(applied(runtime, "max-two")).as("applied exactly twice").isEqualTo(2L);
+        assertThat(first).as("first is delayed").isGreaterThanOrEqualTo(DELAY_NANOS);
+        assertThat(second).as("second is delayed").isGreaterThanOrEqualTo(DELAY_NANOS);
+        assertThat(third).as("third is not delayed").isLessThan(DELAY_NANOS / 2);
+      }
     }
   }
 
@@ -97,26 +124,27 @@ class ChaosRuntimeActivationPolicyTest {
     @Test
     @DisplayName("receives STARTED and APPLIED events")
     void addEventListenerReceivesStartedAndAppliedEvents() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      List<ChaosEvent> events = new ArrayList<>();
-      runtime.addEventListener(events::add);
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        List<ChaosEvent> events = new ArrayList<>();
+        runtime.addEventListener(events::add);
 
-      runtime.activate(
-          ChaosScenario.builder("listen-test")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .activationPolicy(ActivationPolicy.always())
-              .build());
+        runtime.activate(
+            ChaosScenario.builder("listen-test")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
 
-      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
 
-      assertThat(events)
-          .anyMatch(
-              e -> e.type() == ChaosEvent.Type.STARTED && "listen-test".equals(e.scenarioId()));
-      assertThat(events)
-          .anyMatch(
-              e -> e.type() == ChaosEvent.Type.APPLIED && "listen-test".equals(e.scenarioId()));
+        assertThat(events)
+            .anyMatch(
+                e -> e.type() == ChaosEvent.Type.STARTED && "listen-test".equals(e.scenarioId()));
+        assertThat(events)
+            .anyMatch(
+                e -> e.type() == ChaosEvent.Type.APPLIED && "listen-test".equals(e.scenarioId()));
+      }
     }
   }
 
@@ -127,27 +155,28 @@ class ChaosRuntimeActivationPolicyTest {
     @Test
     @DisplayName("snapshot reflects matched and applied count")
     void diagnosticsSnapshotReflectsMatchedAndAppliedCount() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("counter-test")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .activationPolicy(ActivationPolicy.always())
-              .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("counter-test")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
 
-      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
 
-      ChaosDiagnostics.Snapshot snapshot = runtime.diagnostics().snapshot();
-      ChaosDiagnostics.ScenarioReport report =
-          snapshot.scenarios().stream()
-              .filter(r -> "counter-test".equals(r.id()))
-              .findFirst()
-              .orElseThrow(() -> new AssertionError("scenario not found in snapshot"));
+        ChaosDiagnostics.Snapshot snapshot = runtime.diagnostics().snapshot();
+        ChaosDiagnostics.ScenarioReport report =
+            snapshot.scenarios().stream()
+                .filter(r -> "counter-test".equals(r.id()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("scenario not found in snapshot"));
 
-      assertThat(report.matchedCount()).as("matched count").isEqualTo(2);
-      assertThat(report.appliedCount()).as("applied count").isEqualTo(2);
+        assertThat(report.matchedCount()).as("matched count").isEqualTo(2);
+        assertThat(report.appliedCount()).as("applied count").isEqualTo(2);
+      }
     }
   }
 
@@ -158,36 +187,80 @@ class ChaosRuntimeActivationPolicyTest {
     @Test
     @DisplayName("effect expires after clock advance past activeFor window")
     void activeForExpiresAfterClockAdvance() {
-      MutableClock clock = new MutableClock();
-      ChaosRuntime runtime = new ChaosRuntime(clock, ChaosMetricsSink.NOOP);
-      runtime.activate(
-          ChaosScenario.builder("time-bounded")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(60)))
-              .activationPolicy(
-                  new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC,
-                      1.0d,
-                      0,
-                      null,
-                      Duration.ofSeconds(5),
-                      null,
-                      null,
-                      false))
-              .build());
+      final MutableClock clock = new MutableClock();
+      try (ChaosRuntime runtime = new ChaosRuntime(clock, ChaosMetricsSink.NOOP)) {
+        runtime.activate(
+            ChaosScenario.builder("time-bounded")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(DELAY))
+                .activationPolicy(
+                    new ActivationPolicy(
+                        ActivationPolicy.StartMode.AUTOMATIC,
+                        1.0d,
+                        0,
+                        null,
+                        Duration.ofSeconds(5),
+                        null,
+                        null,
+                        false))
+                .build());
 
-      long firstElapsed =
-          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      assertThat(firstElapsed)
-          .as("delay within active window")
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+        final long firstElapsed = submitNanos(runtime);
+        assertThat(applied(runtime, "time-bounded")).as("applied in the window").isEqualTo(1L);
+        assertThat(firstElapsed)
+            .as("delay within active window")
+            .isGreaterThanOrEqualTo(DELAY_NANOS);
 
-      clock.advance(Duration.ofSeconds(10));
+        clock.advance(Duration.ofSeconds(10));
 
-      long secondElapsed =
-          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      assertThat(secondElapsed).as("no delay after activeFor expiry").isLessThan(NO_DELAY_MAX_MS);
+        final long secondElapsed = submitNanos(runtime);
+        assertThat(applied(runtime, "time-bounded"))
+            .as("not applied after activeFor expiry")
+            .isEqualTo(1L);
+        assertThat(secondElapsed).as("no delay after activeFor expiry").isLessThan(DELAY_NANOS / 2);
+      }
+    }
+
+    @Test
+    @DisplayName(
+        "re-activating an expired id publishes its INACTIVE with no control-plane lock held")
+    void reactivatingExpiredIdPublishesOutsideTheLock() throws InterruptedException {
+      // Arrange
+      final MutableClock clock = new MutableClock();
+      try (ChaosRuntime runtime = new ChaosRuntime(clock, ChaosMetricsSink.NOOP)) {
+        final ChaosScenario scenario =
+            ChaosScenario.builder("expiring")
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(
+                    ActivationPolicy.builder().activeFor(Duration.ofMinutes(10)).build())
+                .build();
+        runtime.activate(scenario);
+        final List<Boolean> otherThreadGotTheLock = new ArrayList<>();
+        runtime.addEventListener(
+            event -> {
+              if (event.type() == ChaosEvent.Type.INACTIVE) {
+                // addEventListener takes the control plane's lock: it finishes only if the
+                // activating thread does not hold it while it publishes.
+                final Thread other = new Thread(() -> runtime.addEventListener(e -> {}));
+                other.start();
+                try {
+                  other.join(2_000);
+                } catch (final InterruptedException interrupted) {
+                  Thread.currentThread().interrupt();
+                }
+                otherThreadGotTheLock.add(!other.isAlive());
+              }
+            });
+        clock.advance(Duration.ofMinutes(11));
+
+        // Act
+        runtime.activate(scenario);
+
+        // Assert
+        assertThat(otherThreadGotTheLock).containsExactly(true);
+      }
     }
   }
 
@@ -196,72 +269,82 @@ class ChaosRuntimeActivationPolicyTest {
   class RateLimitEnforcement {
 
     @Test
+    @DisplayName("a contribution that does not take effect gives its permit back")
+    void permitOfAnInapplicableContributionIsReturned() throws Throwable {
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("trickle-limited")
+                .selector(ChaosSelector.network(Set.of(OperationType.SOCKET_READ)))
+                .effect(ChaosEffect.trickle(16))
+                .activationPolicy(
+                    ActivationPolicy.builder()
+                        .rateLimit(new ActivationPolicy.RateLimit(1L, Duration.ofHours(1)))
+                        .build())
+                .build());
+
+        // A read no longer than the trickle cap cannot be trickled: it must not use the permit.
+        assertThat(runtime.beforeSocketRead(this, 8, null, 0, 0)).isEqualTo(8);
+        assertThat(runtime.beforeSocketRead(this, 100, null, 0, 0)).isEqualTo(16);
+        assertThat(runtime.beforeSocketRead(this, 100, null, 0, 0))
+            .as("the window's one permit is used")
+            .isEqualTo(100);
+      }
+    }
+
+    @Test
     @DisplayName("rateLimit=1/window allows only one application per window")
     void rateLimitOnePerWindowAllowsOneApplication() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("rate-limited")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(60)))
-              .activationPolicy(
-                  new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC,
-                      1.0d,
-                      0,
-                      null,
-                      null,
-                      new ActivationPolicy.RateLimit(1L, Duration.ofSeconds(10)),
-                      null,
-                      false))
-              .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(rateLimited("rate-limited", 1L));
 
-      long first =
-          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      long second =
-          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+        final long first = submitNanos(runtime);
+        final long second = submitNanos(runtime);
 
-      assertThat(first)
-          .as("first call within window should be delayed")
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
-      assertThat(second)
-          .as("second call exceeds rate limit, should not be delayed")
-          .isLessThan(NO_DELAY_MAX_MS);
+        assertThat(applied(runtime, "rate-limited")).as("one application").isEqualTo(1L);
+        assertThat(first)
+            .as("first call within window should be delayed")
+            .isGreaterThanOrEqualTo(DELAY_NANOS);
+        assertThat(second)
+            .as("second call exceeds rate limit, should not be delayed")
+            .isLessThan(DELAY_NANOS / 2);
+      }
     }
 
     @Test
     @DisplayName("rateLimit=2/window fires first two then blocks until window expires")
     void rateLimitTwoPerWindowFiresTwiceThenBlocks() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("rate-limited-2")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(60)))
-              .activationPolicy(
-                  new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC,
-                      1.0d,
-                      0,
-                      null,
-                      null,
-                      new ActivationPolicy.RateLimit(2L, Duration.ofSeconds(10)),
-                      null,
-                      false))
-              .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(rateLimited("rate-limited-2", 2L));
 
-      long first =
-          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      long second =
-          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      long third =
-          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+        final long first = submitNanos(runtime);
+        final long second = submitNanos(runtime);
+        final long third = submitNanos(runtime);
 
-      assertThat(first).as("first should be delayed").isGreaterThanOrEqualTo(DELAY_MIN_MS);
-      assertThat(second).as("second should be delayed").isGreaterThanOrEqualTo(DELAY_MIN_MS);
-      assertThat(third)
-          .as("third exceeds rate limit, should not be delayed")
-          .isLessThan(NO_DELAY_MAX_MS);
+        assertThat(applied(runtime, "rate-limited-2")).as("two applications").isEqualTo(2L);
+        assertThat(first).as("first should be delayed").isGreaterThanOrEqualTo(DELAY_NANOS);
+        assertThat(second).as("second should be delayed").isGreaterThanOrEqualTo(DELAY_NANOS);
+        assertThat(third)
+            .as("third exceeds rate limit, should not be delayed")
+            .isLessThan(DELAY_NANOS / 2);
+      }
+    }
+
+    private ChaosScenario rateLimited(final String id, final long permits) {
+      return ChaosScenario.builder(id)
+          .scope(ChaosScenario.ScenarioScope.JVM)
+          .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+          .effect(ChaosEffect.delay(DELAY))
+          .activationPolicy(
+              new ActivationPolicy(
+                  ActivationPolicy.StartMode.AUTOMATIC,
+                  1.0d,
+                  0,
+                  null,
+                  null,
+                  new ActivationPolicy.RateLimit(permits, Duration.ofSeconds(10)),
+                  null,
+                  false))
+          .build();
     }
   }
 
@@ -272,65 +355,78 @@ class ChaosRuntimeActivationPolicyTest {
     @Test
     @DisplayName("probability=1.0 fires on every match")
     void probabilityOneFiresOnEveryMatch() {
-      ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("prob-always")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(60)))
-              .activationPolicy(
-                  new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null, false))
-              .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("prob-always")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(DELAY))
+                .activationPolicy(
+                    new ActivationPolicy(
+                        ActivationPolicy.StartMode.AUTOMATIC,
+                        1.0d,
+                        0,
+                        null,
+                        null,
+                        null,
+                        null,
+                        false))
+                .build());
 
-      for (int i = 0; i < 5; i++) {
-        long elapsed =
-            measureMillis(
-                () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-        assertThat(elapsed)
-            .as("call %d should always be delayed", i)
-            .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+        for (int i = 0; i < 5; i++) {
+          final long elapsed = submitNanos(runtime);
+          assertThat(applied(runtime, "prob-always")).as("call %d is applied", i).isEqualTo(i + 1L);
+          assertThat(elapsed)
+              .as("call %d should always be delayed", i)
+              .isGreaterThanOrEqualTo(DELAY_NANOS);
+        }
       }
     }
 
     @Test
     @DisplayName("probability=0.1 with fixed seed fires on some but not all matches")
     void probabilityLowWithFixedSeedFiresSometimes() {
-      // With probability 0.1 and a large number of calls, some should fire and some should not.
-      ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("prob-low")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(60)))
-              .activationPolicy(
-                  new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 0.1d, 0, null, null, null, 42L, false))
-              .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("prob-low")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ZERO))
+                .activationPolicy(
+                    new ActivationPolicy(
+                        ActivationPolicy.StartMode.AUTOMATIC,
+                        0.1d,
+                        0,
+                        null,
+                        null,
+                        null,
+                        42L,
+                        false))
+                .build());
 
-      int delayed = 0;
-      int notDelayed = 0;
-      for (int i = 0; i < 20; i++) {
-        long elapsed =
-            measureMillis(
-                () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-        if (elapsed >= 40) {
-          delayed++;
-        } else {
-          notDelayed++;
+        for (int i = 0; i < 100; i++) {
+          runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
         }
+
+        final ChaosDiagnostics.ScenarioReport report =
+            runtime.diagnostics().scenario("prob-low").orElseThrow();
+        assertThat(report.matchedCount()).isEqualTo(100L);
+        assertThat(report.appliedCount())
+            .as("some, but far from all, of 100 matches apply at probability 0.1")
+            .isBetween(1L, 30L);
       }
-      assertThat(delayed).as("some calls should be delayed with 0.1 probability").isGreaterThan(0);
-      assertThat(notDelayed)
-          .as("many calls should NOT be delayed with 0.1 probability")
-          .isGreaterThan(5);
     }
   }
 
-  private long measureMillis(Runnable runnable) {
-    long start = System.nanoTime();
-    runnable.run();
-    return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+  /** Submits one task through the runtime and returns how long the submission took. */
+  private long submitNanos(final ChaosRuntime runtime) {
+    final long start = System.nanoTime();
+    runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+    return System.nanoTime() - start;
+  }
+
+  private static long applied(final ChaosRuntime runtime, final String id) {
+    return runtime.diagnostics().scenario(id).orElseThrow().appliedCount();
   }
 
   static final class MutableClock extends Clock {

@@ -9,7 +9,7 @@ import java.util.concurrent.RunnableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Thread-local session-ID stack that propagates chaos session context across method calls and
@@ -43,10 +43,27 @@ import java.util.logging.Logger;
  * ConcurrentLinkedDeque#peek()} stays O(1) on the hot path ({@link #currentSessionId()}).
  */
 final class ScopeContext {
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
-  private final ThreadLocal<Deque<String>> sessionStack =
-      ThreadLocal.withInitial(ConcurrentLinkedDeque::new);
+  /**
+   * Stack entry that masks the sessions beneath it; compared by identity, so a session can never
+   * collide with it (session ids are UUID strings created elsewhere).
+   */
+  private static final String NO_SESSION = new String("<no session>");
+
+  @SuppressWarnings("ThreadLocalUsage") // one set of stacks per control plane, as before
+  private final ThreadLocal<Deque<String>> sessionStack = new SessionStack();
+
+  /**
+   * The per-thread session stacks: agent-owned, so a THREAD_LOCAL scenario never sees the agent
+   * reading or binding a session (L3).
+   */
+  private static final class SessionStack extends ThreadLocal<Deque<String>> implements AgentOwned {
+    @Override
+    protected Deque<String> initialValue() {
+      return new ConcurrentLinkedDeque<>();
+    }
+  }
 
   /**
    * Returns the session ID at the top of the current thread's stack, or {@code null} if no session
@@ -54,8 +71,21 @@ final class ScopeContext {
    *
    * @return the innermost active session ID, or {@code null}
    */
-  String currentSessionId() {
-    return sessionStack.get().peek();
+  @SuppressWarnings("ReferenceEquality") // the NO_SESSION marker is compared by identity
+  @Nullable String currentSessionId() {
+    final String top = sessionStack.get().peek();
+    // Identity, not equals: only the marker pushed by bindNone() masks a session.
+    return top == NO_SESSION ? null : top;
+  }
+
+  /**
+   * Marks the current thread as outside any session until the returned binding is closed, masking a
+   * session it is bound to or inherited (a pooled server thread started inside a session).
+   *
+   * @return the binding that removes the mark
+   */
+  ChaosSession.ScopeBinding bindNone() {
+    return bind(NO_SESSION);
   }
 
   /**
@@ -119,12 +149,12 @@ final class ScopeContext {
    * bindings would force callers to reverse-order-close sibling sessions, which neither the JUnit
    * extension lifecycle nor typical test code does.
    *
-   * <p>Nested bindings created via {@link #bind(String)} still enforce strict LIFO — they guard the
-   * thread-pool-leak bug that motivated HIGH-59. Since root session IDs are unique UUIDs, a nested
-   * {@code bind()} that happens to reuse this session's ID (for instance, an explicit {@code
-   * session.bind()} re-entry on the same thread) sits at the stack head while the root sits at the
-   * tail; {@code removeLastOccurrence} unambiguously targets the root entry and leaves the nested
-   * entry — and its LIFO guarantee — untouched.
+   * <p>Nested bindings created via {@link #bind(String)} remove their own entry and fail on a
+   * double close, so a session never leaks into later work served by the same pooled thread. Since
+   * root session IDs are unique UUIDs, a nested {@code bind()} that happens to reuse this session's
+   * ID (for instance, an explicit {@code session.bind()} re-entry on the same thread) sits at the
+   * stack head while the root sits at the tail; {@code removeLastOccurrence} unambiguously targets
+   * the root entry and leaves the nested entry — and its LIFO guarantee — untouched.
    *
    * @param sessionId the session ID to push; must not be {@code null}
    * @return an {@link AutoCloseable} that removes this session's root entry when closed
@@ -138,10 +168,6 @@ final class ScopeContext {
     final Deque<String> stack = sessionStack.get();
     stack.push(sessionId);
     return () -> {
-      if (stack.isEmpty()) {
-        throw new IllegalStateException(
-            "session root binding close() called but the stack is empty (double-close?)");
-      }
       // removeLastOccurrence targets the tail-most entry, which for a root binding is the
       // original push (sibling roots pushed later are closer to the head; a nested bind with
       // the same id would also be closer to the head). Removing the tail preserves LIFO
@@ -163,7 +189,7 @@ final class ScopeContext {
    * @param task the task as seen by the executor; may be {@code null}
    * @return the session id carried by the task, or {@code null}
    */
-  static String sessionOf(final Object task) {
+  static @Nullable String sessionOf(final @Nullable Object task) {
     if (task instanceof ScopedRunnable scoped) {
       return scoped.sessionId();
     }
@@ -183,7 +209,8 @@ final class ScopeContext {
    * @param task the task as seen by the executor; may be {@code null}
    * @return the unwrapped task
    */
-  static Object unwrap(final Object task) {
+  @SuppressWarnings("FutureReturnValueIgnored") // returns the task, it does not run it
+  static @Nullable Object unwrap(final @Nullable Object task) {
     if (task instanceof ScopedRunnable scoped) {
       return scoped.delegate();
     }
@@ -291,8 +318,10 @@ final class ScopeContext {
           // thread) must not mask the actual result of the task or corrupt the executor.
           LOGGER.log(
               Level.FINE,
-              "chaos scope binding close failed; session stack may be inconsistent",
-              scopeCloseFailure);
+              scopeCloseFailure,
+              () ->
+                  "[chaos-agent] chaos scope binding close failed; session stack may be"
+                      + " inconsistent");
         }
       }
     }
@@ -311,8 +340,10 @@ final class ScopeContext {
         } catch (final RuntimeException scopeCloseFailure) {
           LOGGER.log(
               Level.FINE,
-              "chaos scope binding close failed; session stack may be inconsistent",
-              scopeCloseFailure);
+              scopeCloseFailure,
+              () ->
+                  "[chaos-agent] chaos scope binding close failed; session stack may be"
+                      + " inconsistent");
         }
       }
     }

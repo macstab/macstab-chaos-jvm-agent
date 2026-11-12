@@ -1,19 +1,24 @@
 package com.macstab.chaos.jvm.bootstrap.jfr;
 
-import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosEventListener;
+import com.macstab.chaos.jvm.api.Internal;
+import com.macstab.chaos.jvm.core.ChaosRuntime;
 
 /**
  * Entry point for the optional JFR integration layer.
  *
- * <p>Calling {@link #installIfAvailable(ChaosControlPlane)} is safe on any JVM. When JFR is not
+ * <p>Calling {@link #installIfAvailable(ChaosRuntime)} is safe on any JVM. When JFR is not
  * accessible (stripped JRE, disabled module), the method returns immediately without registering
  * anything. When JFR is available, a {@link JfrChaosEventSink} is instantiated and registered as a
- * {@link ChaosEventListener}, wiring chaos events to Flight Recorder.
+ * lifecycle {@link ChaosEventListener} ({@link ChaosRuntime#addLifecycleListener}): it wires chaos
+ * events to Flight Recorder, and, since it never reads {@code SKIPPED}, a skipped call builds no
+ * event for it. It listens whether or not a recording runs, so the snapshot's total counts every
+ * application since the start; {@link ChaosRuntime#close()} closes it.
  *
  * <p>This class deliberately avoids loading {@code jdk.jfr.*} classes at its own load time — those
  * are only referenced inside {@code installJfr}, which is only called after the probe succeeds.
  */
+@Internal
 public final class JfrIntegration {
   private JfrIntegration() {}
 
@@ -26,9 +31,9 @@ public final class JfrIntegration {
    * each call will install an additional sink. Callers (e.g., {@code ChaosAgentBootstrap}) must
    * ensure it is called exactly once per runtime lifetime.
    *
-   * @param runtime chaos control plane into which the JFR sink is installed
+   * @param runtime the runtime into which the JFR sink is installed
    */
-  public static void installIfAvailable(final ChaosControlPlane runtime) {
+  public static void installIfAvailable(final ChaosRuntime runtime) {
     if (!JfrAvailability.probe()) {
       return;
     }
@@ -41,8 +46,8 @@ public final class JfrIntegration {
    * lazily — this method body is never executed (and therefore never triggers JFR class loading)
    * unless the probe returned {@code true}.
    */
-  private static void installJfr(final ChaosControlPlane runtime) {
+  private static void installJfr(final ChaosRuntime runtime) {
     final JfrChaosEventSink sink = new JfrChaosEventSink(runtime.diagnostics());
-    runtime.addEventListener(sink);
+    runtime.addLifecycleListener(sink);
   }
 }

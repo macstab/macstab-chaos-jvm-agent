@@ -4,6 +4,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Immutable description of a single chaos injection scenario.
@@ -60,16 +61,28 @@ public record ChaosScenario(
     Map<String, String> tags) {
 
   /** Validates and normalises the ChaosScenario fields. */
-  public ChaosScenario {
+  public ChaosScenario(
+      final String id,
+      final @Nullable String description,
+      final @Nullable ScenarioScope scope,
+      final ChaosSelector selector,
+      final ChaosEffect effect,
+      final @Nullable ActivationPolicy activationPolicy,
+      final int precedence,
+      final Map<String, String> tags) {
     if (id == null || id.isBlank()) {
       throw new IllegalArgumentException("id must be non-blank");
     }
-    description = description == null ? "" : description;
-    scope = scope == null ? ScenarioScope.JVM : scope;
-    selector = Objects.requireNonNull(selector, "selector");
-    effect = Objects.requireNonNull(effect, "effect");
-    activationPolicy = activationPolicy == null ? ActivationPolicy.always() : activationPolicy;
-    tags = copyTagsPreservingOrder(tags);
+    this.description = description == null ? "" : description;
+    this.scope = scope == null ? ScenarioScope.JVM : scope;
+    Objects.requireNonNull(selector, "selector");
+    Objects.requireNonNull(effect, "effect");
+    this.activationPolicy = activationPolicy == null ? ActivationPolicy.always() : activationPolicy;
+    this.tags = copyTagsPreservingOrder(tags);
+    this.id = id;
+    this.selector = selector;
+    this.effect = effect;
+    this.precedence = precedence;
   }
 
   private static Map<String, String> copyTagsPreservingOrder(final Map<String, String> tags) {
@@ -116,13 +129,17 @@ public record ChaosScenario(
     JVM,
 
     /**
-     * The scenario is evaluated only for operations performed on threads that have been {@link
-     * ChaosSession#bind() bound} to a specific session. Use for per-test isolation when multiple
-     * tests share a JVM.
+     * The scenario is evaluated only for operations performed on threads bound to a specific
+     * session (the thread that opened it, threads {@link ChaosSession#bind() bound} to it, and work
+     * handed off from them). Use for per-test isolation when multiple tests share a JVM.
      *
-     * <p>Session-scoped scenarios cannot use JVM-global selectors ({@link
-     * ChaosSelector.ThreadSelector}, {@link ChaosSelector.ShutdownSelector}, {@link
-     * ChaosSelector.ClassLoadingSelector}, {@link ChaosSelector.StressSelector}).
+     * <p>A session-scoped scenario cannot select {@code CLASS_LOAD}, {@code CLASS_DEFINE}, {@code
+     * RESOURCE_LOAD} or {@code SHUTDOWN_HOOK_REGISTER}: the JVM evaluates them without a session,
+     * so the scenario could never apply. A stressor ({@link ChaosSelector.StressSelector}) runs
+     * beside the whole JVM and must be JVM scoped. Thread starts and sleeps ({@link
+     * ChaosSelector.ThreadSelector}) and executor shutdowns ({@link ChaosSelector.ShutdownSelector}
+     * on {@code EXECUTOR_SHUTDOWN} / {@code EXECUTOR_AWAIT_TERMINATION}) run on the calling thread
+     * and can be session scoped.
      */
     SESSION,
   }
@@ -135,11 +152,11 @@ public record ChaosScenario(
    */
   public static final class Builder {
     private final String id;
-    private String description = "";
-    private ScenarioScope scope = ScenarioScope.JVM;
-    private ChaosSelector selector;
-    private ChaosEffect effect;
-    private ActivationPolicy activationPolicy = ActivationPolicy.always();
+    private @Nullable String description = "";
+    private @Nullable ScenarioScope scope = ScenarioScope.JVM;
+    private @Nullable ChaosSelector selector;
+    private @Nullable ChaosEffect effect;
+    private @Nullable ActivationPolicy activationPolicy = ActivationPolicy.always();
     private int precedence;
     private final Map<String, String> tags = new LinkedHashMap<>();
 
@@ -151,10 +168,10 @@ public record ChaosScenario(
      * Human-readable description of what this scenario tests. Appears in diagnostics and debug
      * dumps.
      *
-     * @param description free-form description text
+     * @param description free-form description text; {@code null} is {@code ""}
      * @return this builder for chaining
      */
-    public Builder description(final String description) {
+    public Builder description(final @Nullable String description) {
       this.description = description;
       return this;
     }
@@ -162,11 +179,11 @@ public record ChaosScenario(
     /**
      * Sets the scope. Defaults to {@link ScenarioScope#JVM} when not called.
      *
-     * @param scope visibility scope for this scenario
+     * @param scope visibility scope for this scenario; {@code null} is {@link ScenarioScope#JVM}
      * @return this builder for chaining
      * @see ScenarioScope
      */
-    public Builder scope(final ScenarioScope scope) {
+    public Builder scope(final @Nullable ScenarioScope scope) {
       this.scope = scope;
       return this;
     }
@@ -199,11 +216,12 @@ public record ChaosScenario(
      * Sets the activation policy controlling when and how often the effect fires. Defaults to
      * {@link ActivationPolicy#always()} when not called.
      *
-     * @param activationPolicy activation policy governing when the effect fires
+     * @param activationPolicy activation policy governing when the effect fires; {@code null} is
+     *     {@link ActivationPolicy#always()}
      * @return this builder for chaining
      * @see ActivationPolicy
      */
-    public Builder activationPolicy(final ActivationPolicy activationPolicy) {
+    public Builder activationPolicy(final @Nullable ActivationPolicy activationPolicy) {
       this.activationPolicy = activationPolicy;
       return this;
     }
@@ -246,11 +264,18 @@ public record ChaosScenario(
      * Builds the scenario.
      *
      * @return the constructed ChaosScenario
-     * @throws IllegalArgumentException if selector or effect is null
+     * @throws NullPointerException if the selector or the effect was not set
      */
     public ChaosScenario build() {
       return new ChaosScenario(
-          id, description, scope, selector, effect, activationPolicy, precedence, tags);
+          id,
+          description,
+          scope,
+          Objects.requireNonNull(selector, "selector"),
+          Objects.requireNonNull(effect, "effect"),
+          activationPolicy,
+          precedence,
+          tags);
     }
   }
 }

@@ -1,13 +1,61 @@
 package com.macstab.chaos.jvm.startup;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.StreamReadConstraints;
+import com.fasterxml.jackson.core.StreamReadFeature;
+import com.fasterxml.jackson.core.exc.InputCoercionException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.BeanDescription;
+import com.fasterxml.jackson.databind.DeserializationConfig;
+import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.JsonDeserializer;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.cfg.CoercionAction;
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
+import com.fasterxml.jackson.databind.deser.BeanDeserializerModifier;
+import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
+import com.fasterxml.jackson.databind.deser.std.StdScalarDeserializer;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
+import com.fasterxml.jackson.databind.exc.InvalidNullException;
+import com.fasterxml.jackson.databind.exc.MismatchedInputException;
+import com.fasterxml.jackson.databind.exc.ValueInstantiationException;
+import com.fasterxml.jackson.databind.introspect.BeanPropertyDefinition;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.fasterxml.jackson.databind.type.CollectionType;
+import com.fasterxml.jackson.databind.type.LogicalType;
+import com.fasterxml.jackson.databind.type.TypeFactory;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosPlan;
+import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.api.Internal;
+import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.function.IntFunction;
+import java.util.stream.Collectors;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Jackson-based serialisation bridge between JSON and {@link ChaosPlan}.
@@ -17,18 +65,36 @@ import com.macstab.chaos.jvm.api.ChaosPlan;
  * <ul>
  *   <li>{@link DeserializationFeature#FAIL_ON_UNKNOWN_PROPERTIES} — rejects unexpected fields
  *   <li>{@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS} — rejects JSON with trailing garbage
+ *   <li>{@link StreamReadFeature#STRICT_DUPLICATE_DETECTION} — rejects a property given twice
+ *       instead of keeping the last value
+ *   <li>no coercion: a number is not a boolean, a string or a fraction is not an integer, a number
+ *       or a boolean is not a string, and an enum is read by name only
+ *   <li>a value given twice in a set ({@code operations}) is refused instead of being dropped
+ *   <li>durations and instants are ISO-8601 strings only ({@code "PT0.1S"}, {@code
+ *       "2026-11-01T08:00:00Z"}); a number is refused (Jackson's own deserializers read one as
+ *       seconds whatever their leniency)
  *   <li>{@link StreamReadConstraints} — caps nesting depth and single-string length at the
  *       streaming parser level; a pathological payload like {@code "[[[[...]}]]]...] }} cannot
  *       exhaust the stack or allocate an arbitrarily large String before the outer size gate sees
  *       it
+ *   <li>a {@code gate} needs {@code maxBlock}: nothing can release a gate read from JSON, since its
+ *       author holds no {@link com.macstab.chaos.jvm.api.ChaosActivationHandle}
  * </ul>
  *
- * <p>Input size is validated before parsing to prevent OOM from oversized payloads.
+ * <p>Input size is validated before parsing to prevent OOM from oversized payloads. Durations and
+ * instants are written in ISO-8601; {@link #write(ChaosPlan)} leaves out absent ({@code null})
+ * values.
  */
 public final class ChaosPlanMapper {
 
-  /** Maximum JSON input size accepted by {@link #read(String)}: 1 MiB. */
-  static final int MAX_JSON_LENGTH = 1_048_576;
+  /**
+   * Maximum JSON input size accepted by {@link #read(String)}, in UTF-8 bytes: 1 MiB. Also the cap
+   * on a plan file and on a plan posted to a management endpoint.
+   */
+  @Internal public static final int MAX_JSON_LENGTH = 1_048_576;
+
+  /** Cap, in characters, on a validation message relayed into a parse failure. */
+  private static final int CAUSE_MESSAGE_MAX_LENGTH = 200;
 
   /**
    * Maximum JSON nesting depth allowed by the streaming parser. 32 is generous for any realistic
@@ -46,6 +112,18 @@ public final class ChaosPlanMapper {
 
   private static final String SOURCE_JSON_INPUT = "json-input";
 
+  /** The name of the plan {@link #read(String)} wraps bare scenarios in. */
+  private static final String DEFAULT_PLAN_NAME = "default";
+
+  /** A byte order mark, which a file saved by some editors starts with. */
+  private static final char BYTE_ORDER_MARK = '\uFEFF';
+
+  /** Members that make an object a plan; an object without any of them is a scenario. */
+  private static final List<String> PLAN_MEMBERS =
+      List.of("scenarios", "metadata", "observability");
+
+  private static final TypeReference<List<ChaosScenario>> SCENARIO_LIST = new TypeReference<>() {};
+
   /** Highest code point representable in a single UTF-8 byte (7-bit ASCII). */
   private static final int UTF8_ONE_BYTE_LIMIT = 0x80;
 
@@ -54,7 +132,16 @@ public final class ChaosPlanMapper {
 
   private static final ObjectMapper OBJECT_MAPPER = buildObjectMapper();
 
+  /** The mapper {@link #write(ChaosPlan)} uses: absent values are left out of a plan. */
+  private static final ObjectMapper PLAN_WRITER =
+      OBJECT_MAPPER.copy().setDefaultPropertyInclusion(JsonInclude.Include.NON_NULL);
+
   private ChaosPlanMapper() {}
+
+  /** The configured mapper: the plan schema is derived from it ({@code PlanSchemaTest}). */
+  static ObjectMapper objectMapper() {
+    return OBJECT_MAPPER;
+  }
 
   private static ObjectMapper buildObjectMapper() {
     final JsonFactory factory =
@@ -64,16 +151,118 @@ public final class ChaosPlanMapper {
                     .maxNestingDepth(MAX_NESTING_DEPTH)
                     .maxStringLength(MAX_STRING_LENGTH)
                     .build())
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .build();
-    return JsonMapper.builder(factory)
+    return ApiJsonMixins.register(JsonMapper.builder(factory))
         .addModule(new JavaTimeModule())
+        // After JavaTimeModule: a module added later replaces its Duration and Instant readers.
+        .addModule(
+            new SimpleModule("chaos-plan-iso-time")
+                .addDeserializer(
+                    Duration.class,
+                    new IsoStringDeserializer<>(Duration.class, Duration::parse, "duration"))
+                .addDeserializer(
+                    Instant.class,
+                    new IsoStringDeserializer<>(Instant.class, Instant::parse, "instant"))
+                .setDeserializerModifier(
+                    new BeanDeserializerModifier() {
+                      @Override
+                      public JsonDeserializer<?> modifyCollectionDeserializer(
+                          final DeserializationConfig config,
+                          final CollectionType type,
+                          final BeanDescription description,
+                          final JsonDeserializer<?> deserializer) {
+                        return Set.class.isAssignableFrom(type.getRawClass())
+                            ? new DuplicateRefusingSetDeserializer(type)
+                            : deserializer;
+                      }
+                    }))
+        // Jackson's string reader takes a number or a boolean whatever ALLOW_COERCION_OF_SCALARS
+        // says; the schema's "type": "string" does not.
+        .withCoercionConfig(
+            LogicalType.Textual,
+            coercion ->
+                coercion
+                    .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+                    .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
+                    .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail))
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
         .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+        .enable(DeserializationFeature.FAIL_ON_NUMBERS_FOR_ENUMS)
+        .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+        .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
+        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+        .disable(SerializationFeature.WRITE_DURATIONS_AS_TIMESTAMPS)
         .build();
   }
 
   /**
-   * Deserialises a JSON string into a {@link ChaosPlan}.
+   * Reads a set from a JSON array whose values are distinct: a value given twice is refused (the
+   * schema's {@code uniqueItems}), not silently dropped.
+   */
+  private static final class DuplicateRefusingSetDeserializer extends StdDeserializer<Set<Object>> {
+
+    private static final long serialVersionUID = 1L;
+
+    /** The message of the refusal, which {@link #mismatchKind} reports as it is. */
+    static final String DUPLICATE = "duplicate value";
+
+    private final JavaType listType;
+
+    DuplicateRefusingSetDeserializer(final CollectionType setType) {
+      super(setType);
+      this.listType =
+          TypeFactory.defaultInstance()
+              .constructCollectionType(List.class, setType.getContentType());
+    }
+
+    @Override
+    public Set<Object> deserialize(final JsonParser parser, final DeserializationContext context)
+        throws IOException {
+      final List<Object> values = context.readValue(parser, listType);
+      final Set<Object> distinct = new LinkedHashSet<>(values);
+      if (distinct.size() != values.size()) {
+        throw MismatchedInputException.from(parser, handledType(), DUPLICATE);
+      }
+      return distinct;
+    }
+  }
+
+  /** Reads a value from an ISO-8601 string only; a number or any other token is refused. */
+  private static final class IsoStringDeserializer<T> extends StdScalarDeserializer<T> {
+
+    private static final long serialVersionUID = 1L;
+
+    private final transient Function<String, T> parse;
+    private final String kind;
+
+    IsoStringDeserializer(final Class<T> type, final Function<String, T> parse, final String kind) {
+      super(type);
+      this.parse = parse;
+      this.kind = kind;
+    }
+
+    @Override
+    @SuppressWarnings("unchecked") // a problem handler's replacement is of the handled type
+    public T deserialize(final JsonParser parser, final DeserializationContext context)
+        throws IOException {
+      if (!parser.hasToken(JsonToken.VALUE_STRING)) {
+        return (T) context.handleUnexpectedToken(handledType(), parser);
+      }
+      final String text = parser.getText().trim();
+      try {
+        return parse.apply(text);
+      } catch (final DateTimeParseException invalid) {
+        return (T) context.handleWeirdStringValue(handledType(), text, "invalid " + kind);
+      }
+    }
+  }
+
+  /**
+   * Deserialises a plan, a single scenario or an array of scenarios, recognised by the JSON's
+   * structure: an object with a {@code scenarios}, {@code metadata} or {@code observability} member
+   * is a plan, another object a scenario. Scenarios are wrapped in a plan named {@value
+   * #DEFAULT_PLAN_NAME}. A leading byte order mark is skipped.
    *
    * @param json non-null JSON representation of a chaos plan
    * @return validated ChaosPlan instance
@@ -81,6 +270,26 @@ public final class ChaosPlanMapper {
    *     contract
    */
   public static ChaosPlan read(final String json) {
+    return read(json, SOURCE_JSON_INPUT);
+  }
+
+  /**
+   * Deserialises a plan as {@link #read(String)} does, reporting a failure with {@code source} (for
+   * example the plan file).
+   *
+   * @param json non-null JSON representation of a chaos plan
+   * @param source where the JSON came from, as {@link ConfigLoadException#getSource()} reports it
+   * @return validated ChaosPlan instance
+   * @throws ConfigLoadException if the JSON is malformed, exceeds size limits, or violates the plan
+   *     contract
+   */
+  static ChaosPlan read(final String json, final String source) {
+    return read(json, source, DEFAULT_PLAN_NAME);
+  }
+
+  private static ChaosPlan read(final String input, final String source, final String planName) {
+    final String json =
+        !input.isEmpty() && input.charAt(0) == BYTE_ORDER_MARK ? input.substring(1) : input;
     // String.length() counts UTF-16 chars, not bytes — a 500k-char JSON full of 4-byte
     // codepoints is ~2 MiB encoded, silently bypassing the documented 1 MiB gate. Count the
     // actual UTF-8 byte length with a short-circuit pass so oversized inputs are rejected
@@ -93,12 +302,84 @@ public final class ChaosPlanMapper {
               + " bytes (>"
               + MAX_JSON_LENGTH
               + " UTF-8 bytes provided)",
-          SOURCE_JSON_INPUT);
+          source);
     }
+    // The shape is read from the tree; each shape is bound from the original text, so a failure
+    // reports its position in the input.
+    // The tree locates what a failing record constructor hides (an unknown property, a null).
+    JsonNode tree = null;
     try {
-      return OBJECT_MAPPER.readValue(json, ChaosPlan.class);
+      tree = OBJECT_MAPPER.readTree(json);
+      if (tree.isArray()) {
+        return boundedGates(
+            wrap(OBJECT_MAPPER.readValue(json, SCENARIO_LIST), planName, source),
+            index -> "[" + index + "].effect",
+            source);
+      }
+      if (tree.isObject() && PLAN_MEMBERS.stream().noneMatch(tree::has)) {
+        return boundedGates(
+            wrap(List.of(OBJECT_MAPPER.readValue(json, ChaosScenario.class)), planName, source),
+            index -> "effect",
+            source);
+      }
+      // A plan, or neither an array nor an object: bound as a plan, as before.
+      final ChaosPlan plan = OBJECT_MAPPER.readValue(json, ChaosPlan.class);
+      // Jackson maps the JSON literal null to a null value rather than failing.
+      if (plan == null) {
+        throw new ConfigLoadException(
+            "chaos plan JSON is null; expected an object with \"scenarios\"", source);
+      }
+      return boundedGates(plan, index -> "scenarios[" + index + "].effect", source);
     } catch (JsonProcessingException exception) {
-      throw new ConfigLoadException(parseFailureMessage(exception), SOURCE_JSON_INPUT, exception);
+      final com.fasterxml.jackson.core.JsonLocation location = exception.getLocation();
+      final boolean positioned = location != null && location.getLineNr() > 0;
+      throw new ConfigLoadException(
+          parseFailureMessage(exception, tree),
+          source,
+          exception,
+          positioned ? location.getLineNr() : 0,
+          positioned ? location.getColumnNr() : 0,
+          parseFailureReason(exception, tree));
+    }
+  }
+
+  /**
+   * Refuses a gate without {@code maxBlock}. Only an {@link
+   * com.macstab.chaos.jvm.api.ChaosActivationHandle} releases a gate, and a plan read from JSON (a
+   * file, HTTP, JMX, {@code @WithChaos}) gives none to its author, so such a gate would hold every
+   * caller until the scenario is stopped.
+   *
+   * @param path the JSON path of the effect of the scenario at an index
+   */
+  private static ChaosPlan boundedGates(
+      final ChaosPlan plan, final IntFunction<String> path, final String source) {
+    final List<ChaosScenario> scenarios = plan.scenarios();
+    for (int index = 0; index < scenarios.size(); index++) {
+      if (scenarios.get(index).effect() instanceof ChaosEffect.GateEffect gate
+          && gate.maxBlock() == null) {
+        final String reason =
+            "invalid value: gate needs maxBlock, nothing can release a gate read from JSON at "
+                + path.apply(index);
+        throw new ConfigLoadException(
+            "failed to parse chaos plan JSON: " + reason, source, null, 0, 0, reason);
+      }
+    }
+    return plan;
+  }
+
+  /** Wraps bare scenarios into a plan named {@code planName}; the plan's own rules apply. */
+  private static ChaosPlan wrap(
+      final List<ChaosScenario> scenarios, final String planName, final String source) {
+    try {
+      return new ChaosPlan(
+          new ChaosPlan.Metadata(planName, ""),
+          new ChaosPlan.Observability(true, true, false),
+          scenarios);
+    } catch (final IllegalArgumentException invalid) {
+      final String reason =
+          "invalid value: " + LogText.sanitize(invalid.getMessage(), CAUSE_MESSAGE_MAX_LENGTH);
+      throw new ConfigLoadException(
+          "failed to parse chaos plan JSON: " + reason, source, null, 0, 0, reason);
     }
   }
 
@@ -107,9 +388,19 @@ public final class ChaosPlanMapper {
    * chaos plan JSON at line 7, column 21: unknown property 'delayy' at scenarios[0].effect"}.
    * Values from the input are never included — Jackson's own messages can quote them (a mistyped
    * value would be echoed into logs), so only field names, which come from the plan's structure,
-   * are reported. An earlier version reported only "failed to parse chaos plan JSON".
+   * are reported.
    */
   static String parseFailureMessage(final JsonProcessingException exception) {
+    return parseFailureMessage(exception, null);
+  }
+
+  /**
+   * Describes a parse failure as {@link #parseFailureMessage(JsonProcessingException)} does, using
+   * {@code tree} (the input read as a tree, {@code null} when it did not parse) to find what a
+   * failing constructor hides.
+   */
+  static String parseFailureMessage(
+      final JsonProcessingException exception, final @Nullable JsonNode tree) {
     final StringBuilder message = new StringBuilder("failed to parse chaos plan JSON");
     final com.fasterxml.jackson.core.JsonLocation location = exception.getLocation();
     if (location != null && location.getLineNr() > 0) {
@@ -119,54 +410,230 @@ public final class ChaosPlanMapper {
           .append(", column ")
           .append(location.getColumnNr());
     }
-    message.append(": ").append(failureKind(exception));
-    if (exception instanceof com.fasterxml.jackson.databind.JsonMappingException mapping) {
-      final String path = jsonPath(mapping);
-      if (!path.isEmpty()) {
-        message.append(" at ").append(path);
-      }
-    }
-    return message.toString();
+    return message.append(": ").append(parseFailureReason(exception, tree)).toString();
   }
 
-  private static String failureKind(final JsonProcessingException exception) {
+  /** The failure without its position: the kind and the JSON path. */
+  static String parseFailureReason(final JsonProcessingException exception) {
+    return parseFailureReason(exception, null);
+  }
+
+  /** The failure without its position, using {@code tree} as {@link #parseFailureMessage} does. */
+  static String parseFailureReason(
+      final JsonProcessingException exception, final @Nullable JsonNode tree) {
+    final String path =
+        switch (exception) {
+          case com.fasterxml.jackson.databind.JsonMappingException mapping -> jsonPath(mapping);
+          case com.fasterxml.jackson.core.JsonParseException syntax -> parserPath(syntax);
+          default -> "";
+        };
+    final String kind = failureKind(exception, tree);
+    return path.isEmpty() ? kind : kind + " at " + path;
+  }
+
+  private static String failureKind(
+      final JsonProcessingException exception, final @Nullable JsonNode tree) {
     if (exception
         instanceof com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException unrecognized) {
-      return "unknown property '" + unrecognized.getPropertyName() + "'";
+      return "unknown property '" + printableName(unrecognized.getPropertyName()) + "'";
     }
     if (exception instanceof com.fasterxml.jackson.databind.exc.InvalidTypeIdException) {
       return "unknown or missing type";
     }
-    if (exception
-        instanceof com.fasterxml.jackson.databind.exc.ValueInstantiationException instantiation) {
+    if (exception instanceof ValueInstantiationException instantiation) {
+      // A record constructor ran before Jackson reported what it buffered: an unknown property
+      // or a null in the object come first, in document order.
+      final String hidden = treeProblem(instantiation, tree);
+      if (hidden != null) {
+        return hidden;
+      }
       // The cause is the agent's own validation message (for example "delay bounds must be
-      // non-null"), not Jackson's description of the input.
+      // non-null"), not Jackson's description of the input. It can quote a field value (a
+      // duplicate id), so it is sanitised and capped.
       final Throwable cause = instantiation.getCause();
+      if (cause instanceof NullPointerException) {
+        return cause.getMessage() != null
+            ? "missing or null value: "
+                + LogText.sanitize(cause.getMessage(), CAUSE_MESSAGE_MAX_LENGTH)
+            : "missing or null value";
+      }
       return cause != null && cause.getMessage() != null
-          ? "invalid value: " + cause.getMessage()
+          ? "invalid value: " + LogText.sanitize(cause.getMessage(), CAUSE_MESSAGE_MAX_LENGTH)
           : "invalid value";
     }
-    if (exception instanceof com.fasterxml.jackson.databind.exc.MismatchedInputException) {
-      return "value of the wrong type";
+    if (exception instanceof InputCoercionException
+        || exception.getCause() instanceof InputCoercionException) {
+      return "number out of range";
     }
-    if (exception instanceof com.fasterxml.jackson.core.JsonParseException) {
-      return "malformed JSON";
+    if (exception instanceof InvalidNullException) {
+      return "missing or null value";
+    }
+    if (exception instanceof MismatchedInputException mismatch) {
+      return mismatchKind(mismatch);
+    }
+    // Syntax errors are found while the tree is read, before any value is bound.
+    if (exception instanceof com.fasterxml.jackson.core.JsonParseException syntax) {
+      final String original = syntax.getOriginalMessage();
+      return original != null && original.startsWith("Duplicate field")
+          ? "duplicate property"
+          : "malformed JSON";
     }
     return exception.getClass().getSimpleName();
+  }
+
+  /** A value of the wrong type or form, by what was expected. */
+  private static String mismatchKind(final MismatchedInputException mismatch) {
+    final String original = mismatch.getOriginalMessage();
+    if (DuplicateRefusingSetDeserializer.DUPLICATE.equals(original)) {
+      return DuplicateRefusingSetDeserializer.DUPLICATE;
+    }
+    if (original != null && original.startsWith("Trailing token")) {
+      // FAIL_ON_TRAILING_TOKENS: more JSON after the plan's value.
+      return "trailing content after the plan";
+    }
+    final Class<?> target = mismatch.getTargetType();
+    if (target == Duration.class) {
+      return "invalid duration";
+    }
+    if (target == Instant.class) {
+      return "invalid instant";
+    }
+    if (target != null && target.isEnum() && mismatch instanceof InvalidFormatException) {
+      final String expected =
+          Arrays.stream(target.getEnumConstants())
+              .map(constant -> ((Enum<?>) constant).name())
+              .collect(Collectors.joining(", "));
+      return "unknown value; expected one of "
+          + LogText.sanitize(expected, CAUSE_MESSAGE_MAX_LENGTH);
+    }
+    return "value of the wrong type";
+  }
+
+  /**
+   * The first unknown property or null value, in document order, of the object a failing
+   * constructor was given; {@code null} when there is none or the object cannot be found.
+   */
+  private static @Nullable String treeProblem(
+      final ValueInstantiationException instantiation, final @Nullable JsonNode tree) {
+    JsonNode node = tree;
+    for (final com.fasterxml.jackson.databind.JsonMappingException.Reference reference :
+        instantiation.getPath()) {
+      if (node == null) {
+        return null;
+      }
+      node =
+          reference.getFieldName() != null
+              ? node.get(reference.getFieldName())
+              : node.get(reference.getIndex());
+    }
+    if (node == null || !node.isObject() || instantiation.getType() == null) {
+      return null;
+    }
+    final Set<String> known = propertyNames(instantiation.getType());
+    for (final Map.Entry<String, JsonNode> field : node.properties()) {
+      final String name = LogText.sanitize(field.getKey(), CAUSE_MESSAGE_MAX_LENGTH);
+      if (!known.contains(field.getKey())) {
+        return "unknown property '" + name + "'";
+      }
+      final JsonNode value = field.getValue();
+      boolean nullInside = value.isNull();
+      for (final JsonNode element : value.isArray() ? value : List.<JsonNode>of()) {
+        nullInside |= element.isNull();
+      }
+      if (nullInside) {
+        return "missing or null value: " + name;
+      }
+    }
+    return null;
+  }
+
+  /** The JSON property names of {@code type}, its type id included. */
+  private static Set<String> propertyNames(final JavaType type) {
+    final DeserializationConfig config = OBJECT_MAPPER.getDeserializationConfig();
+    final Set<String> names = new HashSet<>();
+    for (final BeanPropertyDefinition property : config.introspect(type).findProperties()) {
+      names.add(property.getName());
+    }
+    // The type id ("type" of a selector or an effect) is declared on a supertype.
+    final Deque<Class<?>> types = new ArrayDeque<>(List.of(type.getRawClass()));
+    while (!types.isEmpty()) {
+      final Class<?> current = types.pop();
+      final JsonTypeInfo.Value typeInfo =
+          config
+              .getAnnotationIntrospector()
+              .findPolymorphicTypeInfo(
+                  config, config.introspectClassAnnotations(current).getClassInfo());
+      if (typeInfo != null) {
+        names.add(typeInfo.getPropertyName());
+      }
+      if (current.getSuperclass() != null) {
+        types.push(current.getSuperclass());
+      }
+      types.addAll(Arrays.asList(current.getInterfaces()));
+    }
+    return names;
   }
 
   private static String jsonPath(
       final com.fasterxml.jackson.databind.JsonMappingException mapping) {
     final StringBuilder path = new StringBuilder();
+    java.util.List<com.fasterxml.jackson.databind.JsonMappingException.Reference> references =
+        mapping.getPath();
+    if (mapping instanceof com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException
+        && !references.isEmpty()) {
+      // The last reference is the unknown property itself, which the kind already names: the
+      // path is the object that holds it.
+      references = references.subList(0, references.size() - 1);
+    }
     for (final com.fasterxml.jackson.databind.JsonMappingException.Reference reference :
-        mapping.getPath()) {
+        references) {
       if (reference.getFieldName() != null) {
         if (!path.isEmpty()) {
           path.append('.');
         }
-        path.append(reference.getFieldName());
+        path.append(printableName(reference.getFieldName()));
       } else if (reference.getIndex() >= 0) {
         path.append('[').append(reference.getIndex()).append(']');
+      }
+    }
+    return path.toString();
+  }
+
+  /**
+   * A property name from the input, as a failure message relays it: on one line and capped; an
+   * empty name stays empty.
+   */
+  private static String printableName(final @Nullable String name) {
+    return name == null || name.isEmpty() ? "" : LogText.sanitize(name, CAUSE_MESSAGE_MAX_LENGTH);
+  }
+
+  /**
+   * The path to where a syntax error stopped the parser: the members and indices of the values it
+   * was in.
+   */
+  private static String parserPath(final com.fasterxml.jackson.core.JsonParseException syntax) {
+    // Member names and array indices, outermost first.
+    final java.util.Deque<Object> steps = new java.util.ArrayDeque<>();
+    final com.fasterxml.jackson.core.JsonParser parser = syntax.getProcessor();
+    for (com.fasterxml.jackson.core.JsonStreamContext context =
+            parser == null ? null : parser.getParsingContext();
+        context != null;
+        context = context.getParent()) {
+      if (context.hasCurrentName()) {
+        steps.addFirst(context.getCurrentName());
+      } else if (context.inArray()) {
+        steps.addFirst(context.getCurrentIndex());
+      }
+    }
+    final StringBuilder path = new StringBuilder();
+    for (final Object step : steps) {
+      if (step instanceof Integer index) {
+        path.append('[').append(index).append(']');
+      } else {
+        if (!path.isEmpty()) {
+          path.append('.');
+        }
+        path.append(printableName(step.toString()));
       }
     }
     return path.toString();
@@ -190,10 +657,9 @@ public final class ChaosPlanMapper {
         // Only a well-formed surrogate pair encodes to 4 UTF-8 bytes. A lone high surrogate —
         // either at the end of the string or followed by a non-low-surrogate — gets replaced
         // with U+FFFD at encode time, which is 3 bytes, and the next char must still be counted
-        // on its own. Consuming it unconditionally (the old code did `i++` regardless) over-
-        // counted lone surrogates by one byte each and under-counted the following CJK char by
-        // three, shifting the net tally far enough off to let ~50% oversized JSON slip past the
-        // 1 MiB guard on JDK 17/21.
+        // on its own. Consuming it unconditionally (`i++` regardless) would over-count lone
+        // surrogates by one byte each and under-count the following CJK char by three, shifting
+        // the net tally far enough off to let ~50% oversized JSON slip past the 1 MiB guard.
         if (i + 1 < length && Character.isLowSurrogate(text.charAt(i + 1))) {
           bytes += 4;
           i++;
@@ -211,7 +677,7 @@ public final class ChaosPlanMapper {
   }
 
   /**
-   * Serialises a {@link ChaosPlan} to a pretty-printed JSON string.
+   * Serialises a {@link ChaosPlan} to a pretty-printed JSON string, leaving out absent values.
    *
    * @param plan non-null plan to serialise
    * @return JSON representation
@@ -219,9 +685,39 @@ public final class ChaosPlanMapper {
    */
   public static String write(final ChaosPlan plan) {
     try {
-      return OBJECT_MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(plan);
+      return PLAN_WRITER.writerWithDefaultPrettyPrinter().writeValueAsString(plan);
     } catch (JsonProcessingException exception) {
       throw new IllegalStateException("failed to serialize chaos plan", exception);
     }
+  }
+
+  /**
+   * Serialises any value the plan model and diagnostics consist of (records, enums, durations,
+   * instants) to compact JSON, with the same conventions as plans.
+   *
+   * @param value the value
+   * @return JSON
+   * @throws IllegalStateException if serialisation fails (indicates a bug)
+   */
+  public static String toJson(final Object value) {
+    try {
+      return OBJECT_MAPPER.writeValueAsString(value);
+    } catch (JsonProcessingException exception) {
+      throw new IllegalStateException(
+          "failed to serialize " + value.getClass().getName(), exception);
+    }
+  }
+
+  /**
+   * Reads a plan, a single scenario or an array of scenarios as {@link #read(String)} does,
+   * wrapping bare scenarios in a plan named {@code planName}.
+   *
+   * @param json the JSON
+   * @param planName the name of the plan wrapping bare scenarios
+   * @return the plan
+   * @throws ConfigLoadException if the JSON is malformed or invalid
+   */
+  public static ChaosPlan readPlanOrScenarios(final String json, final String planName) {
+    return read(json, SOURCE_JSON_INPUT, planName);
   }
 }

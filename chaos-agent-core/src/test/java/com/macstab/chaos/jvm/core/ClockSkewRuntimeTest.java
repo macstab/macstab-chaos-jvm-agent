@@ -19,7 +19,6 @@ import org.junit.jupiter.api.Test;
 class ClockSkewRuntimeTest {
 
   private static final long REAL_MILLIS = 1_700_000_000_000L;
-  private static final long REAL_NANOS = 100_000_000_000L;
   private static final long SKEW_MS = 5_000L;
 
   private static ChaosRuntime runtimeWithClockSkew(
@@ -42,29 +41,32 @@ class ClockSkewRuntimeTest {
     @Test
     @DisplayName("adds constant positive skew to millis")
     void addsConstantPositiveSkew() {
-      final ChaosRuntime runtime =
-          runtimeWithClockSkew(Duration.ofMillis(SKEW_MS), ChaosEffect.ClockSkewMode.FIXED);
-      final long skewed = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
-      assertThat(skewed).isEqualTo(REAL_MILLIS + SKEW_MS);
+      try (ChaosRuntime runtime =
+          runtimeWithClockSkew(Duration.ofMillis(SKEW_MS), ChaosEffect.ClockSkewMode.FIXED)) {
+        final long skewed = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
+        assertThat(skewed).isEqualTo(REAL_MILLIS + SKEW_MS);
+      }
     }
 
     @Test
     @DisplayName("adds constant negative skew to millis")
     void addsConstantNegativeSkew() {
-      final ChaosRuntime runtime =
-          runtimeWithClockSkew(Duration.ofMillis(-SKEW_MS), ChaosEffect.ClockSkewMode.FIXED);
-      final long skewed = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
-      assertThat(skewed).isEqualTo(REAL_MILLIS - SKEW_MS);
+      try (ChaosRuntime runtime =
+          runtimeWithClockSkew(Duration.ofMillis(-SKEW_MS), ChaosEffect.ClockSkewMode.FIXED)) {
+        final long skewed = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
+        assertThat(skewed).isEqualTo(REAL_MILLIS - SKEW_MS);
+      }
     }
 
     @Test
     @DisplayName("returns same offset on repeated calls")
     void returnsSameOffsetOnRepeatedCalls() {
-      final ChaosRuntime runtime =
-          runtimeWithClockSkew(Duration.ofMillis(SKEW_MS), ChaosEffect.ClockSkewMode.FIXED);
-      final long first = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
-      final long second = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
-      assertThat(first).isEqualTo(second);
+      try (ChaosRuntime runtime =
+          runtimeWithClockSkew(Duration.ofMillis(SKEW_MS), ChaosEffect.ClockSkewMode.FIXED)) {
+        final long first = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
+        final long second = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
+        assertThat(first).isEqualTo(second);
+      }
     }
   }
 
@@ -75,24 +77,27 @@ class ClockSkewRuntimeTest {
     @Test
     @DisplayName("each call adds another skew increment")
     void eachCallAddsAnotherSkewIncrement() {
-      final ChaosRuntime runtime =
-          runtimeWithClockSkew(Duration.ofMillis(1_000L), ChaosEffect.ClockSkewMode.DRIFT);
-      final long first = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
-      final long second = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
-      // First call: REAL + 1000; second call: REAL + 2000
-      assertThat(second - first).isEqualTo(1_000L);
+      try (ChaosRuntime runtime =
+          runtimeWithClockSkew(Duration.ofSeconds(1), ChaosEffect.ClockSkewMode.DRIFT)) {
+        final long first = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
+        final long second = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
+        // First call: REAL + 1000; second call: REAL + 2000
+        assertThat(second - first).isEqualTo(1_000L);
+      }
     }
 
     @Test
     @DisplayName("accumulated drift grows monotonically for positive skew")
     void driftGrowsMonotonically() {
-      final ChaosRuntime runtime =
-          runtimeWithClockSkew(Duration.ofMillis(500L), ChaosEffect.ClockSkewMode.DRIFT);
-      long previous = Long.MIN_VALUE;
-      for (int i = 0; i < 5; i++) {
-        final long current = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
-        assertThat(current).isGreaterThan(previous);
-        previous = current;
+      try (ChaosRuntime runtime =
+          runtimeWithClockSkew(Duration.ofMillis(500L), ChaosEffect.ClockSkewMode.DRIFT)) {
+        long previous = Long.MIN_VALUE;
+        for (int i = 0; i < 5; i++) {
+          final long current =
+              runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
+          assertThat(current).isGreaterThan(previous);
+          previous = current;
+        }
       }
     }
   }
@@ -104,12 +109,13 @@ class ClockSkewRuntimeTest {
     @Test
     @DisplayName("all calls return the same frozen value")
     void allCallsReturnSameFrozenValue() {
-      final ChaosRuntime runtime =
-          runtimeWithClockSkew(Duration.ofMillis(SKEW_MS), ChaosEffect.ClockSkewMode.FREEZE);
-      final long first = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
-      final long second =
-          runtime.applyClockSkew(REAL_MILLIS + 1_000L, OperationType.SYSTEM_CLOCK_MILLIS);
-      assertThat(first).isEqualTo(second);
+      try (ChaosRuntime runtime =
+          runtimeWithClockSkew(Duration.ofMillis(SKEW_MS), ChaosEffect.ClockSkewMode.FREEZE)) {
+        final long first = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
+        final long second =
+            runtime.applyClockSkew(REAL_MILLIS + 1_000L, OperationType.SYSTEM_CLOCK_MILLIS);
+        assertThat(first).isEqualTo(second);
+      }
     }
   }
 
@@ -120,9 +126,10 @@ class ClockSkewRuntimeTest {
     @Test
     @DisplayName("returns real value unchanged when no clock-skew scenario is active")
     void returnsRealValueUnchangedWhenNoScenario() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final long skewed = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
-      assertThat(skewed).isEqualTo(REAL_MILLIS);
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final long skewed = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
+        assertThat(skewed).isEqualTo(REAL_MILLIS);
+      }
     }
   }
 
@@ -139,89 +146,94 @@ class ClockSkewRuntimeTest {
     @Test
     @DisplayName("FIXED skew: adjustClockMillis returns value offset by skewAmount")
     void fixedSkewAppliedToAdjustClockMillis() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final long realMillis = System.currentTimeMillis();
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("clock-millis-e2e")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_MILLIS)))
-                  .effect(
-                      ChaosEffect.skewClock(
-                          Duration.ofSeconds(30), ChaosEffect.ClockSkewMode.FIXED))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-      try {
-        final long skewed = runtime.adjustClockMillis(realMillis);
-        assertThat(skewed).isGreaterThanOrEqualTo(realMillis + 25_000L);
-      } finally {
-        handle.stop();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final long realMillis = System.currentTimeMillis();
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("clock-millis-e2e")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_MILLIS)))
+                    .effect(
+                        ChaosEffect.skewClock(
+                            Duration.ofSeconds(30), ChaosEffect.ClockSkewMode.FIXED))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        try {
+          final long skewed = runtime.adjustClockMillis(realMillis);
+          assertThat(skewed).isEqualTo(realMillis + 30_000L);
+        } finally {
+          handle.stop();
+        }
       }
     }
 
     @Test
     @DisplayName("FIXED skew: adjustClockNanos returns value offset by skewAmount in nanos")
     void fixedSkewAppliedToAdjustClockNanos() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final long realNanos = System.nanoTime();
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("clock-nanos-e2e")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_NANOS)))
-                  .effect(
-                      ChaosEffect.skewClock(
-                          Duration.ofSeconds(10), ChaosEffect.ClockSkewMode.FIXED))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-      try {
-        final long skewed = runtime.adjustClockNanos(realNanos);
-        assertThat(skewed).isGreaterThanOrEqualTo(realNanos + 9_000_000_000L);
-      } finally {
-        handle.stop();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final long realNanos = System.nanoTime();
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("clock-nanos-e2e")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_NANOS)))
+                    .effect(
+                        ChaosEffect.skewClock(
+                            Duration.ofSeconds(10), ChaosEffect.ClockSkewMode.FIXED))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        try {
+          final long skewed = runtime.adjustClockNanos(realNanos);
+          assertThat(skewed).isEqualTo(realNanos + 10_000_000_000L);
+        } finally {
+          handle.stop();
+        }
       }
     }
 
     @Test
     @DisplayName("FREEZE mode: repeated adjustClockMillis calls return same value")
     void freezeModeReturnsSameValue() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final long realMillis = System.currentTimeMillis();
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("clock-freeze-e2e")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_MILLIS)))
-                  .effect(
-                      ChaosEffect.skewClock(Duration.ofMillis(1), ChaosEffect.ClockSkewMode.FREEZE))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-      try {
-        final long first = runtime.adjustClockMillis(realMillis);
-        final long second = runtime.adjustClockMillis(realMillis + 100L);
-        assertThat(first).isEqualTo(second);
-      } finally {
-        handle.stop();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final long realMillis = System.currentTimeMillis();
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("clock-freeze-e2e")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_MILLIS)))
+                    .effect(
+                        ChaosEffect.skewClock(
+                            Duration.ofMillis(1), ChaosEffect.ClockSkewMode.FREEZE))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        try {
+          final long first = runtime.adjustClockMillis(realMillis);
+          final long second = runtime.adjustClockMillis(realMillis + 100L);
+          assertThat(first).isEqualTo(second);
+        } finally {
+          handle.stop();
+        }
       }
     }
 
     @Test
     @DisplayName("after handle.stop(), adjustClockMillis returns the real value unchanged")
     void afterStopReturnsRealValue() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final long realMillis = System.currentTimeMillis();
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("clock-stop-e2e")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_MILLIS)))
-                  .effect(
-                      ChaosEffect.skewClock(Duration.ofHours(1), ChaosEffect.ClockSkewMode.FIXED))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-      handle.stop();
-      final long afterStop = runtime.adjustClockMillis(realMillis);
-      assertThat(afterStop).isEqualTo(realMillis);
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final long realMillis = System.currentTimeMillis();
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("clock-stop-e2e")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_MILLIS)))
+                    .effect(
+                        ChaosEffect.skewClock(Duration.ofHours(1), ChaosEffect.ClockSkewMode.FIXED))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        handle.stop();
+        final long afterStop = runtime.adjustClockMillis(realMillis);
+        assertThat(afterStop).isEqualTo(realMillis);
+      }
     }
   }
 
@@ -239,159 +251,275 @@ class ClockSkewRuntimeTest {
     @Test
     @DisplayName("adjustInstantNow shifts the returned Instant when INSTANT_NOW scenario is active")
     void adjustInstantNowShiftsWhenActive() {
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final java.time.Instant real = java.time.Instant.ofEpochSecond(1_700_000_000L, 123_456_789);
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("instant-skew")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.INSTANT_NOW)))
+                    .effect(
+                        ChaosEffect.skewClock(
+                            Duration.ofSeconds(30), ChaosEffect.ClockSkewMode.FIXED))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        try {
+          final java.time.Instant adjusted = runtime.adjustInstantNow(real);
+          // Exactly 30 s later: the sub-millisecond part of the real instant is preserved.
+          assertThat(Duration.between(real, adjusted)).isEqualTo(Duration.ofSeconds(30));
+        } finally {
+          handle.stop();
+        }
+      }
+    }
+
+    @Test
+    @DisplayName(
+        "an Instant read is skewed in whole milliseconds, as a millisecond read, keeping its own"
+            + " sub-millisecond part")
+    void subMillisecondSkew() {
       final ChaosRuntime runtime = new ChaosRuntime();
       final java.time.Instant real = java.time.Instant.ofEpochSecond(1_700_000_000L, 123_456_789);
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("instant-skew")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.INSTANT_NOW)))
-                  .effect(
-                      ChaosEffect.skewClock(
-                          Duration.ofSeconds(30), ChaosEffect.ClockSkewMode.FIXED))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
+      runtime.activate(instantSkew(Duration.ofNanos(1_500_000), ChaosEffect.ClockSkewMode.FIXED));
       try {
-        final java.time.Instant adjusted = runtime.adjustInstantNow(real);
-        assertThat(adjusted.toEpochMilli() - real.toEpochMilli()).isEqualTo(30_000L);
-        // Nanosecond-of-second component must be preserved by plusMillis.
-        assertThat(adjusted.getNano() % 1_000_000).isEqualTo(real.getNano() % 1_000_000);
+        assertThat(runtime.adjustInstantNow(real)).isEqualTo(real.plusMillis(1));
       } finally {
-        handle.stop();
+        runtime.close();
       }
+    }
+
+    @Test
+    @DisplayName("a frozen Instant is the same at every read, whatever its sub-millisecond part")
+    void freezeIsStableBelowTheMillisecond() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      runtime.activate(instantSkew(Duration.ofSeconds(1), ChaosEffect.ClockSkewMode.FREEZE));
+      try {
+        final java.time.Instant late =
+            runtime.adjustInstantNow(java.time.Instant.ofEpochSecond(1_700_000_000L, 900_000));
+        final java.time.Instant early =
+            runtime.adjustInstantNow(java.time.Instant.ofEpochSecond(1_700_000_001L, 100_000));
+        assertThat(early).isEqualTo(late);
+      } finally {
+        runtime.close();
+      }
+    }
+
+    private static ChaosScenario instantSkew(
+        final Duration amount, final ChaosEffect.ClockSkewMode mode) {
+      return ChaosScenario.builder("instant-skew")
+          .scope(ChaosScenario.ScenarioScope.JVM)
+          .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.INSTANT_NOW)))
+          .effect(ChaosEffect.skewClock(amount, mode))
+          .activationPolicy(ActivationPolicy.always())
+          .build();
     }
 
     @Test
     @DisplayName("adjustInstantNow returns the real instant when no scenario matches")
     void adjustInstantNowPassthroughWithoutScenario() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final java.time.Instant real = java.time.Instant.ofEpochSecond(1_700_000_000L);
-      assertThat(runtime.adjustInstantNow(real)).isEqualTo(real);
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final java.time.Instant real = java.time.Instant.ofEpochSecond(1_700_000_000L);
+        assertThat(runtime.adjustInstantNow(real)).isEqualTo(real);
+      }
     }
 
     @Test
     @DisplayName(
         "adjustInstantNow ignores scenarios that target other operation types (e.g. DATE_NEW)")
     void adjustInstantNowIsolatedFromOtherClockOps() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final java.time.Instant real = java.time.Instant.ofEpochSecond(1_700_000_000L);
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("date-only-skew")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.DATE_NEW)))
-                  .effect(
-                      ChaosEffect.skewClock(Duration.ofMinutes(5), ChaosEffect.ClockSkewMode.FIXED))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-      try {
-        assertThat(runtime.adjustInstantNow(real)).isEqualTo(real);
-      } finally {
-        handle.stop();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final java.time.Instant real = java.time.Instant.ofEpochSecond(1_700_000_000L);
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("date-only-skew")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.DATE_NEW)))
+                    .effect(
+                        ChaosEffect.skewClock(
+                            Duration.ofMinutes(5), ChaosEffect.ClockSkewMode.FIXED))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        try {
+          assertThat(runtime.adjustInstantNow(real)).isEqualTo(real);
+        } finally {
+          handle.stop();
+        }
       }
     }
 
     @Test
     @DisplayName("adjustDateNew shifts the embedded millis when DATE_NEW scenario is active")
     void adjustDateNewShiftsWhenActive() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final long real = 1_700_000_000_000L;
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("date-skew")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.DATE_NEW)))
-                  .effect(
-                      ChaosEffect.skewClock(
-                          Duration.ofMinutes(-10), ChaosEffect.ClockSkewMode.FIXED))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-      try {
-        assertThat(runtime.adjustDateNew(real)).isEqualTo(real - 600_000L);
-      } finally {
-        handle.stop();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final long real = 1_700_000_000_000L;
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("date-skew")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.DATE_NEW)))
+                    .effect(
+                        ChaosEffect.skewClock(
+                            Duration.ofMinutes(-10), ChaosEffect.ClockSkewMode.FIXED))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        try {
+          assertThat(runtime.adjustDateNew(real)).isEqualTo(real - 600_000L);
+        } finally {
+          handle.stop();
+        }
       }
     }
 
     @Test
     @DisplayName("adjustDateNew returns the real millis when no scenario matches")
     void adjustDateNewPassthroughWithoutScenario() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      assertThat(runtime.adjustDateNew(1_700_000_000_000L)).isEqualTo(1_700_000_000_000L);
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        assertThat(runtime.adjustDateNew(1_700_000_000_000L)).isEqualTo(1_700_000_000_000L);
+      }
     }
 
     @Test
     @DisplayName(
         "adjustLocalDateTimeNow shifts the returned local date-time when scenario is active")
     void adjustLocalDateTimeNowShiftsWhenActive() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final java.time.LocalDateTime real = java.time.LocalDateTime.of(2026, 4, 18, 12, 0, 0);
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("ldt-skew")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.LOCAL_DATE_TIME_NOW)))
-                  .effect(
-                      ChaosEffect.skewClock(Duration.ofHours(2), ChaosEffect.ClockSkewMode.FIXED))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-      try {
-        final java.time.LocalDateTime adjusted = runtime.adjustLocalDateTimeNow(real);
-        assertThat(adjusted).isEqualTo(real.plusHours(2));
-      } finally {
-        handle.stop();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final java.time.LocalDateTime real = java.time.LocalDateTime.of(2026, 4, 18, 12, 0, 0);
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("ldt-skew")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.LOCAL_DATE_TIME_NOW)))
+                    .effect(
+                        ChaosEffect.skewClock(Duration.ofHours(2), ChaosEffect.ClockSkewMode.FIXED))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        try {
+          final java.time.LocalDateTime adjusted = runtime.adjustLocalDateTimeNow(real);
+          assertThat(adjusted).isEqualTo(real.plusHours(2));
+        } finally {
+          handle.stop();
+        }
+      }
+    }
+
+    @Test
+    @DisplayName(
+        "adjustLocalDateTimeNow without a scenario returns before resolving the default zone")
+    void adjustLocalDateTimeNowIdleAllocatesNothing() {
+      final java.lang.management.ThreadMXBean threads =
+          java.lang.management.ManagementFactory.getThreadMXBean();
+      org.junit.jupiter.api.Assumptions.assumeTrue(
+          threads instanceof com.sun.management.ThreadMXBean allocation
+              && allocation.isThreadAllocatedMemorySupported(),
+          "the JVM measures a thread's allocations");
+      final com.sun.management.ThreadMXBean allocation = (com.sun.management.ThreadMXBean) threads;
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final java.time.LocalDateTime real = java.time.LocalDateTime.of(2026, 4, 18, 12, 0, 0);
+        final int calls = 10_000;
+        for (int i = 0; i < calls; i++) {
+          runtime.adjustLocalDateTimeNow(real);
+        }
+        final long thread = Thread.currentThread().threadId();
+
+        java.time.LocalDateTime returned = java.time.LocalDateTime.MIN;
+        final long before = allocation.getThreadAllocatedBytes(thread);
+        for (int i = 0; i < calls; i++) {
+          returned = runtime.adjustLocalDateTimeNow(real);
+        }
+        final long allocated = allocation.getThreadAllocatedBytes(thread) - before;
+
+        assertThat(returned).isSameAs(real);
+
+        // ZoneId.systemDefault() clones the default TimeZone on every call.
+        assertThat(allocated).as("bytes allocated by %d idle calls", calls).isLessThan(calls);
       }
     }
 
     @Test
     @DisplayName("adjustZonedDateTimeNow shifts the instant while preserving the original zone")
     void adjustZonedDateTimeNowShiftsAndPreservesZone() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final java.time.ZoneId zone = java.time.ZoneId.of("America/New_York");
-      final java.time.ZonedDateTime real =
-          java.time.ZonedDateTime.of(2026, 4, 18, 12, 0, 0, 0, zone);
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("zdt-skew")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.ZONED_DATE_TIME_NOW)))
-                  .effect(
-                      ChaosEffect.skewClock(
-                          Duration.ofMinutes(45), ChaosEffect.ClockSkewMode.FIXED))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-      try {
-        final java.time.ZonedDateTime adjusted = runtime.adjustZonedDateTimeNow(real);
-        assertThat(adjusted.toInstant()).isEqualTo(real.toInstant().plus(Duration.ofMinutes(45)));
-        assertThat(adjusted.getZone()).isEqualTo(zone);
-      } finally {
-        handle.stop();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final java.time.ZoneId zone = java.time.ZoneId.of("America/New_York");
+        final java.time.ZonedDateTime real =
+            java.time.ZonedDateTime.of(2026, 4, 18, 12, 0, 0, 0, zone);
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("zdt-skew")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.ZONED_DATE_TIME_NOW)))
+                    .effect(
+                        ChaosEffect.skewClock(
+                            Duration.ofMinutes(45), ChaosEffect.ClockSkewMode.FIXED))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        try {
+          final java.time.ZonedDateTime adjusted = runtime.adjustZonedDateTimeNow(real);
+          assertThat(adjusted.toInstant()).isEqualTo(real.toInstant().plus(Duration.ofMinutes(45)));
+          assertThat(adjusted.getZone()).isEqualTo(zone);
+        } finally {
+          handle.stop();
+        }
       }
     }
 
     @Test
     @DisplayName("INSTANT_NOW FREEZE mode returns the same instant on repeated calls")
     void instantNowFreezeReturnsSameValue() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final java.time.Instant a = java.time.Instant.ofEpochSecond(1_700_000_000L);
-      final java.time.Instant b = java.time.Instant.ofEpochSecond(1_700_000_100L);
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("instant-freeze")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.INSTANT_NOW)))
-                  .effect(
-                      ChaosEffect.skewClock(Duration.ofMillis(1), ChaosEffect.ClockSkewMode.FREEZE))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-      try {
-        // FREEZE pins the skewed millis at activation time. Both inputs therefore produce the
-        // same toEpochMilli(), even though the original instants are 100 s apart.
-        assertThat(runtime.adjustInstantNow(a).toEpochMilli())
-            .isEqualTo(runtime.adjustInstantNow(b).toEpochMilli());
-      } finally {
-        handle.stop();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final java.time.Instant a = java.time.Instant.ofEpochSecond(1_700_000_000L);
+        final java.time.Instant b = java.time.Instant.ofEpochSecond(1_700_000_100L);
+        final ChaosActivationHandle handle =
+            runtime.activate(
+                ChaosScenario.builder("instant-freeze")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.INSTANT_NOW)))
+                    .effect(
+                        ChaosEffect.skewClock(
+                            Duration.ofMillis(1), ChaosEffect.ClockSkewMode.FREEZE))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        try {
+          // FREEZE pins the skewed millis at activation time. Both inputs therefore produce the
+          // same toEpochMilli(), even though the original instants are 100 s apart.
+          assertThat(runtime.adjustInstantNow(a).toEpochMilli())
+              .isEqualTo(runtime.adjustInstantNow(b).toEpochMilli());
+        } finally {
+          handle.stop();
+        }
       }
+    }
+  }
+
+  @Nested
+  @DisplayName("REGRESS mode")
+  class RegressMode {
+
+    @Test
+    @DisplayName("the first read is real, the next steps back once, later reads stay shifted")
+    void stepsBackOnce() {
+      try (ChaosRuntime runtime =
+          runtimeWithClockSkew(Duration.ofMillis(SKEW_MS), ChaosEffect.ClockSkewMode.REGRESS)) {
+
+        assertThat(runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS))
+            .as("arming read")
+            .isEqualTo(REAL_MILLIS);
+        assertThat(runtime.applyClockSkew(REAL_MILLIS + 10, OperationType.SYSTEM_CLOCK_MILLIS))
+            .as("the jump")
+            .isEqualTo(REAL_MILLIS + 10 - SKEW_MS);
+        assertThat(runtime.applyClockSkew(REAL_MILLIS + 20, OperationType.SYSTEM_CLOCK_MILLIS))
+            .as("stays shifted, does not jump again")
+            .isEqualTo(REAL_MILLIS + 20 - SKEW_MS);
+      }
+    }
+
+    @Test
+    @DisplayName("requires a positive amount")
+    void requiresPositiveAmount() {
+      org.assertj.core.api.Assertions.assertThatThrownBy(
+              () ->
+                  new ChaosEffect.ClockSkewEffect(
+                      Duration.ofMillis(-5), ChaosEffect.ClockSkewMode.REGRESS))
+          .isInstanceOf(IllegalArgumentException.class);
     }
   }
 }

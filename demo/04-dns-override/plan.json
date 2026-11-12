@@ -1,0 +1,3 @@
+{"scenarios": [{"id": "pin-localhost", "scope": "JVM",
+  "selector": {"type": "dns", "operations": ["DNS_ANSWER"], "hostnamePattern": {"mode": "EXACT", "value": "localhost"}},
+  "effect": {"type": "dnsAnswer", "override": ["10.9.8.7"]}}]}

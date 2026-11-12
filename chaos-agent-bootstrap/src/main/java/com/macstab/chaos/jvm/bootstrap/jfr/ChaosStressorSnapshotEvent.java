@@ -1,12 +1,15 @@
 package com.macstab.chaos.jvm.bootstrap.jfr;
 
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
+import com.macstab.chaos.jvm.api.Internal;
 import jdk.jfr.Category;
+import jdk.jfr.Description;
 import jdk.jfr.Event;
 import jdk.jfr.Label;
 import jdk.jfr.Name;
 import jdk.jfr.Period;
 import jdk.jfr.StackTrace;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Periodic JFR event that snapshots the current state of all active chaos scenarios.
@@ -24,9 +27,11 @@ import jdk.jfr.StackTrace;
  * {@link JfrChaosEventSink}. The hook queries {@link ChaosDiagnostics} at each tick and emits one
  * event per invocation.
  */
+@Internal
 @Name("com.macstab.chaos.jvm.StressorSnapshot")
 @Category({"Chaos", "Stressor"})
 @Label("Chaos Stressor Snapshot")
+@Description("The active chaos scenarios and the applications since the start")
 @Period("5 s")
 @StackTrace(false)
 public final class ChaosStressorSnapshotEvent extends Event {
@@ -47,5 +52,5 @@ public final class ChaosStressorSnapshotEvent extends Event {
    * Truncated to 1024 characters to bound JFR field size under extreme concurrency.
    */
   @Label("Active Scenario IDs")
-  public String activeScenarioIds;
+  public @Nullable String activeScenarioIds;
 }

@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.RejectedExecutionException;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,11 @@ class AppliedOnlyWhenEffectiveTest {
             applied.add(event);
           }
         });
+  }
+
+  @AfterEach
+  void tearDown() {
+    runtime.close();
   }
 
   @Test
