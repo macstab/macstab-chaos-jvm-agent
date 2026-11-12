@@ -389,6 +389,22 @@ class PlanSchemaTest {
     assertThat(defs.at("/ExecutorSelector/required"))
         .extracting(JsonNode::asText)
         .containsExactly("type", "operations");
+    assertThat(defs.at("/GateEffect/required"))
+        .as("a gate read from JSON needs maxBlock")
+        .extracting(JsonNode::asText)
+        .containsExactly("type", "maxBlock");
+    // An optional member the mapper reads as omitted when it is null: the schema allows null.
+    assertThat(defs.at("/ChaosScenario/properties/description/type"))
+        .extracting(JsonNode::asText)
+        .containsExactly("string", "null");
+    assertThat(defs.at("/ChaosScenario/properties/activationPolicy/anyOf/1/type").asText())
+        .isEqualTo("null");
+    assertThat(defs.at("/ChaosScenario/properties/scope/enum"))
+        .extracting(JsonNode::asText)
+        .contains("JVM", "null");
+    assertThat(defs.at("/ChaosScenario/properties/id/type").asText())
+        .as("a required member stays non-null")
+        .isEqualTo("string");
   }
 
   @Test
@@ -565,6 +581,10 @@ class PlanSchemaTest {
     final List<ObjectNode> variants = variants(raw);
     final BeanDescription description = config.introspect(type);
     final Set<OperationType> operations = validOperations(raw);
+    // An effect is also probed inside a plan: ChaosPlanMapper.read refuses some effects that a
+    // bare read accepts (a gate without maxBlock).
+    final boolean probeInPlan =
+        ChaosEffect.class.isAssignableFrom(raw) && !rejectedInPlanBySome(variants, variant -> {});
     description.findProperties().stream()
         .sorted(Comparator.comparing(BeanPropertyDefinition::getName))
         .forEach(
@@ -580,7 +600,11 @@ class PlanSchemaTest {
                     schema.putObject("items").put("type", "string").putArray("enum");
                 operations.stream().sorted().forEach(operation -> values.add(operation.name()));
               }
-              if (rejectedInEvery(raw, variants, variant -> variant.remove(name))) {
+              final boolean isRequired =
+                  rejectedInEvery(raw, variants, variant -> variant.remove(name))
+                      || (probeInPlan
+                          && rejectedInPlanByEvery(variants, variant -> variant.remove(name)));
+              if (isRequired) {
                 required.add(name);
               }
               if ("array".equals(schema.path("type").asText())
@@ -593,12 +617,72 @@ class PlanSchemaTest {
                   && rejectedInEvery(raw, variants, variant -> variant.put(name, " "))) {
                 schema.put("pattern", "\\S");
               }
-              properties.set(name, schema);
+              // An optional member that the mapper reads as omitted when it is null.
+              properties.set(
+                  name,
+                  !isRequired && !rejectedInEvery(raw, variants, variant -> variant.putNull(name))
+                      ? nullable(schema)
+                      : schema);
             });
     if (!required.isEmpty()) {
       definition.set("required", required);
     }
     definition.put("additionalProperties", false);
+  }
+
+  /** {@code schema} that also admits {@code null}. */
+  private ObjectNode nullable(final ObjectNode schema) {
+    if (!schema.has("type")) {
+      final ObjectNode either = mapper.createObjectNode();
+      final ArrayNode anyOf = either.putArray("anyOf");
+      anyOf.add(schema);
+      anyOf.addObject().put("type", "null");
+      return either;
+    }
+    schema.set("type", mapper.createArrayNode().add(schema.get("type").asText()).add("null"));
+    if (schema.get("enum") instanceof ArrayNode values) {
+      values.addNull();
+    }
+    return schema;
+  }
+
+  /** Whether {@link ChaosPlanMapper#read} refuses the effect in every variant once changed. */
+  private boolean rejectedInPlanByEvery(
+      final List<ObjectNode> variants, final Consumer<ObjectNode> change) {
+    for (final ObjectNode variant : variants) {
+      if (!rejectedInPlan(variant, change)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Whether {@link ChaosPlanMapper#read} refuses the effect in some variant once changed. */
+  private boolean rejectedInPlanBySome(
+      final List<ObjectNode> variants, final Consumer<ObjectNode> change) {
+    for (final ObjectNode variant : variants) {
+      if (rejectedInPlan(variant, change)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Whether a plan whose one scenario has the changed effect {@code variant} is refused. */
+  private static boolean rejectedInPlan(
+      final ObjectNode variant, final Consumer<ObjectNode> change) {
+    final ObjectNode changed = variant.deepCopy();
+    change.accept(changed);
+    try {
+      ChaosPlanMapper.read(
+          "{\"scenarios\": [{\"id\": \"s\", \"selector\": {\"type\": \"executor\","
+              + " \"operations\": [\"EXECUTOR_SUBMIT\"]}, \"effect\": "
+              + changed
+              + "}]}");
+      return false;
+    } catch (final ConfigLoadException refused) {
+      return true;
+    }
   }
 
   /** The samples of {@code raw}, each checked to be accepted by the mapper. */

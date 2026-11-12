@@ -9,44 +9,48 @@
       "type" : "object",
       "properties" : {
         "activateAfterMatches" : {
-          "type" : "integer"
+          "type" : [ "integer", "null" ]
         },
         "activeFor" : {
-          "type" : "string",
+          "type" : [ "string", "null" ],
           "format" : "duration"
         },
         "activeFrom" : {
-          "type" : "string",
+          "type" : [ "string", "null" ],
           "format" : "date-time"
         },
         "activeUntil" : {
-          "type" : "string",
+          "type" : [ "string", "null" ],
           "format" : "date-time"
         },
         "allowDestructiveEffects" : {
-          "type" : "boolean"
+          "type" : [ "boolean", "null" ]
         },
         "maxApplications" : {
-          "type" : "integer"
+          "type" : [ "integer", "null" ]
         },
         "probability" : {
-          "type" : "number"
+          "type" : [ "number", "null" ]
         },
         "randomSeed" : {
-          "type" : "integer"
+          "type" : [ "integer", "null" ]
         },
         "rateLimit" : {
-          "$ref" : "#/$defs/RateLimit"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/RateLimit"
+          }, {
+            "type" : "null"
+          } ]
         },
         "replayMatches" : {
-          "type" : "array",
+          "type" : [ "array", "null" ],
           "items" : {
             "type" : "integer"
           }
         },
         "startMode" : {
-          "type" : "string",
-          "enum" : [ "AUTOMATIC", "MANUAL" ]
+          "type" : [ "string", "null" ],
+          "enum" : [ "AUTOMATIC", "MANUAL", null ]
         }
       },
       "additionalProperties" : false
@@ -77,7 +81,11 @@
           "const" : "awsSdk"
         },
         "operationPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         },
         "operations" : {
           "type" : "array",
@@ -89,7 +97,11 @@
           "minItems" : 1
         },
         "servicePattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         }
       },
       "required" : [ "type", "operations" ],
@@ -168,10 +180,18 @@
       "type" : "object",
       "properties" : {
         "metadata" : {
-          "$ref" : "#/$defs/Metadata"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/Metadata"
+          }, {
+            "type" : "null"
+          } ]
         },
         "observability" : {
-          "$ref" : "#/$defs/Observability"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/Observability"
+          }, {
+            "type" : "null"
+          } ]
         },
         "scenarios" : {
           "type" : "array",
@@ -188,10 +208,14 @@
       "type" : "object",
       "properties" : {
         "activationPolicy" : {
-          "$ref" : "#/$defs/ActivationPolicy"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/ActivationPolicy"
+          }, {
+            "type" : "null"
+          } ]
         },
         "description" : {
-          "type" : "string"
+          "type" : [ "string", "null" ]
         },
         "effect" : {
           "$ref" : "#/$defs/ChaosEffect"
@@ -201,17 +225,17 @@
           "pattern" : "\\S"
         },
         "precedence" : {
-          "type" : "integer"
+          "type" : [ "integer", "null" ]
         },
         "scope" : {
-          "type" : "string",
-          "enum" : [ "JVM", "SESSION" ]
+          "type" : [ "string", "null" ],
+          "enum" : [ "JVM", "SESSION", null ]
         },
         "selector" : {
           "$ref" : "#/$defs/ChaosSelector"
         },
         "tags" : {
-          "type" : "object",
+          "type" : [ "object", "null" ],
           "additionalProperties" : {
             "type" : "string"
           }
@@ -280,7 +304,11 @@
           "const" : "classLoading"
         },
         "loaderClassPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         },
         "operations" : {
           "type" : "array",
@@ -292,7 +320,11 @@
           "minItems" : 1
         },
         "targetNamePattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         }
       },
       "required" : [ "type", "operations" ],
@@ -359,7 +391,7 @@
           "const" : "deadlock"
         },
         "acquisitionDelay" : {
-          "type" : "string",
+          "type" : [ "string", "null" ],
           "format" : "duration"
         },
         "participantCount" : {
@@ -397,7 +429,7 @@
           "type" : "integer"
         },
         "registerCleaner" : {
-          "type" : "boolean"
+          "type" : [ "boolean", "null" ]
         },
         "totalBytes" : {
           "type" : "integer"
@@ -413,21 +445,21 @@
           "const" : "dnsAnswer"
         },
         "family" : {
-          "type" : "string",
-          "enum" : [ "IPV4", "IPV6" ]
+          "type" : [ "string", "null" ],
+          "enum" : [ "IPV4", "IPV6", null ]
         },
         "limit" : {
-          "type" : "integer"
+          "type" : [ "integer", "null" ]
         },
         "override" : {
-          "type" : "array",
+          "type" : [ "array", "null" ],
           "items" : {
             "type" : "string"
           },
           "minItems" : 1
         },
         "shuffle" : {
-          "type" : "boolean"
+          "type" : [ "boolean", "null" ]
         }
       },
       "required" : [ "type" ],
@@ -454,7 +486,11 @@
           "const" : "dns"
         },
         "hostnamePattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         },
         "operations" : {
           "type" : "array",
@@ -498,7 +534,7 @@
           "pattern" : "\\S"
         },
         "withStackTrace" : {
-          "type" : "boolean"
+          "type" : [ "boolean", "null" ]
         }
       },
       "required" : [ "type", "exceptionClassName", "message" ],
@@ -529,7 +565,11 @@
           "const" : "executor"
         },
         "executorClassPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         },
         "operations" : {
           "type" : "array",
@@ -541,10 +581,14 @@
           "minItems" : 1
         },
         "scheduledOnly" : {
-          "type" : "boolean"
+          "type" : [ "boolean", "null" ]
         },
         "taskClassPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         }
       },
       "required" : [ "type", "operations" ],
@@ -557,10 +601,10 @@
           "const" : "fileIo"
         },
         "maxBytes" : {
-          "type" : "integer"
+          "type" : [ "integer", "null" ]
         },
         "minBytes" : {
-          "type" : "integer"
+          "type" : [ "integer", "null" ]
         },
         "operations" : {
           "type" : "array",
@@ -572,7 +616,11 @@
           "minItems" : 1
         },
         "pathPattern" : {
-          "$ref" : "#/$defs/PathPattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/PathPattern"
+          }, {
+            "type" : "null"
+          } ]
         }
       },
       "required" : [ "type", "operations" ],
@@ -606,7 +654,7 @@
           "format" : "duration"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "maxBlock" ],
       "additionalProperties" : false
     },
     "GcPressureEffect" : {
@@ -623,10 +671,10 @@
           "format" : "duration"
         },
         "objectSizeBytes" : {
-          "type" : "integer"
+          "type" : [ "integer", "null" ]
         },
         "promoteToOldGen" : {
-          "type" : "boolean"
+          "type" : [ "boolean", "null" ]
         }
       },
       "required" : [ "type", "allocationRateBytesPerSecond", "duration" ],
@@ -664,7 +712,11 @@
           "minItems" : 1
         },
         "urlPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         }
       },
       "required" : [ "type", "operations" ],
@@ -686,7 +738,11 @@
           "minItems" : 1
         },
         "targetPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         }
       },
       "required" : [ "type", "operations" ],
@@ -718,7 +774,7 @@
           "const" : "keepAlive"
         },
         "daemon" : {
-          "type" : "boolean"
+          "type" : [ "boolean", "null" ]
         },
         "heartbeat" : {
           "type" : "string",
@@ -739,7 +795,11 @@
           "const" : "messaging"
         },
         "destinationPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         },
         "operations" : {
           "type" : "array",
@@ -758,7 +818,7 @@
       "type" : "object",
       "properties" : {
         "description" : {
-          "type" : "string"
+          "type" : [ "string", "null" ]
         },
         "name" : {
           "type" : "string",
@@ -775,13 +835,13 @@
           "const" : "metaspacePressure"
         },
         "fieldsPerClass" : {
-          "type" : "integer"
+          "type" : [ "integer", "null" ]
         },
         "generatedClassCount" : {
           "type" : "integer"
         },
         "retain" : {
-          "type" : "boolean"
+          "type" : [ "boolean", "null" ]
         }
       },
       "required" : [ "type", "generatedClassCount" ],
@@ -794,10 +854,18 @@
           "const" : "method"
         },
         "classPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         },
         "methodNamePattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         },
         "operations" : {
           "type" : "array",
@@ -809,7 +877,11 @@
           "minItems" : 1
         },
         "signaturePattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         }
       },
       "required" : [ "type", "operations" ],
@@ -829,7 +901,7 @@
           "format" : "duration"
         },
         "unfair" : {
-          "type" : "boolean"
+          "type" : [ "boolean", "null" ]
         }
       },
       "required" : [ "type", "contendingThreadCount", "lockHoldDuration" ],
@@ -842,7 +914,11 @@
           "const" : "monitor"
         },
         "monitorClassPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         },
         "operations" : {
           "type" : "array",
@@ -861,11 +937,11 @@
       "type" : "object",
       "properties" : {
         "mode" : {
-          "type" : "string",
-          "enum" : [ "ANY", "EXACT", "PREFIX", "GLOB", "REGEX" ]
+          "type" : [ "string", "null" ],
+          "enum" : [ "ANY", "EXACT", "PREFIX", "GLOB", "REGEX", null ]
         },
         "value" : {
-          "type" : "string"
+          "type" : [ "string", "null" ]
         }
       },
       "additionalProperties" : false
@@ -886,11 +962,11 @@
           "minItems" : 1
         },
         "remoteCidr" : {
-          "type" : "string",
+          "type" : [ "string", "null" ],
           "pattern" : "\\S"
         },
         "remotePort" : {
-          "type" : "integer"
+          "type" : [ "integer", "null" ]
         }
       },
       "required" : [ "type", "operations" ],
@@ -903,10 +979,10 @@
           "const" : "network"
         },
         "maxBytes" : {
-          "type" : "integer"
+          "type" : [ "integer", "null" ]
         },
         "minBytes" : {
-          "type" : "integer"
+          "type" : [ "integer", "null" ]
         },
         "operations" : {
           "type" : "array",
@@ -918,14 +994,18 @@
           "minItems" : 1
         },
         "remoteCidr" : {
-          "type" : "string",
+          "type" : [ "string", "null" ],
           "pattern" : "\\S"
         },
         "remoteHostPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         },
         "remotePort" : {
-          "type" : "integer"
+          "type" : [ "integer", "null" ]
         }
       },
       "required" : [ "type", "operations" ],
@@ -938,7 +1018,11 @@
           "const" : "nio"
         },
         "channelClassPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         },
         "operations" : {
           "type" : "array",
@@ -957,13 +1041,13 @@
       "type" : "object",
       "properties" : {
         "debugDumpOnStart" : {
-          "type" : "boolean"
+          "type" : [ "boolean", "null" ]
         },
         "jmxEnabled" : {
-          "type" : "boolean"
+          "type" : [ "boolean", "null" ]
         },
         "structuredLoggingEnabled" : {
-          "type" : "boolean"
+          "type" : [ "boolean", "null" ]
         }
       },
       "additionalProperties" : false
@@ -986,7 +1070,11 @@
           "const" : "process"
         },
         "commandPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         },
         "operations" : {
           "type" : "array",
@@ -1017,7 +1105,11 @@
           "minItems" : 1
         },
         "queueClassPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         }
       },
       "required" : [ "type", "operations" ],
@@ -1048,7 +1140,7 @@
           "pattern" : "\\S"
         },
         "port" : {
-          "type" : "integer"
+          "type" : [ "integer", "null" ]
         }
       },
       "required" : [ "type", "host" ],
@@ -1061,7 +1153,11 @@
           "const" : "redis"
         },
         "commandPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         },
         "operations" : {
           "type" : "array",
@@ -1128,7 +1224,11 @@
           "const" : "rpc"
         },
         "methodPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         },
         "operations" : {
           "type" : "array",
@@ -1154,7 +1254,7 @@
           "format" : "duration"
         },
         "retransformClassCount" : {
-          "type" : "integer"
+          "type" : [ "integer", "null" ]
         }
       },
       "required" : [ "type", "gcInterval" ],
@@ -1167,7 +1267,11 @@
           "const" : "scheduling"
         },
         "executorClassPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         },
         "operations" : {
           "type" : "array",
@@ -1179,7 +1283,7 @@
           "minItems" : 1
         },
         "periodicOnly" : {
-          "type" : "boolean"
+          "type" : [ "boolean", "null" ]
         }
       },
       "required" : [ "type", "operations" ],
@@ -1201,7 +1305,11 @@
           "minItems" : 1
         },
         "targetClassPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         }
       },
       "required" : [ "type", "operations" ],
@@ -1283,10 +1391,10 @@
           "const" : "threadLeak"
         },
         "daemon" : {
-          "type" : "boolean"
+          "type" : [ "boolean", "null" ]
         },
         "lifespan" : {
-          "type" : "string",
+          "type" : [ "string", "null" ],
           "format" : "duration"
         },
         "namePrefix" : {
@@ -1332,7 +1440,11 @@
           "minItems" : 1
         },
         "threadLocalClassPattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         }
       },
       "required" : [ "type", "operations" ],
@@ -1345,11 +1457,11 @@
           "const" : "thread"
         },
         "daemon" : {
-          "type" : "boolean"
+          "type" : [ "boolean", "null" ]
         },
         "kind" : {
-          "type" : "string",
-          "enum" : [ "ANY", "PLATFORM", "VIRTUAL" ]
+          "type" : [ "string", "null" ],
+          "enum" : [ "ANY", "PLATFORM", "VIRTUAL", null ]
         },
         "operations" : {
           "type" : "array",
@@ -1361,7 +1473,11 @@
           "minItems" : 1
         },
         "threadNamePattern" : {
-          "$ref" : "#/$defs/NamePattern"
+          "anyOf" : [ {
+            "$ref" : "#/$defs/NamePattern"
+          }, {
+            "type" : "null"
+          } ]
         }
       },
       "required" : [ "type", "operations" ],

@@ -287,6 +287,50 @@ class ChaosPlanMapperTest {
     }
 
     @Test
+    @DisplayName("refuses a number or a boolean for a string, as the schema does")
+    void noStringCoercion() {
+      for (final String json :
+          List.of(
+              scenario(DELAY, "").replace("\"id\":\"s\"", "\"id\":5"),
+              scenario(DELAY, "").replace("\"id\":\"s\"", "\"id\":true"),
+              scenario(DELAY, "").replace("\"id\":\"s\"", "\"id\":\"s\",\"description\":1.5"),
+              scenario(DELAY, "").replace("{\"name\":\"p\"}", "{\"name\":7}"),
+              scenario(DELAY, "").replace("\"id\":\"s\"", "\"id\":\"s\",\"tags\":{\"a\":1}"))) {
+        assertThatThrownBy(() -> ChaosPlanMapper.read(json))
+            .as(json)
+            .isInstanceOfSatisfying(
+                ConfigLoadException.class,
+                failure -> assertThat(failure.reason()).startsWith("value of the wrong type"));
+      }
+    }
+
+    @Test
+    @DisplayName("refuses an operation given twice, as the schema does")
+    void duplicateOperation() {
+      assertThatThrownBy(
+              () ->
+                  ChaosPlanMapper.read(
+                      scenario(DELAY, "")
+                          .replace(
+                              "[\"EXECUTOR_SUBMIT\"]",
+                              "[\"EXECUTOR_SUBMIT\",\"EXECUTOR_SUBMIT\"]")))
+          .isInstanceOfSatisfying(
+              ConfigLoadException.class,
+              failure ->
+                  assertThat(failure.reason())
+                      .isEqualTo("duplicate value at scenarios[0].selector.operations"));
+    }
+
+    @Test
+    @DisplayName("names trailing content after the plan")
+    void trailingContent() {
+      assertThatThrownBy(() -> ChaosPlanMapper.read(scenario(DELAY, "") + " {}"))
+          .isInstanceOfSatisfying(
+              ConfigLoadException.class,
+              failure -> assertThat(failure.reason()).isEqualTo("trailing content after the plan"));
+    }
+
+    @Test
     @DisplayName("refuses a name pattern with a mode and no value instead of matching everything")
     void patternWithoutValue() {
       final String json =

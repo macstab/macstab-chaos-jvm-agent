@@ -10,14 +10,20 @@ import com.fasterxml.jackson.core.StreamReadConstraints;
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.core.exc.InputCoercionException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.BeanDescription;
 import com.fasterxml.jackson.databind.DeserializationConfig;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.cfg.CoercionAction;
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
+import com.fasterxml.jackson.databind.deser.BeanDeserializerModifier;
+import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import com.fasterxml.jackson.databind.deser.std.StdScalarDeserializer;
 import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.fasterxml.jackson.databind.exc.InvalidNullException;
@@ -26,6 +32,9 @@ import com.fasterxml.jackson.databind.exc.ValueInstantiationException;
 import com.fasterxml.jackson.databind.introspect.BeanPropertyDefinition;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.fasterxml.jackson.databind.type.CollectionType;
+import com.fasterxml.jackson.databind.type.LogicalType;
+import com.fasterxml.jackson.databind.type.TypeFactory;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosPlan;
@@ -39,6 +48,7 @@ import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -57,8 +67,9 @@ import org.jspecify.annotations.Nullable;
  *   <li>{@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS} — rejects JSON with trailing garbage
  *   <li>{@link StreamReadFeature#STRICT_DUPLICATE_DETECTION} — rejects a property given twice
  *       instead of keeping the last value
- *   <li>no coercion: a number is not a boolean, a string or a fraction is not an integer, and an
- *       enum is read by name only
+ *   <li>no coercion: a number is not a boolean, a string or a fraction is not an integer, a number
+ *       or a boolean is not a string, and an enum is read by name only
+ *   <li>a value given twice in a set ({@code operations}) is refused instead of being dropped
  *   <li>durations and instants are ISO-8601 strings only ({@code "PT0.1S"}, {@code
  *       "2026-11-01T08:00:00Z"}); a number is refused (Jackson's own deserializers read one as
  *       seconds whatever their leniency)
@@ -152,7 +163,29 @@ public final class ChaosPlanMapper {
                     new IsoStringDeserializer<>(Duration.class, Duration::parse, "duration"))
                 .addDeserializer(
                     Instant.class,
-                    new IsoStringDeserializer<>(Instant.class, Instant::parse, "instant")))
+                    new IsoStringDeserializer<>(Instant.class, Instant::parse, "instant"))
+                .setDeserializerModifier(
+                    new BeanDeserializerModifier() {
+                      @Override
+                      public JsonDeserializer<?> modifyCollectionDeserializer(
+                          final DeserializationConfig config,
+                          final CollectionType type,
+                          final BeanDescription description,
+                          final JsonDeserializer<?> deserializer) {
+                        return Set.class.isAssignableFrom(type.getRawClass())
+                            ? new DuplicateRefusingSetDeserializer(type)
+                            : deserializer;
+                      }
+                    }))
+        // Jackson's string reader takes a number or a boolean whatever ALLOW_COERCION_OF_SCALARS
+        // says; the schema's "type": "string" does not.
+        .withCoercionConfig(
+            LogicalType.Textual,
+            coercion ->
+                coercion
+                    .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+                    .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
+                    .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail))
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
         .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
         .enable(DeserializationFeature.FAIL_ON_NUMBERS_FOR_ENUMS)
@@ -161,6 +194,38 @@ public final class ChaosPlanMapper {
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
         .disable(SerializationFeature.WRITE_DURATIONS_AS_TIMESTAMPS)
         .build();
+  }
+
+  /**
+   * Reads a set from a JSON array whose values are distinct: a value given twice is refused (the
+   * schema's {@code uniqueItems}), not silently dropped.
+   */
+  private static final class DuplicateRefusingSetDeserializer extends StdDeserializer<Set<Object>> {
+
+    private static final long serialVersionUID = 1L;
+
+    /** The message of the refusal, which {@link #mismatchKind} reports as it is. */
+    static final String DUPLICATE = "duplicate value";
+
+    private final JavaType listType;
+
+    DuplicateRefusingSetDeserializer(final CollectionType setType) {
+      super(setType);
+      this.listType =
+          TypeFactory.defaultInstance()
+              .constructCollectionType(List.class, setType.getContentType());
+    }
+
+    @Override
+    public Set<Object> deserialize(final JsonParser parser, final DeserializationContext context)
+        throws IOException {
+      final List<Object> values = context.readValue(parser, listType);
+      final Set<Object> distinct = new LinkedHashSet<>(values);
+      if (distinct.size() != values.size()) {
+        throw MismatchedInputException.from(parser, handledType(), DUPLICATE);
+      }
+      return distinct;
+    }
   }
 
   /** Reads a value from an ISO-8601 string only; a number or any other token is refused. */
@@ -418,6 +483,14 @@ public final class ChaosPlanMapper {
 
   /** A value of the wrong type or form, by what was expected. */
   private static String mismatchKind(final MismatchedInputException mismatch) {
+    final String original = mismatch.getOriginalMessage();
+    if (DuplicateRefusingSetDeserializer.DUPLICATE.equals(original)) {
+      return DuplicateRefusingSetDeserializer.DUPLICATE;
+    }
+    if (original != null && original.startsWith("Trailing token")) {
+      // FAIL_ON_TRAILING_TOKENS: more JSON after the plan's value.
+      return "trailing content after the plan";
+    }
     final Class<?> target = mismatch.getTargetType();
     if (target == Duration.class) {
       return "invalid duration";
