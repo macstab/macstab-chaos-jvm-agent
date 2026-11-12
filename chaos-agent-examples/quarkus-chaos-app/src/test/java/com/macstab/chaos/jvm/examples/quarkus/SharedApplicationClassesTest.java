@@ -176,6 +176,11 @@ class SharedApplicationClassesTest {
       naps.nap();
       naps.nap();
       naps.nap();
+      // A nap outside any session (a thread started here would inherit this class's session):
+      // a session scenario does not reach it, as a JVM-wide one would.
+      try (com.macstab.chaos.jvm.api.ChaosSession.ScopeBinding outside = bean.bindSession(null)) {
+        naps.nap();
+      }
       record("second applied", applied(bean, SECOND_ID));
     }
   }
