@@ -140,6 +140,13 @@ final class ScenarioController {
    */
   private @Nullable Prepared prepared;
 
+  /**
+   * Set while a {@link #start()} builds its stressor, so a concurrent second start returns instead
+   * of building one of its own: the build owns the stressor's end token, and a second build would
+   * take it from the stressor that is installed (L17). Guarded by the monitor.
+   */
+  private boolean starting;
+
   /** What {@link #prepare()} built: the stressor, or {@code null} for a scenario without one. */
   private record Prepared(@Nullable ManagedStressor stressor) {}
 
@@ -397,19 +404,31 @@ final class ScenarioController {
     // good (L19). Checked before the stressor is built, and again under the monitor below.
     // The stressor is the one prepare() built before the registration, or is built here (a
     // MANUAL scenario's start, a start after a failed one).
+    // A start that is building already makes a concurrent one return, as on ACTIVE: one build, so
+    // the end token belongs to the stressor that is installed.
     final Prepared ready;
     synchronized (this) {
-      if (state != ChaosDiagnostics.ScenarioState.REGISTERED) {
+      if (state != ChaosDiagnostics.ScenarioState.REGISTERED || starting) {
         return;
       }
+      starting = true;
       ready = prepared;
       prepared = null;
     }
-    final ManagedStressor newStressor = ready != null ? ready.stressor() : buildStressor();
+    final ManagedStressor newStressor;
+    try {
+      newStressor = ready != null ? ready.stressor() : buildStressor();
+    } catch (final RuntimeException | Error failure) {
+      synchronized (this) {
+        starting = false;
+      }
+      throw failure;
+    }
     // Carried from phase 1 to phase 2: the clock skew, which takes effect only in phase 2 like
     // every other effect.
     ClockSkewState newClockSkewState = null;
     synchronized (this) {
+      starting = false;
       if (state != ChaosDiagnostics.ScenarioState.REGISTERED) {
         closeAsAgentWork(newStressor);
         return;

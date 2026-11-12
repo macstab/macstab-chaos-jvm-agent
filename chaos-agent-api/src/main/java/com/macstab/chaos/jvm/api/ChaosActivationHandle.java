@@ -45,7 +45,8 @@ public interface ChaosActivationHandle extends AutoCloseable {
    * ActivationPolicy.StartMode#AUTOMATIC}, this is a no-op as they start immediately on activation.
    *
    * <p>For stressor effects (heap pressure, deadlock, etc.), this also spawns the stressor
-   * background task.
+   * background task. Of concurrent calls, one starts the scenario; the others return at once,
+   * possibly before it is {@code ACTIVE}.
    */
   void start();
 

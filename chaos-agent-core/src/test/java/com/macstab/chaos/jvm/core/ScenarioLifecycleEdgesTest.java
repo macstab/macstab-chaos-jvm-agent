@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.core;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosActivationHandle;
@@ -238,6 +239,80 @@ class ScenarioLifecycleEdgesTest {
         } finally {
           session.close();
         }
+      }
+    }
+  }
+
+  @Nested
+  @DisplayName("Two concurrent starts of a MANUAL scenario")
+  class ConcurrentStarts {
+
+    @Test
+    @DisplayName("end the scenario INACTIVE when the stressor that runs ends on its own")
+    void theRunningStressorOwnsItsEnd() throws Exception {
+      final CountDownLatch firstBuilding = new CountDownLatch(1);
+      final CountDownLatch secondBuilding = new CountDownLatch(1);
+      final CountDownLatch firstStarted = new CountDownLatch(1);
+      final List<Consumer<String>> ends = new CopyOnWriteArrayList<>();
+      final List<AtomicBoolean> closed = new CopyOnWriteArrayList<>();
+      final ChaosControlPlaneImpl plane =
+          plane(
+              new StressorFactory(Optional::empty) {
+                @Override
+                ManagedStressor createIfNeeded(
+                    final ChaosEffect effect,
+                    final boolean allowDestructiveEffects,
+                    final Consumer<String> onEnd) {
+                  final boolean first = ends.isEmpty();
+                  final AtomicBoolean isClosed = new AtomicBoolean();
+                  ends.add(onEnd);
+                  closed.add(isClosed);
+                  try {
+                    if (first) {
+                      firstBuilding.countDown();
+                      // The second start builds while this one does.
+                      secondBuilding.await(2, TimeUnit.SECONDS);
+                    } else {
+                      secondBuilding.countDown();
+                      // The first start installs its stressor before this one finishes.
+                      firstStarted.await(5, TimeUnit.SECONDS);
+                    }
+                  } catch (final InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                  }
+                  return () -> isClosed.set(true);
+                }
+              });
+      try {
+        final ChaosActivationHandle handle =
+            plane.activate(
+                ChaosScenario.builder("twice")
+                    .selector(ChaosSelector.stress(ChaosSelector.StressTarget.KEEPALIVE))
+                    .effect(ChaosEffect.keepAlive("twice-thread", true, Duration.ofHours(1)))
+                    .activationPolicy(ActivationPolicy.manual())
+                    .build());
+        final Thread starter = new Thread(handle::start, "first-start");
+        starter.start();
+        assertThat(firstBuilding.await(5, TimeUnit.SECONDS)).isTrue();
+        final Thread second = new Thread(handle::start, "second-start");
+        second.start();
+        starter.join(5_000L);
+        firstStarted.countDown();
+        second.join(5_000L);
+        assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+
+        // The stressor that runs is the one no start closed; it ends on its own.
+        final int running = closed.get(0).get() ? 1 : 0;
+        assertThat(closed.get(running)).isFalse();
+        ends.get(running).accept("duration elapsed");
+
+        await()
+            .atMost(Duration.ofSeconds(5))
+            .untilAsserted(
+                () ->
+                    assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.INACTIVE));
+      } finally {
+        plane.close();
       }
     }
   }
