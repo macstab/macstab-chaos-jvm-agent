@@ -168,7 +168,24 @@ final class ScenarioRegistry implements ChaosDiagnostics {
         });
     // Adds the new controller's method selector if it was not woven beforehand, and keeps the
     // pre-woven ones of a plan whose other scenarios are still to be registered.
-    rebuildIndex(false);
+    try {
+      rebuildIndex(false);
+    } catch (final RuntimeException | Error failure) {
+      // An error from the re-weave: the caller treats the controller as never registered, so it
+      // must not stay in the map, a REGISTERED controller nobody holds a handle of. The finished
+      // one it replaced is put back, as a failed activation keeps it (L21).
+      final ScenarioController previous = replaced[0];
+      controllers.computeIfPresent(
+          controller.key(), (key, current) -> current.equals(controller) ? previous : current);
+      try {
+        rebuildIndex(true);
+      } catch (final RuntimeException | Error rebuildFailure) {
+        if (!rebuildFailure.equals(failure)) {
+          failure.addSuppressed(rebuildFailure);
+        }
+      }
+      throw failure;
+    }
     return replaced[0];
   }
 

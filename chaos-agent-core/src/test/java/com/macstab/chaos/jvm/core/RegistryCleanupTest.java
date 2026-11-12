@@ -1,12 +1,14 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Clock;
 import java.time.Duration;
@@ -205,6 +207,45 @@ class RegistryCleanupTest {
           .as("registered as %s", scopes)
           .isEqualTo(scopes.stream().sorted().findFirst().orElseThrow());
     }
+  }
+
+  @Test
+  @DisplayName("an Error from the re-weave of a registration leaves the registry as it was")
+  void errorFromTheReweaveLeavesNoController() {
+    final ScenarioRegistry registry = new ScenarioRegistry(Clock.systemUTC(), Map::of);
+    final ScenarioController finished = methodController("before");
+    registry.register(finished);
+    finished.stop();
+    final LinkageError linkage = new LinkageError("retransformation failed");
+    registry.onMethodSelectorsChanged(
+        selectors -> {
+          throw linkage;
+        });
+    final ScenarioController failing = methodController("call");
+
+    assertThatThrownBy(() -> registry.register(failing)).isSameAs(linkage);
+
+    assertThat(registry.isLive(failing.key())).as("no live controller under the key").isFalse();
+    assertThat(registry.controllers()).as("the finished one is kept").containsExactly(finished);
+    assertThat(registry.candidates(OperationType.METHOD_ENTER)).containsExactly(finished);
+  }
+
+  private static ScenarioController methodController(final String method) {
+    return new ScenarioController(
+        ChaosScenario.builder("woven")
+            .selector(
+                ChaosSelector.method(
+                    Set.of(OperationType.METHOD_ENTER),
+                    NamePattern.exact("com.example.Service"),
+                    NamePattern.exact(method)))
+            .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+            .activationPolicy(ActivationPolicy.always())
+            .build(),
+        "jvm",
+        null,
+        Clock.systemUTC(),
+        new ObservabilityBus(com.macstab.chaos.jvm.api.ChaosMetricsSink.NOOP),
+        java.util.Optional::empty);
   }
 
   private static ScenarioController controller(final String scopeKey) {
