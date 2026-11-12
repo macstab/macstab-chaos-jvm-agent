@@ -211,6 +211,41 @@ public final class NetworkFaultProbeMain {
               () -> timedOut.connect(address, 100)));
       System.out.println("timeout.open=" + !timedOut.isClosed());
       timedOut.close();
+
+      // A connect of a channel that is connected, connecting or closed: the JDK refuses it, and
+      // a connected or connecting channel stays open.
+      final ChaosSelector nioConnect = ChaosSelector.nio(Set.of(OperationType.NIO_CHANNEL_CONNECT));
+      try (SocketChannel connected = SocketChannel.open(address);
+          SocketChannel connecting = SocketChannel.open();
+          SocketChannel closed = SocketChannel.open()) {
+        connecting.configureBlocking(false);
+        connecting.connect(address); // pending, or already connected on a fast loopback
+        closed.close();
+        refusedByTheJdk("chConnected", socketConnect, connected, () -> connected.connect(address));
+        refusedByTheJdk(
+            "adConnected", socketConnect, connected, () -> connected.socket().connect(address));
+        refusedByTheJdk("chPending", socketConnect, connecting, () -> connecting.connect(address));
+        refusedByTheJdk("chClosed", socketConnect, closed, () -> closed.connect(address));
+        refusedByTheJdk("nioConnected", nioConnect, connected, () -> connected.connect(address));
+        refusedByTheJdk("nioPending", nioConnect, connecting, () -> connecting.connect(address));
+      }
+    }
+  }
+
+  /**
+   * A reject of {@code selector} active while {@code call} connects {@code channel} again. Prints
+   * {@code <row>.outcome}, {@code <row>.open} and {@code <row>.matched}.
+   */
+  private static void refusedByTheJdk(
+      final String row,
+      final ChaosSelector selector,
+      final SocketChannel channel,
+      final RealCallRows.Call call) {
+    try (ChaosActivationHandle reject =
+        RealCallRows.activate(row, selector, ChaosEffect.reject("chaos connect"))) {
+      System.out.println(row + ".outcome=" + RealCallRows.outcome(call));
+      System.out.println(row + ".open=" + channel.isOpen());
+      System.out.println(row + ".matched=" + reject.matchedCount());
     }
   }
 

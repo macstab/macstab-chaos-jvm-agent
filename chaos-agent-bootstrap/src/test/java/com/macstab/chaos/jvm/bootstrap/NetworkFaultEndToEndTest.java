@@ -98,6 +98,47 @@ class NetworkFaultEndToEndTest {
                 .assertThat(result.value("timeout.type"))
                 .isEqualTo("java.net.SocketTimeoutException");
             softly.assertThat(result.value("timeout.open")).isEqualTo(result.value("real.open"));
+            // A connect of a connected, connecting or closed channel: the JDK's own refusal, not
+            // evaluated, and the live channel stays open.
+            for (final String row :
+                new String[] {
+                  "chConnected",
+                  "adConnected",
+                  "chPending",
+                  "chClosed",
+                  "nioConnected",
+                  "nioPending"
+                }) {
+              softly.assertThat(result.longValue(row + ".matched")).as(row).isZero();
+              softly
+                  .assertThat(result.value(row + ".open"))
+                  .as(row)
+                  .isEqualTo(String.valueOf(!"chClosed".equals(row)));
+            }
+            softly
+                .assertThat(result.value("chConnected.outcome"))
+                .isEqualTo("java.nio.channels.AlreadyConnectedException");
+            softly
+                .assertThat(result.value("nioConnected.outcome"))
+                .isEqualTo("java.nio.channels.AlreadyConnectedException");
+            // The adaptor reports it as the channel's exception or as a SocketException.
+            softly
+                .assertThat(result.value("adConnected.outcome"))
+                .isIn("java.nio.channels.AlreadyConnectedException", "java.net.SocketException");
+            for (final String row : new String[] {"chPending", "nioPending"}) {
+              // Pending, or connected at once on a fast loopback.
+              softly
+                  .assertThat(result.value(row + ".outcome"))
+                  .as(row)
+                  .isIn(
+                      "java.nio.channels.ConnectionPendingException",
+                      "java.nio.channels.AlreadyConnectedException");
+            }
+            softly
+                .assertThat(result.value("chClosed.outcome"))
+                .isIn(
+                    "java.nio.channels.ClosedChannelException",
+                    "java.nio.channels.AsynchronousCloseException");
           });
     }
 

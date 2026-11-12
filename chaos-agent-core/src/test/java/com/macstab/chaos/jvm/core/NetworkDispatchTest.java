@@ -19,6 +19,7 @@ import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.net.UnixDomainSocketAddress;
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -545,6 +546,60 @@ class NetworkDispatchTest {
           .isInstanceOf(IOException.class)
           .hasMessageContaining("no connect");
       runtime.beforeNioChannelOp("NIO_CHANNEL_CONNECT", this);
+    }
+
+    @Test
+    @DisplayName(
+        "a connect of a connected, connecting or closed socket channel is the JDK's own refusal:"
+            + " not evaluated, and the channel stays as it was")
+    void nothingToConnectOnTheChannel() throws Throwable {
+      final com.macstab.chaos.jvm.api.ChaosActivationHandle socketConnect =
+          runtime.activate(
+              ChaosScenario.builder("socket-connect")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.network(Set.of(OperationType.SOCKET_CONNECT)))
+                  .effect(ChaosEffect.reject("chaos connect"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final com.macstab.chaos.jvm.api.ChaosActivationHandle channelConnect =
+          runtime.activate(
+              ChaosScenario.builder("channel-connect")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.nio(Set.of(OperationType.NIO_CHANNEL_CONNECT)))
+                  .effect(ChaosEffect.reject("chaos nio connect"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      try (java.nio.channels.ServerSocketChannel server =
+          java.nio.channels.ServerSocketChannel.open()
+              .bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0))) {
+        final java.net.SocketAddress address = server.getLocalAddress();
+        final java.nio.channels.SocketChannel connected =
+            java.nio.channels.SocketChannel.open(address);
+        final java.nio.channels.SocketChannel connecting = java.nio.channels.SocketChannel.open();
+        connecting.configureBlocking(false);
+        connecting.connect(address); // pending, or already connected on a fast loopback
+        final java.nio.channels.SocketChannel closed = java.nio.channels.SocketChannel.open();
+        closed.close();
+
+        for (final java.nio.channels.SocketChannel channel :
+            List.of(connected, connecting, closed)) {
+          final boolean open = channel.isOpen();
+          assertThat(runtime.beforeSocketConnect(channel, address, 0)).isNull();
+          runtime.beforeNioChannelOp("NIO_CHANNEL_CONNECT", channel);
+          assertThat(channel.isOpen()).as("open as before").isEqualTo(open);
+        }
+        assertThat(socketConnect.matchedCount()).as("socket connects evaluated").isZero();
+        assertThat(channelConnect.matchedCount()).as("channel connects evaluated").isZero();
+
+        // A channel with a connect to make is still rejected.
+        try (java.nio.channels.SocketChannel fresh = java.nio.channels.SocketChannel.open()) {
+          assertThatThrownBy(() -> runtime.beforeNioChannelOp("NIO_CHANNEL_CONNECT", fresh))
+              .hasMessageContaining("chaos nio connect");
+          assertThat(channelConnect.appliedCount()).isEqualTo(1L);
+        }
+        connected.close();
+        connecting.close();
+      }
     }
 
     @Test

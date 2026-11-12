@@ -183,8 +183,12 @@ public final class NetworkDispatch {
    */
   public void beforeNioChannelOp(final String operation, final Object channel) throws Throwable {
     final OperationType indexedOp = OperationType.valueOf(operation);
+    final boolean idle = engine.idle(indexedOp);
+    if (!idle && indexedOp == OperationType.NIO_CHANNEL_CONNECT && nothingToConnect(channel)) {
+      return; // the JDK refuses it and keeps the connection (see nothingToConnect)
+    }
     final RuntimeDecision decision =
-        (engine.idle(indexedOp)
+        (idle
             ? RuntimeDecision.none()
             : engine.evaluate(
                 new InvocationContext(
@@ -219,9 +223,7 @@ public final class NetworkDispatch {
     if (engine.idle(OperationType.SOCKET_CONNECT)) {
       return null;
     }
-    if (socket instanceof java.net.Socket plain && (plain.isConnected() || plain.isClosed())) {
-      // The JDK refuses it ("already connected", "Socket is closed") and keeps the connection:
-      // no connect is attempted, so there is none to fail, and the live connection stays open.
+    if (nothingToConnect(socket)) {
       return null;
     }
     final String remoteHost = extractRemoteHost(socketAddress);
@@ -265,6 +267,22 @@ public final class NetworkDispatch {
     }
     applyClosingOnFailure(decision, connectReleased(socket));
     return null;
+  }
+
+  /**
+   * Whether a connect of {@code endpoint} is refused by the JDK before any connect is attempted: a
+   * socket that is connected or closed ("already connected", "Socket is closed"), a socket channel
+   * (also behind its adaptor) that is connected, connecting or closed ({@code
+   * AlreadyConnectedException}, {@code ConnectionPendingException}, {@code
+   * ClosedChannelException}). There is no connect to fail then, and the live connection stays open:
+   * the call is not evaluated, and the JDK throws its own exception.
+   */
+  private static boolean nothingToConnect(final @Nullable Object endpoint) {
+    if (endpoint instanceof java.net.Socket plain) {
+      return plain.isConnected() || plain.isClosed();
+    }
+    return endpoint instanceof java.nio.channels.SocketChannel channel
+        && (!channel.isOpen() || channel.isConnected() || channel.isConnectionPending());
   }
 
   /**
