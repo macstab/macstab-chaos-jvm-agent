@@ -140,6 +140,9 @@ class JdkOwnUseTest {
     private final CloseAction action;
     final CompletableFuture<Boolean> result = new CompletableFuture<>();
 
+    /** Counted down once {@link #begin()} has registered the interrupt hook. */
+    final java.util.concurrent.CountDownLatch blocking = new java.util.concurrent.CountDownLatch(1);
+
     RecordingChannel(final CloseAction action) {
       this.action = action;
     }
@@ -156,6 +159,7 @@ class JdkOwnUseTest {
     /** Blocks as an interruptible I/O operation does, until the channel is closed. */
     void block() {
       begin();
+      blocking.countDown();
       try {
         result.get();
       } catch (final InterruptedException | java.util.concurrent.ExecutionException interrupted) {
@@ -182,6 +186,9 @@ class JdkOwnUseTest {
     final Thread reader =
         virtual ? Thread.ofVirtual().unstarted(channel::block) : new Thread(channel::block);
     reader.start();
+    // Interrupted only once begin() registered the hook and the reader waits in result.get(): a
+    // WAITING state before begin() (class loading on a loaded runner) is no blocked read.
+    channel.blocking.await();
     while (reader.getState() != Thread.State.WAITING) {
       Thread.onSpinWait();
     }

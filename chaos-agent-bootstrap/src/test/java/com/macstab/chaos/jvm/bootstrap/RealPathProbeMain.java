@@ -321,15 +321,25 @@ public final class RealPathProbeMain {
                 .activationPolicy(ActivationPolicy.always())
                 .build());
     for (int read = 1; read <= 3; read++) {
+      final long before = System.currentTimeMillis();
       final long skewed = Instant.now().toEpochMilli();
-      final long real = System.currentTimeMillis();
+      final long after = System.currentTimeMillis();
       System.out.println("read" + read + "=" + skewed);
-      System.out.println("offset" + read + "=" + (skewed - real));
+      System.out.println("offset" + read + "=" + offset(skewed, before, after));
       pause(200L);
     }
     skew.close();
-    System.out.println(
-        "offsetAfterStop=" + (Instant.now().toEpochMilli() - System.currentTimeMillis()));
+    final long before = System.currentTimeMillis();
+    final long unskewed = Instant.now().toEpochMilli();
+    System.out.println("offsetAfterStop=" + offset(unskewed, before, System.currentTimeMillis()));
+  }
+
+  /**
+   * How far {@code read} lies outside the real time {@code before} to {@code after} around it: a
+   * pause of the thread between the reads is no skew.
+   */
+  private static long offset(final long read, final long before, final long after) {
+    return read < before ? read - before : read > after ? read - after : 0L;
   }
 
   // ── stressors ─────────────────────────────────────────────────────────────────────────────────
