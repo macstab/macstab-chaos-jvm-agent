@@ -88,6 +88,8 @@ The raw control plane is wrapped in a `TrackingChaosControlPlane` before being s
 
 `tracker.openSession(context.getDisplayName())` creates a new `ChaosSession` scoped to this test class's execution. The display name (the class name or whatever `@DisplayName` provides) is stored as the session's human-readable identifier, which appears in diagnostics snapshots.
 
+Opening a session binds the thread that opens it, and Spring starts the application context on that thread after `beforeAll` (in `postProcessTestInstance`, or in the test class's constructor when it is autowired). The extension therefore unbinds the thread again at once (`bindSession(null)`, closed in `afterAll`): the context and every thread it starts (an event loop, a Kafka consumer, a worker loop) run outside the session, so a cached context does not belong to whichever chaos test class happened to start it. The extension is an `InvocationInterceptor` instead: each test method (also a template, a factory and its dynamic tests) and each `@BeforeAll`, `@BeforeEach`, `@AfterEach` and `@AfterAll` method runs bound to the class's session, on whichever thread runs it (`@Timeout(threadMode = SEPARATE_THREAD)` and concurrent methods included).
+
 Both the tracking control plane and the session are stored in the extension's `ExtensionContext.Store` under the type-keyed namespace:
 
 ```java

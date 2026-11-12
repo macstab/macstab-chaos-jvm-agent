@@ -177,16 +177,18 @@ When each extension activates and stops them:
 | Extension                                   | Class-level `@WithChaos`             | Method-level `@WithChaos`        | Test thread bound to the session |
 |---------------------------------------------|--------------------------------------|----------------------------------|----------------------------------|
 | testkit `ChaosAgentExtension`               | around each test method (session per test) | around each test method    | yes, while any `@WithChaos` applies |
-| Spring Boot 3/4 `ChaosAgentExtension`       | `beforeAll` → `afterAll`             | around the test method          | the class's `beforeAll` thread ¹ |
+| Spring Boot 3/4 `ChaosAgentExtension`       | `beforeAll` → `afterAll`             | around the test method          | each test and lifecycle method, on any thread; not the context's start ² |
 | `ChaosMicronautExtension`                   | `beforeAll` → `afterAll`             | around the test method          | the class's `beforeAll` thread ¹ |
 | `ChaosQuarkusExtension`                     | `beforeAll` → `afterAll`             | around the test method          | the class's `beforeAll` thread ¹ |
 
 "Around the test method" means after the test's `@BeforeEach` methods and before its `@AfterEach` methods (`beforeTestExecution` → `afterTestExecution`): set-up and tear-down run without the method's chaos.
 
-¹ These extensions open the class's session in `beforeAll`, and opening a session binds the thread that opens it. A test method that runs on that thread (JUnit's default, also with classes running in parallel) runs in the session; a method on another thread (`junit.jupiter.execution.parallel.mode.default=concurrent`, `@Timeout(threadMode = SEPARATE_THREAD)`) binds it with `session.bind()`, or the scenario uses `JVM` scope.
+¹ The Micronaut and Quarkus extensions open the class's session in `beforeAll`, and opening a session binds the thread that opens it. A test method that runs on that thread (JUnit's default, also with classes running in parallel) runs in the session; a method on another thread (`junit.jupiter.execution.parallel.mode.default=concurrent`, `@Timeout(threadMode = SEPARATE_THREAD)`) binds it with `session.bind()`, or the scenario uses `JVM` scope.
+
+² The Spring Boot extensions open the class's session in `beforeAll` and unbind the opening thread again at once, so the application context, which Spring starts after `beforeAll`, and every thread it starts run outside the session. Each test method and each `@BeforeAll`, `@BeforeEach`, `@AfterEach` and `@AfterAll` method of the class runs bound to the session, also on a thread of its own (`@Timeout(threadMode = SEPARATE_THREAD)`, `junit.jupiter.execution.parallel.mode.default=concurrent`).
 
 Test classes that run in parallel (`junit.jupiter.execution.parallel.mode.classes.default=concurrent`) each have a session of their own, also when they share an application context:
-- a class-level `SESSION` scenario reaches only the class's own thread and the work it hands off, not the other class's calls into the same beans;
+- a class-level `SESSION` scenario reaches only the class's own thread and the work it hands off, not the other class's calls into the same beans. A long-lived thread a session starts directly stays in that session for its whole life (core.md, *Propagation*); the Spring Boot extensions start the application context outside any session, so the context's own threads (an event loop, a consumer, a worker loop) belong to no class;
 - a class's `afterAll` stops only its own class-level scenarios and its session: a class running beside it keeps its scenarios;
 - a class-level `JVM` scenario reaches every thread, the other class's included, and its id has one owner at a time: give parallel classes different ids;
 - what a class activates through the injected `ChaosControlPlane` bean belongs to the context, not to the class. Spring caches one context for classes with the same configuration, so the bean's activations stay until the last running chaos test class ends. Micronaut starts a context per test class, so they end when the class's context closes.

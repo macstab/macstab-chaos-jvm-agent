@@ -38,13 +38,12 @@ import org.springframework.context.annotation.Configuration;
 /**
  * Two {@link ChaosTest} classes with different class-level {@link WithChaos} scenarios run at the
  * same time on one cached application context ({@code junit.jupiter.execution.parallel.*}, classes
- * concurrent): the thread that runs a class's tests is bound to the class's session (the chaos
- * extension opened it on that thread in {@code beforeAll}), so each class's session scenario
- * reaches only its own class's calls, the first class's teardown leaves the second class's scenario
- * running, and what the first class activated through the shared control plane bean stays until the
- * second class ends too. The fixture classes are run by an engine of their own ({@link
- * EngineTestKit}), so the parallel configuration stays inside this test; when the build discovers
- * them they are skipped.
+ * concurrent): the chaos extension runs a class's tests bound to the class's session, so each
+ * class's session scenario reaches only its own class's calls, the first class's teardown leaves
+ * the second class's scenario running, and what the first class activated through the shared
+ * control plane bean stays until the second class ends too. The fixture classes are run by an
+ * engine of their own ({@link EngineTestKit}), so the parallel configuration stays inside this
+ * test; when the build discovers them they are skipped.
  */
 @DisplayName("Parallel test classes sharing one application context (@ChaosTest)")
 class SharedContextParallelTest {

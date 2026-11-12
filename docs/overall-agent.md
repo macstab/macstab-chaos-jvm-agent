@@ -336,7 +336,7 @@ Threads see session-scoped chaos only if bound:
 2. Every dispatch reads `scopeContext.currentSessionId()`, the top of that stack
 3. The session ID is embedded in the `InvocationContext`
 4. `ScenarioController.evaluate()` skips the call if its `sessionId != null && !sessionId.equals(context.sessionId())`
-5. Executor task submission wraps the `Runnable`/`Callable` to carry the session ID across thread pool boundaries via `ScopeContext.wrap()`, once the session has a registered scenario; `SessionHandoff` carries it into fork-join tasks, `Thread.start()` and virtual threads ([core.md §6](core.md#scopecontext))
+5. Executor task submission wraps the `Runnable`/`Callable` to carry the session ID across thread pool boundaries via `ScopeContext.wrap()`, once the session has a registered scenario; `SessionHandoff` carries it into fork-join tasks, and, also once the session has a registered scenario, `Thread.start()` and virtual threads ([core.md §6](core.md#scopecontext))
 
 Consequence: a test can safely activate session-scoped chaos and submit work to a shared `ThreadPoolExecutor`; only tasks submitted from a thread bound to the session (after its first scenario was activated) carry the session ID and are subject to session-scoped chaos. Tasks from other threads — including other parallel tests — are unaffected.
 

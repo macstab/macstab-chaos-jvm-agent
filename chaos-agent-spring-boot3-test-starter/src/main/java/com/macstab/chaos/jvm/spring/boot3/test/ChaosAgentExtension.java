@@ -6,6 +6,7 @@ import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane;
 import com.macstab.chaos.jvm.testkit.WithChaosSupport;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -14,10 +15,13 @@ import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.AfterTestExecutionCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.BeforeTestExecutionCallback;
+import org.junit.jupiter.api.extension.DynamicTestInvocationContext;
 import org.junit.jupiter.api.extension.ExtensionContext;
+import org.junit.jupiter.api.extension.InvocationInterceptor;
 import org.junit.jupiter.api.extension.ParameterContext;
 import org.junit.jupiter.api.extension.ParameterResolutionException;
 import org.junit.jupiter.api.extension.ParameterResolver;
+import org.junit.jupiter.api.extension.ReflectiveInvocationContext;
 import org.springframework.beans.factory.annotation.ParameterResolutionDelegate;
 import org.springframework.test.context.support.TestConstructorUtils;
 
@@ -33,7 +37,15 @@ import org.springframework.test.context.support.TestConstructorUtils;
  *
  * <ul>
  *   <li>{@code beforeAll}: self-attach the agent (idempotent) and open one session for the whole
- *       class. A {@code @Nested} class runs inside its outer class and shares its session.
+ *       class. A {@code @Nested} class runs inside its outer class and shares its session. The
+ *       opening thread is unbound again at once ({@code bindSession(null)}), so the application
+ *       context, which Spring starts after {@code beforeAll}, starts outside the session: a
+ *       long-lived thread it starts (an event loop, a consumer, a worker loop) serves the whole
+ *       application, not the class that happened to start the context.
+ *   <li>Every test method (also a template, a factory and its dynamic tests) and every
+ *       {@code @BeforeAll}, {@code @BeforeEach}, {@code @AfterEach} and {@code @AfterAll} method
+ *       runs bound to the class's session, on whichever thread runs it. The test class's
+ *       constructor, where Spring may start the context, does not.
  *   <li>{@code beforeTestExecution} / {@code afterTestExecution}: activate the method's {@link
  *       com.macstab.chaos.jvm.testkit.WithChaos} scenarios right before the test method runs and
  *       stop them right after it, so the test's {@code @BeforeEach} and {@code @AfterEach} methods
@@ -56,6 +68,7 @@ public final class ChaosAgentExtension
         AfterAllCallback,
         BeforeTestExecutionCallback,
         AfterTestExecutionCallback,
+        InvocationInterceptor,
         ParameterResolver {
   static final ExtensionContext.Namespace NAMESPACE =
       ExtensionContext.Namespace.create(ChaosAgentExtension.class);
@@ -68,6 +81,9 @@ public final class ChaosAgentExtension
   static final Set<TrackingChaosControlPlane> CONTEXT_PLANES = ConcurrentHashMap.newKeySet();
 
   private static final Object RUNNING_LOCK = new Object();
+
+  /** The store key of the binding that keeps the class's opening thread out of its session. */
+  private static final String SESSION_MASK = "sessionMask";
 
   /** Outermost chaos test classes running now (several in a parallel run); guarded by the lock. */
   private static int runningClasses;
@@ -116,6 +132,9 @@ public final class ChaosAgentExtension
       session = tracker.openSession(context.getDisplayName());
       store.put(ChaosControlPlane.class, tracker);
       store.put(ChaosSession.class, session);
+      // Opening the session bound this thread to it; Spring starts the application context on
+      // this thread after beforeAll, and every thread the context starts would inherit the session.
+      store.put(SESSION_MASK, tracker.bindSession(null));
       synchronized (RUNNING_LOCK) {
         runningClasses++;
       }
@@ -160,6 +179,8 @@ public final class ChaosAgentExtension
     final ChaosSession session = store.remove(ChaosSession.class, ChaosSession.class);
     final ChaosControlPlane controlPlane =
         store.remove(ChaosControlPlane.class, ChaosControlPlane.class);
+    final ChaosSession.ScopeBinding mask =
+        store.remove(SESSION_MASK, ChaosSession.ScopeBinding.class);
     // Close the session first so session-scoped scenarios stop via their owning session's
     // lifecycle, then drain any JVM-scoped handles the test class activated via the tracker.
     // try/finally ensures each step runs even if an earlier one throws.
@@ -167,6 +188,9 @@ public final class ChaosAgentExtension
       WithChaosSupport.close(classHandles);
     } finally {
       try {
+        if (mask != null) {
+          mask.close();
+        }
         if (session != null) {
           session.close();
         }
@@ -178,6 +202,90 @@ public final class ChaosAgentExtension
           releaseContextPlanesIfLast();
         }
       }
+    }
+  }
+
+  @Override
+  public void interceptTestMethod(
+      final Invocation<Void> invocation,
+      final ReflectiveInvocationContext<Method> invocationContext,
+      final ExtensionContext extensionContext)
+      throws Throwable {
+    proceedBound(invocation, extensionContext);
+  }
+
+  @Override
+  public void interceptTestTemplateMethod(
+      final Invocation<Void> invocation,
+      final ReflectiveInvocationContext<Method> invocationContext,
+      final ExtensionContext extensionContext)
+      throws Throwable {
+    proceedBound(invocation, extensionContext);
+  }
+
+  @Override
+  public <T> T interceptTestFactoryMethod(
+      final Invocation<T> invocation,
+      final ReflectiveInvocationContext<Method> invocationContext,
+      final ExtensionContext extensionContext)
+      throws Throwable {
+    return proceedBound(invocation, extensionContext);
+  }
+
+  @Override
+  public void interceptDynamicTest(
+      final Invocation<Void> invocation,
+      final DynamicTestInvocationContext invocationContext,
+      final ExtensionContext extensionContext)
+      throws Throwable {
+    proceedBound(invocation, extensionContext);
+  }
+
+  @Override
+  public void interceptBeforeAllMethod(
+      final Invocation<Void> invocation,
+      final ReflectiveInvocationContext<Method> invocationContext,
+      final ExtensionContext extensionContext)
+      throws Throwable {
+    proceedBound(invocation, extensionContext);
+  }
+
+  @Override
+  public void interceptBeforeEachMethod(
+      final Invocation<Void> invocation,
+      final ReflectiveInvocationContext<Method> invocationContext,
+      final ExtensionContext extensionContext)
+      throws Throwable {
+    proceedBound(invocation, extensionContext);
+  }
+
+  @Override
+  public void interceptAfterEachMethod(
+      final Invocation<Void> invocation,
+      final ReflectiveInvocationContext<Method> invocationContext,
+      final ExtensionContext extensionContext)
+      throws Throwable {
+    proceedBound(invocation, extensionContext);
+  }
+
+  @Override
+  public void interceptAfterAllMethod(
+      final Invocation<Void> invocation,
+      final ReflectiveInvocationContext<Method> invocationContext,
+      final ExtensionContext extensionContext)
+      throws Throwable {
+    proceedBound(invocation, extensionContext);
+  }
+
+  /** Runs {@code invocation} bound to the class's session, on the thread that runs it. */
+  private <T> T proceedBound(final Invocation<T> invocation, final ExtensionContext context)
+      throws Throwable {
+    final ChaosSession session = (ChaosSession) findInContextHierarchy(context, ChaosSession.class);
+    if (session == null) {
+      return invocation.proceed();
+    }
+    try (ChaosSession.ScopeBinding binding = session.bind()) {
+      return invocation.proceed();
     }
   }
 

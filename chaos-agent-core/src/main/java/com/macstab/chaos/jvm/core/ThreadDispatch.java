@@ -52,8 +52,10 @@ public final class ThreadDispatch {
     }
     // The started thread runs in the starting thread's session (see enterSession), unless it is
     // a pool worker: a worker grown by a submission inside a session served every later task in
-    // that session, leaking it to other tests and to requests without a session.
-    if (!poolWorker) {
+    // that session, leaking it to other tests and to requests without a session. As for an
+    // executor submission, only a session with a registered scenario is carried: a long-lived
+    // thread started while a session has no chaos yet (a framework starting up) stays outside it.
+    if (!poolWorker && sessionId != null && engine.hasScenarios(sessionId)) {
       engine.sessionHandoff.capture(thread, sessionId);
     }
   }

@@ -167,6 +167,41 @@ class ThreadAndSessionDispatchTest {
   @DisplayName("session hand-off")
   class Handoff {
 
+    /** A started thread carries its session only once the session has a scenario. */
+    private void activateInSession(final ChaosSession session) {
+      session.activate(
+          ChaosScenario.builder("session-has-scenario")
+              .scope(ChaosScenario.ScenarioScope.SESSION)
+              .selector(
+                  ChaosSelector.thread(
+                      Set.of(OperationType.THREAD_SLEEP), ChaosSelector.ThreadKind.ANY))
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .activationPolicy(ActivationPolicy.always())
+              .build());
+    }
+
+    @Test
+    @DisplayName("a thread started in a session without a scenario runs outside it")
+    void threadStartWithoutScenarioCarriesNoSession() throws Throwable {
+      final AtomicReference<String> during = new AtomicReference<>("unset");
+      final Thread[] started = new Thread[1];
+      started[0] =
+          new Thread(
+              () -> {
+                runtime.enterSession(started[0]);
+                during.set(runtime.currentSessionId());
+                runtime.exitSession(started[0]);
+              },
+              "started-early");
+      try (ChaosSession session = runtime.openSession("no-chaos-yet")) {
+        runtime.beforeThreadStart(started[0], false);
+        started[0].start();
+        started[0].join(10_000L);
+
+        assertThat(during.get()).isNull();
+      }
+    }
+
     @Test
     @DisplayName("a started thread runs in the starter's session, and leaves it when done")
     void threadStartCarriesTheSession() throws Throwable {
@@ -183,6 +218,7 @@ class ThreadAndSessionDispatchTest {
               },
               "started");
       try (ChaosSession session = runtime.openSession("handoff")) {
+        activateInSession(session);
         runtime.beforeThreadStart(started[0], false);
         started[0].start();
         started[0].join(10_000L);
@@ -206,6 +242,7 @@ class ThreadAndSessionDispatchTest {
               },
               "pool-worker");
       try (ChaosSession session = runtime.openSession("handoff")) {
+        activateInSession(session);
         runtime.beforeThreadStart(worker[0], true);
         worker[0].start();
         worker[0].join(10_000L);
@@ -220,6 +257,7 @@ class ThreadAndSessionDispatchTest {
       final Thread notStarted = new Thread(() -> {}, "not-started");
       final AtomicReference<String> elsewhere = new AtomicReference<>("unset");
       try (ChaosSession session = runtime.openSession("handoff")) {
+        activateInSession(session);
         runtime.beforeThreadStart(notStarted, false);
         onOtherThread(
             () -> {

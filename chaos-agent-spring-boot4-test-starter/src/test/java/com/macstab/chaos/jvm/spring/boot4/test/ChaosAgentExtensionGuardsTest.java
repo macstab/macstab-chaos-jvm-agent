@@ -41,6 +41,23 @@ class ChaosAgentExtensionGuardsTest {
   }
 
   @Test
+  @DisplayName("an invocation without a session proceeds unbound")
+  void invocationWithoutSessionProceeds() throws Throwable {
+    final java.util.concurrent.atomic.AtomicBoolean proceeded =
+        new java.util.concurrent.atomic.AtomicBoolean();
+
+    extension.interceptTestMethod(
+        () -> {
+          proceeded.set(true);
+          return null;
+        },
+        null,
+        context(new HashMap<>()));
+
+    assertThat(proceeded).isTrue();
+  }
+
+  @Test
   @DisplayName("before each test, a control plane without a session activates nothing")
   void controlPlaneWithoutSession() {
     final ChaosControlPlane plane =
