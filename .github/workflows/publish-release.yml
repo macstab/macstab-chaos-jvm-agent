@@ -56,9 +56,11 @@ jobs:
       # The commit published is the commit checked: the version edit above is part of both.
       # Check and publish are separate steps: in one Gradle call (with org.gradle.parallel) nothing
       # orders a publish task after check, so a module could be uploaded while another module's tests
-      # still run. The tests also never see the signing key or the token.
+      # still run. The tests also never see the signing key or the token. The build cache restored
+      # with the Gradle caches holds test results of the same commit's main build, keyed without the
+      # version: --no-build-cache makes the release's own check run every test.
       - name: Check
-        run: ./gradlew check --no-daemon --stacktrace
+        run: ./gradlew check --no-build-cache --no-daemon --stacktrace
 
       - name: Publish to GitHub Packages
         run: ./gradlew publish --no-daemon --stacktrace
