@@ -241,6 +241,34 @@ class ChaosReportsTest {
   }
 
   @Test
+  @DisplayName("a read-only report directory keeps its previous status and gets no staging file")
+  @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+  void readOnlyDirectoryKeepsThePreviousStatus() throws Exception {
+    // root writes into a read-only directory
+    org.junit.jupiter.api.Assumptions.assumeFalse(
+        "root".equals(System.getProperty("user.name")), "running as root");
+    final Path directory = Files.createDirectories(tempDir.resolve("frozen"));
+    final ChaosReports reports = create("reports=on;reportsDir=" + directory, Map.of());
+    reports.statusOk(1, "inline");
+    final String previous = Files.readString(directory.resolve(ChaosReports.STATUS_FILE));
+    Files.setPosixFilePermissions(
+        directory, java.nio.file.attribute.PosixFilePermissions.fromString("r-xr-xr-x"));
+    try {
+      // The staged file cannot be created: the write fails after it was named.
+      reports.statusOk(2, "inline");
+    } finally {
+      Files.setPosixFilePermissions(
+          directory, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+    }
+
+    assertThat(directory.resolve(ChaosReports.STATUS_FILE)).hasContent(previous);
+    try (Stream<Path> files = Files.list(directory)) {
+      assertThat(files.map(path -> path.getFileName().toString()))
+          .containsExactly(ChaosReports.STATUS_FILE);
+    }
+  }
+
+  @Test
   @DisplayName("an unwritable report directory or status path leaves no file behind and no error")
   void unwritableReports() throws Exception {
     final Path notADirectory = Files.writeString(tempDir.resolve("plain-file"), "x");

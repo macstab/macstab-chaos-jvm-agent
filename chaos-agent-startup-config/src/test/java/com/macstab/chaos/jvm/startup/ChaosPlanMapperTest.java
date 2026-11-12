@@ -261,6 +261,28 @@ class ChaosPlanMapperTest {
     }
 
     @Test
+    @DisplayName("refuses a duration or instant text that is not ISO-8601, naming what it expected")
+    void invalidIsoText() {
+      assertThatThrownBy(
+              () ->
+                  ChaosPlanMapper.read(scenario("\"minDelay\":\"soon\",\"maxDelay\":\"PT1S\"", "")))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("invalid duration");
+      assertThatThrownBy(() -> ChaosPlanMapper.read(scenario(DELAY, "\"activeFrom\":\"tomorrow\"")))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("invalid instant");
+    }
+
+    @Test
+    @DisplayName("refuses a boolean for a duration")
+    void booleanDuration() {
+      assertThatThrownBy(
+              () -> ChaosPlanMapper.read(scenario("\"minDelay\":true,\"maxDelay\":\"PT1S\"", "")))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("minDelay");
+    }
+
+    @Test
     @DisplayName("refuses a number for an instant")
     void numericInstant() {
       assertThatThrownBy(() -> ChaosPlanMapper.read(scenario(DELAY, "\"activeFrom\":1700000000")))

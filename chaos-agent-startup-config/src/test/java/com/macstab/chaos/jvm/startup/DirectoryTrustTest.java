@@ -84,6 +84,23 @@ class DirectoryTrustTest {
   }
 
   @Test
+  @DisplayName("a directory whose owner the file system cannot name is not refused for its owner")
+  void unnamedOwnerIsNotCompared() throws Exception {
+    assumePosix();
+    final Path directory = Files.createDirectory(tempDir.resolve("unnamed"));
+
+    assertThat(
+            DirectoryTrust.distrust(
+                directory,
+                POSIX,
+                path -> {
+                  throw new UnsupportedOperationException("no owner view");
+                },
+                "alice"))
+        .isEmpty();
+  }
+
+  @Test
   @DisplayName("a directory inside another user's directory is refused: that user can rename it")
   void foreignAncestorRefused() throws Exception {
     assumePosix();

@@ -10,6 +10,7 @@ import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.jar.Attributes;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
@@ -77,6 +78,47 @@ class ShadowingCopiesTest {
       System.setErr(original);
     }
 
+    assertThat(captured.toString(StandardCharsets.UTF_8)).isEmpty();
+  }
+
+  @Test
+  @DisplayName("a copy in a jar that is not a local file (nested or remote) is not opened")
+  void copyOutsideALocalJarIsNotOpened() throws Exception {
+    final Path local = agentJar("local.jar", "1.0.0");
+    // Not connected: a JarURLConnection opens its jar only when read, and this one never is.
+    final URL remote =
+        java.net
+            .URI
+            .create(
+                "jar:http://127.0.0.1:9/remote.jar!/"
+                    + "com/macstab/chaos/jvm/bootstrap/ChaosAgentBootstrap.class")
+            .toURL();
+    final URL localEntry =
+        java.net
+            .URI
+            .create(
+                "jar:"
+                    + local.toUri()
+                    + "!/"
+                    + "com/macstab/chaos/jvm/bootstrap/ChaosAgentBootstrap.class")
+            .toURL();
+    final ClassLoader loader =
+        new ClassLoader(null) {
+          @Override
+          public java.util.Enumeration<URL> getResources(final String name) {
+            return java.util.Collections.enumeration(List.of(localEntry, remote));
+          }
+        };
+    final ByteArrayOutputStream captured = new ByteArrayOutputStream();
+    final PrintStream original = System.err;
+    try (PrintStream capture = new PrintStream(captured, true, StandardCharsets.UTF_8)) {
+      System.setErr(capture);
+      ChaosAgentBootstrap.reportShadowingCopies(loader);
+    } finally {
+      System.setErr(original);
+    }
+
+    // Only the local copy is compared: one version, nothing to report, and no failure.
     assertThat(captured.toString(StandardCharsets.UTF_8)).isEmpty();
   }
 

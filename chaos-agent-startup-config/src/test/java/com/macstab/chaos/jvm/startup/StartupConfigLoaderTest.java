@@ -661,6 +661,25 @@ class StartupConfigLoaderTest {
     }
 
     @Test
+    @DisplayName("a config file whose owner cannot be read is not rejected for its owner")
+    void unreadableOwnerIsNotCompared() throws Exception {
+      assumePosix();
+      final Path file = tempDir.resolve("plan.json");
+      Files.writeString(file, writeSampleJson("owner-unreadable"));
+
+      final Path target =
+          StartupConfigLoader.validateAndResolvePath(
+              file.toString(),
+              Set.of("basic", "posix", "unix", "owner"),
+              path -> {
+                throw new java.io.UncheckedIOException(new java.io.IOException("no owner"));
+              },
+              "alice");
+
+      assertThat(target).isEqualTo(file.toAbsolutePath().normalize());
+    }
+
+    @Test
     @DisplayName("a directory link owned by another user than the JVM's is rejected")
     void foreignDirectoryLinkRejected() throws Exception {
       assumePosix();
