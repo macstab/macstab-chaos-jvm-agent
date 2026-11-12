@@ -33,15 +33,14 @@ import org.junit.platform.testkit.engine.EngineTestKit;
  * Two {@link QuarkusChaosTest} classes with different class-level {@link WithChaos} scenarios run
  * on one Quarkus application. Quarkus's test extension runs one test class at a time (it keeps the
  * current test class in static state, so concurrent classes fail inside it): the classes run one
- * after the other. The thread that runs a class's tests is bound to the class's session (the chaos
- * extension opened it on that thread in {@code beforeAll}), so each class's session scenario
- * reaches only its own class's calls and ends with its class, and what the first class activated
- * through the shared control plane bean ends with it, the last running chaos test class. Quarkus
- * runs a test class in a class loader of its own, so the fixtures and this test share their state
- * through a JDK map in the system properties. The fixtures run in an engine of their own ({@link
- * EngineTestKit}) that starts an application of its own; Quarkus's test extension keeps the running
- * application in static state, so the build runs this test in a test JVM of its own ({@code
- * testSharedApplication}).
+ * after the other. The chaos extension binds the thread that runs a class's tests to the class's
+ * session around each test, so each class's session scenario reaches only its own class's calls and
+ * ends with its class, and what the first class activated through the shared control plane bean
+ * ends with it, the last running chaos test class. Quarkus runs a test class in a class loader of
+ * its own, so the fixtures and this test share their state through a JDK map in the system
+ * properties. The fixtures run in an engine of their own ({@link EngineTestKit}) that starts an
+ * application of its own; Quarkus's test extension keeps the running application in static state,
+ * so the build runs this test in a test JVM of its own ({@code testSharedApplication}).
  */
 @DisplayName("@QuarkusChaosTest classes sharing one application")
 class SharedApplicationClassesTest {

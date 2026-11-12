@@ -23,8 +23,10 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.extension.AfterAllCallback;
+import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.AfterTestExecutionCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
+import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.BeforeTestExecutionCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ParameterContext;
@@ -43,7 +45,18 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  * <ul>
  *   <li>{@code beforeAll}: self-attach the agent (idempotent), open one session for the whole test
  *       class, and activate every {@link ChaosScenario} annotation present on the class. A
- *       {@code @Nested} class runs inside its outer class and shares its session.
+ *       {@code @Nested} class runs inside its outer class and shares its session. The opening
+ *       thread is unbound again at once ({@code bindSession(null)}), so an application Quarkus
+ *       starts on that thread after this callback (when {@code @QuarkusTest} is registered after
+ *       this extension, or for a {@code @Nested} class with a test profile of its own) starts
+ *       outside the session: a long-lived thread it starts (an event loop, a consumer, a worker
+ *       loop) serves the whole application, not the class that happened to start it.
+ *   <li>{@code beforeEach} / {@code afterEach}: bind the thread that runs the test to the class's
+ *       session, so the test's {@code @BeforeEach} methods, the test method and its
+ *       {@code @AfterEach} methods run in it. Quarkus runs the test and lifecycle methods itself
+ *       and skips the rest of the invocation chain, so the binding is made by these callbacks, not
+ *       by an {@code InvocationInterceptor}; {@code @BeforeAll} and {@code @AfterAll} methods run
+ *       outside the session.
  *   <li>{@code beforeTestExecution}: activate every {@link ChaosScenario} and {@link
  *       com.macstab.chaos.jvm.testkit.WithChaos} annotation present on the test method, right
  *       before the test method runs (after its {@code @BeforeEach} methods). The activations of
@@ -67,8 +80,10 @@ import org.junit.jupiter.api.extension.ParameterResolver;
 @SuppressWarnings("removal")
 public final class ChaosQuarkusExtension
     implements BeforeAllCallback,
+        BeforeEachCallback,
         BeforeTestExecutionCallback,
         AfterTestExecutionCallback,
+        AfterEachCallback,
         AfterAllCallback,
         ParameterResolver {
   static final ExtensionContext.Namespace NAMESPACE =
@@ -88,6 +103,12 @@ public final class ChaosQuarkusExtension
    * is still registered.
    */
   private static final String METHOD_HANDLES_KEY = "methodHandles";
+
+  /** Store key of the binding that keeps the class's opening thread out of its session. */
+  private static final String SESSION_MASK_KEY = "sessionMask";
+
+  /** Store key, scoped to the per-test store, of the binding the test runs in. */
+  private static final String TEST_BINDING_KEY = "testBinding";
 
   /**
    * The control planes the application's {@code ChaosControlPlane} beans hand out in a test ({@link
@@ -149,6 +170,9 @@ public final class ChaosQuarkusExtension
       session = tracker.openSession(context.getDisplayName());
       store.put(ChaosControlPlane.class, tracker);
       store.put(ChaosSession.class, session);
+      // Opening the session bound this thread to it; Quarkus may start the application on this
+      // thread after this callback, and every thread the application starts would inherit it.
+      store.put(SESSION_MASK_KEY, tracker.bindSession(null));
       synchronized (RUNNING_LOCK) {
         runningClasses++;
       }
@@ -164,6 +188,23 @@ public final class ChaosQuarkusExtension
           controlPlane, session, testClass.getAnnotationsByType(ChaosScenario.class), classHandles);
       // @WithChaos (full JSON model): both scopes are released in afterAll.
       classHandles.addAll(WithChaosSupport.activate(testClass, controlPlane, session));
+    }
+  }
+
+  @Override
+  public void beforeEach(final ExtensionContext context) {
+    final ChaosSession session = lookupSession(context);
+    if (session != null) {
+      context.getStore(NAMESPACE).put(TEST_BINDING_KEY, session.bind());
+    }
+  }
+
+  @Override
+  public void afterEach(final ExtensionContext context) {
+    final ChaosSession.ScopeBinding binding =
+        context.getStore(NAMESPACE).remove(TEST_BINDING_KEY, ChaosSession.ScopeBinding.class);
+    if (binding != null) {
+      binding.close();
     }
   }
 
@@ -209,8 +250,13 @@ public final class ChaosQuarkusExtension
     final ChaosSession session = store.remove(ChaosSession.class, ChaosSession.class);
     final ChaosControlPlane controlPlane =
         store.remove(ChaosControlPlane.class, ChaosControlPlane.class);
+    final ChaosSession.ScopeBinding mask =
+        store.remove(SESSION_MASK_KEY, ChaosSession.ScopeBinding.class);
     // try/finally ensures the class's handles are always stopped even if session.close() throws.
     try {
+      if (mask != null) {
+        mask.close();
+      }
       if (session != null) {
         session.close();
       }

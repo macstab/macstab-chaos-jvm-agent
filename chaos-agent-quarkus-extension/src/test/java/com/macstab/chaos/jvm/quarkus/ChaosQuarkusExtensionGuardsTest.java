@@ -62,6 +62,53 @@ class ChaosQuarkusExtensionGuardsTest {
   }
 
   @Test
+  @DisplayName("the class's opening thread leaves the session; each test runs bound to it")
+  void eachTestRunsBoundToTheSession() {
+    final Map<Object, Object> values = new HashMap<>();
+    final ExtensionContext classContext = context(values, null, null, null);
+    extension.beforeAll(classContext);
+    try {
+      final String sessionId = ((ChaosSession) values.get(ChaosSession.class)).id();
+      assertThat(currentSessionId()).as("the opening thread after beforeAll").isEmpty();
+
+      final Map<Object, Object> testValues = new HashMap<>();
+      final ExtensionContext test = context(testValues, null, null, classContext);
+      extension.beforeEach(test);
+      try {
+        assertThat(currentSessionId()).as("the test's thread").contains(sessionId);
+      } finally {
+        extension.afterEach(test);
+      }
+      assertThat(currentSessionId()).as("the thread after the test").isEmpty();
+      assertThat(testValues).isEmpty();
+    } finally {
+      extension.afterAll(classContext);
+    }
+  }
+
+  @Test
+  @DisplayName("before and after each test, nothing is bound without a session")
+  void beforeEachWithoutSessionBindsNothing() {
+    final Map<Object, Object> values = new HashMap<>();
+    final ExtensionContext context = context(values, null, null, null);
+
+    extension.beforeEach(context);
+    extension.afterEach(context);
+
+    assertThat(values).isEmpty();
+    assertThat(currentSessionId()).isEmpty();
+  }
+
+  private static Optional<String> currentSessionId() {
+    return Optional.ofNullable(
+        ChaosPlatform.installLocally()
+            .diagnostics()
+            .snapshot()
+            .runtimeDetails()
+            .get("currentSessionId"));
+  }
+
+  @Test
   @DisplayName("a JVM scenario activated through the injected control plane ends with the class")
   void injectedActivationEndsWithTheClass() {
     final Map<Object, Object> values = new HashMap<>();

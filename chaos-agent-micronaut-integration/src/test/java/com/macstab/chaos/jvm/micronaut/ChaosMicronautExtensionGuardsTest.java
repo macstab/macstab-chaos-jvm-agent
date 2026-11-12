@@ -56,6 +56,23 @@ class ChaosMicronautExtensionGuardsTest {
   }
 
   @Test
+  @DisplayName("an invocation without a session proceeds unbound")
+  void invocationWithoutSessionProceeds() throws Throwable {
+    final java.util.concurrent.atomic.AtomicBoolean proceeded =
+        new java.util.concurrent.atomic.AtomicBoolean();
+
+    extension.interceptTestMethod(
+        () -> {
+          proceeded.set(true);
+          return null;
+        },
+        null,
+        context(new HashMap<>(), null));
+
+    assertThat(proceeded).isTrue();
+  }
+
+  @Test
   @DisplayName(
       "scenarios activated through a context bean end when the last running chaos class ends;"
           + " its listeners stay")

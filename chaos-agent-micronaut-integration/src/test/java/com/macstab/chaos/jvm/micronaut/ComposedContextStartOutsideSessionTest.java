@@ -1,0 +1,45 @@
+package com.macstab.chaos.jvm.micronaut;
+
+import static com.macstab.chaos.jvm.micronaut.ContextWorker.currentSessionId;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.macstab.chaos.jvm.api.ChaosSession;
+import com.macstab.chaos.jvm.testkit.WithChaos;
+import io.micronaut.context.annotation.Property;
+import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
+import jakarta.inject.Inject;
+import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+
+/**
+ * A test that composes the chaos extension before {@code @MicronautTest} registers it first, so
+ * Micronaut starts the application context in its {@code beforeAll} after the chaos extension
+ * opened the class's session on the same thread. The context and a long-lived thread a bean starts
+ * while it starts run outside the session all the same.
+ */
+@ExtendWith(ChaosMicronautExtension.class)
+@MicronautTest
+@Property(name = "macstab.chaos.test.enabled", value = "true")
+@Property(name = ContextWorker.ENABLED, value = "true")
+@WithChaos(
+    """
+    {"id": "mn-composed-context-start", "scope": "SESSION",
+     "selector": {"type": "thread", "operations": ["THREAD_SLEEP"]},
+     "effect": {"type": "delay", "minDelay": "PT0.001S", "maxDelay": "PT0.001S"}}
+    """)
+@DisplayName("The context of a test registering the chaos extension before @MicronautTest")
+class ComposedContextStartOutsideSessionTest {
+
+  @Inject ContextWorker worker;
+
+  @Test
+  @DisplayName("starts its threads outside the class's session; the test method runs in it")
+  void startsOutsideTheSession(final ChaosSession session) throws Exception {
+    assertThat(worker.sessionOfTheWorker.get(10, TimeUnit.SECONDS))
+        .as("the session of the worker thread the context started")
+        .isEmpty();
+    assertThat(currentSessionId()).as("the test method's session").contains(session.id());
+  }
+}
