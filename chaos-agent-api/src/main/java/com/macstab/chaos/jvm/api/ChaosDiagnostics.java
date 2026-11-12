@@ -83,9 +83,11 @@ public interface ChaosDiagnostics {
     ACTIVE,
 
     /**
-     * The scenario is temporarily inactive. Occurs when {@link ActivationPolicy#activeFor()} has
-     * elapsed or {@link ActivationPolicy#maxApplications()} is exhausted (a stop leads to {@code
-     * STOPPED}). No effects fire while inactive.
+     * The scenario has ended on its own. Occurs when {@link ActivationPolicy#activeFor()} has
+     * elapsed, {@link ActivationPolicy#activeUntil()} has passed, {@link
+     * ActivationPolicy#maxApplications()} is exhausted or its stressor stopped (a stop leads to
+     * {@code STOPPED}). Final for the handle: no effects fire again, and {@code start()} does
+     * nothing.
      */
     INACTIVE,
 
@@ -96,8 +98,8 @@ public interface ChaosDiagnostics {
     STOPPED,
 
     /**
-     * The scenario failed to activate due to a configuration or runtime error. See {@link
-     * ActivationFailure} records in the {@link Snapshot} for details.
+     * Reserved; never reported. A scenario that fails to activate is not registered, so it has no
+     * report: its failure is recorded as an {@link ActivationFailure} in the {@link Snapshot}.
      */
     FAILED,
   }
@@ -112,8 +114,9 @@ public interface ChaosDiagnostics {
     INVALID_CONFIGURATION,
 
     /**
-     * The scenario requires a runtime feature not available on the current JVM (e.g., virtual
-     * threads on JDK 17). See {@link ChaosUnsupportedFeatureException}.
+     * The scenario requires more than the current JVM provides (e.g., direct-buffer pressure above
+     * {@code -XX:MaxDirectMemorySize}, heap pressure above the free heap). See {@link
+     * ChaosUnsupportedFeatureException}.
      */
     UNSUPPORTED_RUNTIME,
 
@@ -182,8 +185,10 @@ public interface ChaosDiagnostics {
    *     session-scoped
    * @param scope the scenario scope
    * @param state current lifecycle state
-   * @param matchedCount number of operations that satisfied the selector since the scenario was
-   *     started; includes matches skipped by {@link ActivationPolicy} constraints
+   * @param matchedCount number of operations that satisfied the selector and passed the scenario's
+   *     time bounds since it was started; includes matches skipped by the other {@link
+   *     ActivationPolicy} constraints (probability, warm-up, rate limit, budget), not calls before
+   *     {@code activeFrom}
    * @param appliedCount number of times the effect was actually applied; always {@code <=
    *     matchedCount}
    * @param reason human-readable explanation of the current state (e.g., {@code "max applications

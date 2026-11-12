@@ -9,8 +9,9 @@ import org.jspecify.annotations.Nullable;
  * Immutable event published to {@link ChaosEventListener} subscribers on every chaos lifecycle
  * transition and effect application.
  *
- * <p>Events are dispatched synchronously on the thread that triggers the transition. Listener
- * implementations must be non-blocking and must not throw.
+ * <p>Events are dispatched synchronously on the thread that triggers the transition, except to a
+ * listener wrapped with {@link ChaosEventListener#async}, which receives them on an agent thread.
+ * Listener implementations must be non-blocking and must not throw.
  *
  * <p><b>Attributes by event type:</b>
  *
@@ -20,10 +21,15 @@ import org.jspecify.annotations.Nullable;
  *   <tr><td>{@link Type#STARTED}, {@link Type#STOPPED}, {@link Type#RELEASED}</td>
  *       <td>{@code scope}</td><td>—</td></tr>
  *   <tr><td>{@link Type#APPLIED}</td>
- *       <td>{@code operation}, {@code scope}, {@code effectType}</td>
- *       <td>{@code sessionId} (session-scoped scenarios only)</td></tr>
+ *       <td>{@code operation}, {@code match} (the scenario's 1-based match number), {@code scope},
+ *       {@code effectType}</td>
+ *       <td>{@code delayNanos} and, from one millisecond, {@code delayMillis} (when the
+ *       application adds a delay); {@code sessionId} (session-scoped scenarios only)</td></tr>
  *   <tr><td>{@link Type#REGISTERED}</td><td>{@code scope}</td><td>—</td></tr>
- *   <tr><td>{@link Type#SKIPPED}, {@link Type#FAILED}</td><td>—</td><td>—</td></tr>
+ *   <tr><td>{@link Type#SKIPPED}</td><td>{@code reason}, {@code operation}, {@code scope}</td>
+ *       <td>—</td></tr>
+ *   <tr><td>{@link Type#FAILED}</td><td>{@code category}, {@code scope}</td><td>—</td></tr>
+ *   <tr><td>{@link Type#INACTIVE}</td><td>{@code scope}, {@code reason}</td><td>—</td></tr>
  * </table>
  *
  * @param timestamp when the event occurred, in UTC

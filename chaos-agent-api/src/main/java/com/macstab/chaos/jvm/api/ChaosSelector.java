@@ -106,8 +106,10 @@ public sealed interface ChaosSelector
   }
 
   /**
-   * Returns a selector that matches scheduled task submission and tick operations across any {@link
-   * java.util.concurrent.ScheduledExecutorService}.
+   * Returns a selector that matches scheduled task submission and tick operations of a {@link
+   * java.util.concurrent.ScheduledThreadPoolExecutor} (the class behind {@code
+   * Executors.newScheduledThreadPool}); another {@link
+   * java.util.concurrent.ScheduledExecutorService} is not woven.
    *
    * <p>Valid operations: {@link OperationType#SCHEDULE_SUBMIT}, {@link
    * OperationType#SCHEDULE_TICK}.
@@ -950,12 +952,14 @@ public sealed interface ChaosSelector
    *   <li>{@code remotePort} — the peer port.
    *   <li>{@code minBytes} / {@code maxBytes} — the byte count of a read or write lies in this
    *       inclusive range (for a read, the number of bytes requested). Only {@link
-   *       OperationType#SOCKET_READ} and {@link OperationType#SOCKET_WRITE} carry a byte count, so
-   *       a size filter requires that the selector names only those operations.
+   *       OperationType#SOCKET_READ}, {@link OperationType#SOCKET_WRITE}, {@link
+   *       OperationType#DATAGRAM_SEND} and {@link OperationType#DATAGRAM_RECEIVE} carry a byte
+   *       count, so a size filter requires that the selector names only those operations.
    * </ul>
    *
    * <p>{@link OperationType#SOCKET_ACCEPT} has no peer when it is evaluated (the connection is not
-   * yet accepted), so it never matches a host, CIDR or port filter.
+   * yet accepted), so a host, CIDR or port filter on a selector that names it is refused at
+   * activation ({@link ChaosValidationException}).
    *
    * @param operations operation types this selector matches
    * @param remoteHostPattern pattern matched against the remote host name or IP string

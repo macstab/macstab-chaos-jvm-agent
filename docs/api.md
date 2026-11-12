@@ -348,7 +348,7 @@ Sealed hierarchy. Divided into interceptor effects (applied inline on the callin
 | `ChaosPresets.packetLoss(cidr, port)` | datagrams are dropped | `udp4://…:sendto:…` |
 | `ChaosPresets.failover(cidr, port, host, targetPort)` | connects go elsewhere | endpoint redirect |
 | `ChaosPresets.dnsOutage(names)` | lookups fail | `dns://…:GAI:EAI_NONAME` |
-| `ChaosPresets.clockJump(offset)` | every wall-clock read is off | `clock_gettime/realtime:OFFSET` |
+| `ChaosPresets.clockJump(offset)` | every `java.time` and `java.util.Date` read is off (not `System.currentTimeMillis()`) | `clock_gettime/realtime:OFFSET` |
 | `ChaosPresets.threadExhaustion()` | platform thread starts fail | `pthread_create:ERRNO:EAGAIN` |
 
 ```java

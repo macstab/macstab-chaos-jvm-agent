@@ -129,13 +129,17 @@ public record ChaosScenario(
     JVM,
 
     /**
-     * The scenario is evaluated only for operations performed on threads that have been {@link
-     * ChaosSession#bind() bound} to a specific session. Use for per-test isolation when multiple
-     * tests share a JVM.
+     * The scenario is evaluated only for operations performed on threads bound to a specific
+     * session (the thread that opened it, threads {@link ChaosSession#bind() bound} to it, and work
+     * handed off from them). Use for per-test isolation when multiple tests share a JVM.
      *
-     * <p>Session-scoped scenarios cannot use JVM-global selectors ({@link
-     * ChaosSelector.ThreadSelector}, {@link ChaosSelector.ShutdownSelector}, {@link
-     * ChaosSelector.ClassLoadingSelector}, {@link ChaosSelector.StressSelector}).
+     * <p>A session-scoped scenario cannot select {@code CLASS_LOAD}, {@code CLASS_DEFINE}, {@code
+     * RESOURCE_LOAD} or {@code SHUTDOWN_HOOK_REGISTER}: the JVM evaluates them without a session,
+     * so the scenario could never apply. A stressor ({@link ChaosSelector.StressSelector}) runs
+     * beside the whole JVM and must be JVM scoped. Thread starts and sleeps ({@link
+     * ChaosSelector.ThreadSelector}) and executor shutdowns ({@link ChaosSelector.ShutdownSelector}
+     * on {@code EXECUTOR_SHUTDOWN} / {@code EXECUTOR_AWAIT_TERMINATION}) run on the calling thread
+     * and can be session scoped.
      */
     SESSION,
   }
