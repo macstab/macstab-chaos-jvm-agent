@@ -87,6 +87,7 @@ public interface ChaosSession extends AutoCloseable {
    * @throws ChaosActivationConflictException if a scenario with the same ID is still registered or
    *     active in this session
    * @throws ChaosInstrumentationException if the instrumentation the scenario needs cannot be woven
+   * @throws IllegalStateException if the session or its control plane is closed
    */
   ChaosActivationHandle activate(ChaosScenario scenario);
 
@@ -102,6 +103,7 @@ public interface ChaosSession extends AutoCloseable {
    * @throws ChaosActivationConflictException if a scenario's ID is still registered or active in
    *     this session
    * @throws ChaosInstrumentationException if the instrumentation the plan needs cannot be woven
+   * @throws IllegalStateException if the session or its control plane is closed
    */
   ChaosActivationHandle activate(ChaosPlan plan);
 
@@ -134,6 +136,7 @@ public interface ChaosSession extends AutoCloseable {
    *
    * @param runnable the task to wrap; must not be null
    * @return a new Runnable that activates the session context before delegating to the original
+   * @throws NullPointerException if {@code runnable} is {@code null}
    */
   Runnable wrap(Runnable runnable);
 
@@ -144,6 +147,7 @@ public interface ChaosSession extends AutoCloseable {
    * @param callable the task to wrap; must not be null
    * @param <T> the return type of the callable
    * @return a new Callable that activates the session context before delegating to the original
+   * @throws NullPointerException if {@code callable} is {@code null}
    */
   <T> Callable<T> wrap(Callable<T> callable);
 

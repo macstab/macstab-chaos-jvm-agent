@@ -5,6 +5,7 @@ import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -173,7 +174,7 @@ final class DefaultChaosSession implements ChaosSession {
    */
   @Override
   public Runnable wrap(final Runnable runnable) {
-    return scopeContext.wrap(id, runnable);
+    return scopeContext.wrap(id, Objects.requireNonNull(runnable, "runnable"));
   }
 
   /**
@@ -187,7 +188,7 @@ final class DefaultChaosSession implements ChaosSession {
    */
   @Override
   public <T> Callable<T> wrap(final Callable<T> callable) {
-    return scopeContext.wrap(id, callable);
+    return scopeContext.wrap(id, Objects.requireNonNull(callable, "callable"));
   }
 
   /**

@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ChaosSession;
@@ -90,5 +91,21 @@ class SessionBindingTest {
     final Field field = SessionHandoff.class.getDeclaredField("captured");
     field.setAccessible(true);
     return (Map<?, ?>) field.get(handoff);
+  }
+
+  @Test
+  @DisplayName("a null display name or task is refused where it is passed, naming the parameter")
+  void nullArgumentsAreRefused() {
+    assertThatThrownBy(() -> runtime.openSession(null))
+        .isInstanceOf(NullPointerException.class)
+        .hasMessage("displayName");
+    try (ChaosSession session = runtime.openSession("nulls")) {
+      assertThatThrownBy(() -> session.wrap((Runnable) null))
+          .isInstanceOf(NullPointerException.class)
+          .hasMessage("runnable");
+      assertThatThrownBy(() -> session.wrap((java.util.concurrent.Callable<?>) null))
+          .isInstanceOf(NullPointerException.class)
+          .hasMessage("callable");
+    }
   }
 }

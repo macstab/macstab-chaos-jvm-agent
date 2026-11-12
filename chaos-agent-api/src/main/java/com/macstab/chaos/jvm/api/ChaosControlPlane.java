@@ -32,8 +32,9 @@ public interface ChaosControlPlane extends AutoCloseable {
    * call.
    *
    * <p>The exceptions have no common root besides {@link RuntimeException}: catch the ones below,
-   * or {@link RuntimeException}. Every failure is recorded once in the diagnostics and published as
-   * a {@code FAILED} event before it is thrown.
+   * or {@link RuntimeException}. Every failure of an open control plane is recorded once in the
+   * diagnostics and published as a {@code FAILED} event before it is thrown; an activation on a
+   * closed one throws {@link IllegalStateException} and records nothing.
    *
    * @param scenario the scenario to activate; must have {@link ChaosScenario.ScenarioScope#JVM}
    *     scope
@@ -58,8 +59,9 @@ public interface ChaosControlPlane extends AutoCloseable {
    * every hook the plan needs is woven before any scenario is registered.
    *
    * <p>The exceptions have no common root besides {@link RuntimeException}: catch the ones below,
-   * or {@link RuntimeException}. Every failure is recorded once in the diagnostics and published as
-   * a {@code FAILED} event before it is thrown.
+   * or {@link RuntimeException}. Every failure of an open control plane is recorded once in the
+   * diagnostics and published as a {@code FAILED} event before it is thrown; an activation on a
+   * closed one throws {@link IllegalStateException} and records nothing.
    *
    * @param plan all scenarios must have {@link ChaosScenario.ScenarioScope#JVM} scope
    * @return a composite handle that stops all plan scenarios when closed
@@ -92,6 +94,8 @@ public interface ChaosControlPlane extends AutoCloseable {
    *
    * @param displayName human-readable name for this session; appears in diagnostics and logs
    * @return a new session; caller is responsible for closing it
+   * @throws NullPointerException if {@code displayName} is {@code null}
+   * @throws IllegalStateException if the control plane is closed
    */
   ChaosSession openSession(String displayName);
 

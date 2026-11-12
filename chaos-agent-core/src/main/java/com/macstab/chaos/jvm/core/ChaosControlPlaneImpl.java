@@ -459,6 +459,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
 
   @Override
   public ChaosSession openSession(final String displayName) {
+    Objects.requireNonNull(displayName, "displayName");
     // A session only needs {@code activateInSession} to register session-scoped scenarios; that
     // method lives on this control plane, so the session can hold a direct reference instead of
     // bouncing through the ChaosRuntime facade. Callers that reach the control plane without
