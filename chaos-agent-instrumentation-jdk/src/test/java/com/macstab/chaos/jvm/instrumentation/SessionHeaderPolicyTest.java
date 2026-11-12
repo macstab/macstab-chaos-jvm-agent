@@ -52,7 +52,9 @@ class SessionHeaderPolicyTest {
         List.of("+10.0.0.1", "\uff11\uff10.0.0.1", "10.0.0.256", "10.0.0.1000", "10.0..1")) {
       assertThat(SessionHeaderPolicy.allows(notAnAddress)).as(notAnAddress).isFalse();
     }
-    for (final String name : List.of("a.b.c.d", "10.b.c.d", "10.0.0.1x")) {
+    for (final String name :
+        List.of(
+            "a.b.c.d", "10.b.c.d", "10.0.0.1x", "10.0.0.1.5", "10.0.0", "10.0.0.1.", ".10.0.0")) {
       assertThat(SessionHeaderPolicy.allows(name)).as(name).isFalse();
     }
     assertThat(SessionHeaderPolicy.allows("010.0.0.255")).isTrue();

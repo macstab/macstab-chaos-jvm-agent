@@ -227,6 +227,31 @@ class BridgeEntryPointsTest {
     }
 
     @Test
+    @DisplayName("a real select on one selector does not hide a wakeup of another")
+    void realSelectOfAnotherSelector() throws Throwable {
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("select-other")
+                  .selector(
+                      new ChaosSelector.NioSelector(
+                          Set.of(OperationType.NIO_SELECTOR_SELECT), NamePattern.any()))
+                  .effect(ChaosEffect.timeout())
+                  .activationPolicy(ActivationPolicy.builder().activateAfterMatches(1).build())
+                  .build());
+      try (java.nio.channels.Selector running = java.nio.channels.Selector.open();
+          java.nio.channels.Selector other = java.nio.channels.Selector.open()) {
+        // A real select runs on the first selector while the second is woken up.
+        assertThat(BootstrapDispatcher.beforeNioSelect(running, 2_000L)).isFalse();
+        BootstrapDispatcher.selectorWoken(other);
+        assertThat(stalledMillis(other)).as("the other's wakeup is kept").isLessThan(1_000L);
+        BootstrapDispatcher.afterNioSelect(running);
+        BootstrapDispatcher.afterNioSelect(running); // nothing left to end
+      } finally {
+        handle.close();
+      }
+    }
+
+    @Test
     @DisplayName("a closed selector's wakeup is not kept, and idle a wakeup clears a kept one")
     void closedOrIdle() throws Throwable {
       final ChaosActivationHandle timeout =
