@@ -82,15 +82,16 @@ rebuilds `latest/` from the newest release tag; it never publishes a branch.
 
 ## Branching model
 
-- `develop` - ongoing work. Every push builds, tests, and publishes a SNAPSHOT.
+- `develop` - ongoing work. Every push builds, tests, and publishes a SNAPSHOT of the version
+  semantic-release would release next (see *SNAPSHOT version*).
 - `main` - release branch. Every merge triggers semantic-release, which
   analyses conventional-commit messages since the last tag, bumps the version,
   creates the tag `X.Y.Z` (bare, no `v`: the tag format comes from the release
   image's `/configs/.releaserc-gradle.json`), generates `CHANGELOG.md`, and cuts a
   GitHub release. The tag push then triggers `publish-release.yml` (GitHub
   Packages) and `deploy-javadoc.yml` (GitHub Pages). The release is then merged
-  back into develop; develop keeps its own `gradle.properties` (its `-SNAPSHOT`
-  version), and any other conflict fails the job for a manual merge.
+  back into develop; develop's `gradle.properties` takes the released version and keeps its
+  other properties, and any other conflict fails the job for a manual merge.
 
 ## CHANGELOG.md
 
@@ -127,9 +128,10 @@ the bundled ASM).
 - `build.yml` - spotless + `./gradlew build jacocoAggregatedReport` on PRs and pushes to main/develop,
   the tests on JDK 21 and 25 on amd64 and arm64 (`jdk-matrix`), and the demos (`demos`)
 - `publish-snapshot.yml` - publishes `X.Y.Z-SNAPSHOT` to GitHub Packages
-  after a successful build on develop
+  after a successful build on develop; `X.Y.Z` is the version semantic-release would release from
+  that commit (`.github/scripts/snapshot-version.sh`)
 - `semantic-release.yml` - tags the release after a successful build of a push to main, and
-  merges the tagged release back into develop, keeping develop's `gradle.properties`
+  merges the tagged release back into develop, which takes the released version
   (`.github/scripts/back-merge.sh`; any other conflict fails the job). The release image is
   pinned by digest, and the bot token reaches git as a request header, never in a remote URL.
 - `publish-release.yml` - on a tag push, in the `release` environment: `./gradlew check` of the
@@ -201,14 +203,13 @@ https://central.sonatype.com/ -> Account -> Generate User Token.
 **Maven Central HTTP 402/405** - namespace not verified. Verify
 `com.macstab.chaos.jvm` (or the parent `com.macstab`) in Central Portal.
 
-## Version bump
+## SNAPSHOT version
 
-The next development version after a release is set by editing
-`gradle.properties` on develop:
-
-```properties
-version=1.1.0-SNAPSHOT
-```
-
-Commit as `chore: bump to 1.1.0-SNAPSHOT`. Semantic-release maintains the
-release-line versions itself on main.
+No version is bumped by hand. A SNAPSHOT's version is worked out from the commits: the snapshot
+workflow runs semantic-release in dry-run mode on the built develop commit, with the release's own
+commit rules and tag format, and publishes `<next version>-SNAPSHOT` (`./gradlew publish
+-Pversion=...`). After 1.0.0 with a breaking change on develop that is `2.0.0-SNAPSHOT`; after
+2.0.0 with only fixes it is `2.0.1-SNAPSHOT`. With no commit since the last release that makes one
+(only `docs:` or `test:`, say) there is no next version and no SNAPSHOT is published. The workflow
+refuses any version without `-SNAPSHOT`, so it never replaces a release. `gradle.properties` keeps
+the last released version; semantic-release sets it on main at each release.
