@@ -3010,13 +3010,21 @@ public final class DefectProbeMain {
     final ChaosControlPlane plane = ChaosPlatform.current();
     // A few ticks over the unchanged plan, then a change the poller must read.
     LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(300));
+    // Renamed over the watched file, as startup-config.md tells a writer to: an in-place
+    // rewrite truncates the file first, and a tick between the two reads it empty.
+    final Path next = plan.resolveSibling(plan.getFileName() + ".next");
     Files.writeString(
-        plan,
+        next,
         """
         {"scenarios":[{"id":"reloaded","scope":"JVM",
           "selector":{"type":"executor","operations":["EXECUTOR_SUBMIT"]},
           "effect":{"type":"delay","minDelay":"PT0.001S","maxDelay":"PT0.001S"}}]}
         """);
+    Files.move(
+        next,
+        plan,
+        java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
     String state = "absent";
     while (System.nanoTime() < deadline) {
