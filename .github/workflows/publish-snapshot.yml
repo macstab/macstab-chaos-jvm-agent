@@ -35,6 +35,9 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
+          # The whole history and the tags: the SNAPSHOT version comes from the commits since the
+          # last release.
+          fetch-depth: 0
 
       - name: Verify correct commit
         run: |
@@ -52,19 +55,34 @@ jobs:
           java-version: '25'
           cache: 'gradle'
 
-      - name: Extract version from gradle.properties
+      # The version semantic-release would release from this commit, with -SNAPSHOT: not
+      # gradle.properties, which stays at the last release until the next one, so a SNAPSHOT of it
+      # would address the released packages. No commit that makes a release: no SNAPSHOT.
+      - name: Work out the SNAPSHOT version
+        id: next
+        # Pinned by digest, as in semantic-release.yml.
+        uses: docker://macstab/semantic-release-maven-gradle-nodejs-python-git-jq@sha256:9416a77355c013996df7bef6dd6825160b093bfca818337bf6a0a8797b6278f3 # 1.5.2-slim
+        with:
+          entrypoint: /bin/sh
+          args: .github/scripts/snapshot-version.sh
+        env:
+          BRANCH: develop
+          CONFIG_FILE: .releaserc-gradle.json
+
+      - name: Check the version
         id: version
+        if: steps.next.outputs.SNAPSHOT_VERSION != ''
         run: |
-          VERSION=$(grep -E '^\s*version\s*=' gradle.properties | sed -E 's/.*=\s*//' | tr -d ' \t\n\r')
-          echo "PROJECT_VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Extracted version: ${VERSION}"
+          VERSION="${{ steps.next.outputs.SNAPSHOT_VERSION }}"
           # The next step deletes the published packages of this version: never a release.
           case "${VERSION}" in
             *-SNAPSHOT) ;;
             *) echo "ERROR: ${VERSION} is not a SNAPSHOT version; refusing to replace it"; exit 1 ;;
           esac
+          echo "PROJECT_VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Delete existing snapshot if present
+        if: steps.version.outputs.PROJECT_VERSION != ''
         # The bot token deletes package versions; only this step holds it.
         env:
           BOT_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
@@ -138,11 +156,19 @@ jobs:
 
             echo "  version ${VERSION} exists (id=${VERSION_ID}) - deleting..."
 
+            # GitHub refuses to delete a package's last version: when the SNAPSHOT is the only
+            # version, the package itself goes (it holds nothing else).
+            TARGET="https://api.github.com/orgs/macstab/packages/maven/${PACKAGE_NAME}/versions/${VERSION_ID}"
+            if [ "$(echo "$VERSIONS" | jq 'length')" = "1" ]; then
+              echo "  it is the package's only version - deleting the package"
+              TARGET="https://api.github.com/orgs/macstab/packages/maven/${PACKAGE_NAME}"
+            fi
+
             DELETE_RESULT=$(curl -s -w "\n%{http_code}" -X DELETE \
               -H "Authorization: Bearer ${BOT_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/orgs/macstab/packages/maven/${PACKAGE_NAME}/versions/${VERSION_ID}")
+              "${TARGET}")
 
             HTTP_CODE=$(echo "$DELETE_RESULT" | tail -n1)
 
@@ -162,7 +188,10 @@ jobs:
           echo "=== Cleanup complete: deleted ${DELETED_COUNT} artifact version(s) ==="
 
       - name: Publish SNAPSHOT to GitHub Packages (tests already ran in Build workflow)
-        run: ./gradlew publish -x test --no-daemon --stacktrace
+        if: steps.version.outputs.PROJECT_VERSION != ''
+        run: >
+          ./gradlew publish -x test --no-daemon --stacktrace
+          -Pversion=${{ steps.version.outputs.PROJECT_VERSION }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
