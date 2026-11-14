@@ -20,19 +20,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '25'
           cache: 'gradle'
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: java-kotlin
           build-mode: manual
           queries: security-and-quality
       - name: Compile
         run: ./gradlew compileJava --no-daemon --no-build-cache
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
