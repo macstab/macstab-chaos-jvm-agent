@@ -1,0 +1,46 @@
+name: Bug report
+description: The agent injected the wrong fault, no fault, or changed a call it should not have.
+labels: [bug]
+body:
+  - type: textarea
+    id: plan
+    attributes:
+      label: Plan or scenario
+      description: The plan JSON, @WithChaos annotation or Java code that activates the scenario.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and observed behaviour
+      description: What the call should have done under the scenario, and what it did.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: >
+        The output of `ChaosRuntime.diagnostics().debugDump()` (or the agent argument
+        `debugDumpOnStart=true`): it lists the woven hook groups, unmatched hooks and hook failures.
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Agent version, `java -version`, OS and architecture, framework (Spring Boot, Quarkus, Micronaut) if any.
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How the agent is installed
+      options:
+        - "-javaagent"
+        - dynamic attach / installLocally()
+        - Spring Boot starter
+        - Quarkus extension
+        - Micronaut integration
+    validations:
+      required: true

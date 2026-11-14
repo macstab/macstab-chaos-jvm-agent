@@ -16,6 +16,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("ScenarioController — state machine")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class ScenarioControllerStateTest {
 
   private static ScenarioController makeController(final String id) {
@@ -39,7 +40,7 @@ class ScenarioControllerStateTest {
   @DisplayName("initial state is REGISTERED regardless of StartMode")
   void initialStateIsRegistered() {
     final ScenarioController controller = makeController("init-state");
-    // Task 1: Must be REGISTERED, not ACTIVE, before start() is called.
+    // Must be REGISTERED, not ACTIVE, before start() is called.
     assertThat(controller.state()).isEqualTo(ChaosDiagnostics.ScenarioState.REGISTERED);
   }
 
@@ -92,7 +93,11 @@ class ScenarioControllerStateTest {
             null,
             null,
             null);
-    assertThat(controller.evaluate(context)).isNotNull();
+    final ScenarioContribution contribution = controller.evaluate(context);
+    assertThat(contribution).isNotNull();
+    assertThat(contribution.controller()).isSameAs(controller);
+    assertThat(contribution.delayNanos()).as("the scenario's 1 ms delay").isEqualTo(1_000_000L);
+    assertThat(controller.matchedCount()).isEqualTo(1L);
   }
 
   @Test

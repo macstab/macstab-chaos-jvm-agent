@@ -1,0 +1,27 @@
+version: 2
+updates:
+  # Gradle dependencies: the version catalog and the plugins. Minor and patch updates come as one
+  # weekly pull request; a major update comes alone, so one breaking change cannot hold back the
+  # rest.
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      gradle-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # The Spring Boot 3 and 4 starters pin one line each of the same artifacts; a major update
+      # would move the Boot 3 line to Boot 4.
+      - dependency-name: "org.springframework.boot:spring-boot-dependencies"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "org.springframework.boot"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

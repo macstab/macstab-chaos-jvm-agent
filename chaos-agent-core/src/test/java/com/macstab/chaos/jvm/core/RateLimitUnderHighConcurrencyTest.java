@@ -9,9 +9,12 @@ import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -52,116 +55,130 @@ class RateLimitUnderHighConcurrencyTest {
             + THREAD_COUNT
             + " concurrent threads")
     void appliedCountNeverExceedsPermitsUnderConcurrency() throws Exception {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("rate-limit-concurrent")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ZERO)) // zero delay — fastest possible effect
-              .activationPolicy(
-                  new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC,
-                      1.0d,
-                      0,
-                      null,
-                      null,
-                      new ActivationPolicy.RateLimit(PERMITS, Duration.ofSeconds(10)),
-                      null,
-                      false))
-              .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("rate-limit-concurrent")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ZERO)) // zero delay — fastest possible effect
+                .activationPolicy(
+                    new ActivationPolicy(
+                        ActivationPolicy.StartMode.AUTOMATIC,
+                        1.0d,
+                        0,
+                        null,
+                        null,
+                        new ActivationPolicy.RateLimit(PERMITS, Duration.ofSeconds(10)),
+                        null,
+                        false))
+                .build());
 
-      final CountDownLatch startLatch = new CountDownLatch(1);
-      final var executor = Executors.newFixedThreadPool(THREAD_COUNT);
-      try {
-        for (int i = 0; i < THREAD_COUNT; i++) {
-          executor.submit(
-              () -> {
-                try {
-                  startLatch.await();
-                } catch (final InterruptedException e) {
-                  Thread.currentThread().interrupt();
-                  return;
-                }
-                runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-              });
+        final CountDownLatch startLatch = new CountDownLatch(1);
+        final List<Future<?>> futures = new ArrayList<>();
+        final var executor = Executors.newFixedThreadPool(THREAD_COUNT);
+        try {
+          for (int i = 0; i < THREAD_COUNT; i++) {
+            futures.add(
+                executor.submit(
+                    () -> {
+                      try {
+                        startLatch.await();
+                      } catch (final InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                      }
+                      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                    }));
+          }
+          startLatch.countDown();
+          executor.shutdown();
+          assertThat(executor.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
+          // A worker that failed reports it here, not in a future nobody reads.
+          for (final Future<?> future : futures) {
+            future.get(15, TimeUnit.SECONDS);
+          }
+        } finally {
+          executor.shutdownNow();
         }
-        startLatch.countDown();
-        executor.shutdown();
-        assertThat(executor.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
-      } finally {
-        executor.shutdownNow();
+
+        final long applied =
+            runtime.diagnostics().snapshot().scenarios().stream()
+                .filter(r -> "rate-limit-concurrent".equals(r.id()))
+                .mapToLong(ChaosDiagnostics.ScenarioReport::appliedCount)
+                .sum();
+
+        assertThat(applied)
+            .as(
+                "appliedCount must not exceed permit count %d (got %d with %d threads racing)",
+                PERMITS, applied, THREAD_COUNT)
+            .isLessThanOrEqualTo(PERMITS);
       }
-
-      final long applied =
-          runtime.diagnostics().snapshot().scenarios().stream()
-              .filter(r -> "rate-limit-concurrent".equals(r.id()))
-              .mapToLong(ChaosDiagnostics.ScenarioReport::appliedCount)
-              .sum();
-
-      assertThat(applied)
-          .as(
-              "appliedCount must not exceed permit count %d (got %d with %d threads racing)",
-              PERMITS, applied, THREAD_COUNT)
-          .isLessThanOrEqualTo(PERMITS);
     }
 
     @Test
     @DisplayName(
         "exactly PERMITS applications across " + THREAD_COUNT + " threads — no permit is wasted")
     void exactlyPermitsApplicationsWhenMoreThreadsThanPermits() throws Exception {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final long permits = 10L;
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final long permits = 10L;
 
-      runtime.activate(
-          ChaosScenario.builder("rate-limit-exact")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ZERO))
-              .activationPolicy(
-                  new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC,
-                      1.0d,
-                      0,
-                      null,
-                      null,
-                      new ActivationPolicy.RateLimit(permits, Duration.ofSeconds(10)),
-                      null,
-                      false))
-              .build());
+        runtime.activate(
+            ChaosScenario.builder("rate-limit-exact")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ZERO))
+                .activationPolicy(
+                    new ActivationPolicy(
+                        ActivationPolicy.StartMode.AUTOMATIC,
+                        1.0d,
+                        0,
+                        null,
+                        null,
+                        new ActivationPolicy.RateLimit(permits, Duration.ofSeconds(10)),
+                        null,
+                        false))
+                .build());
 
-      final CountDownLatch startLatch = new CountDownLatch(1);
-      final var executor = Executors.newFixedThreadPool(THREAD_COUNT);
-      try {
-        for (int i = 0; i < THREAD_COUNT; i++) {
-          executor.submit(
-              () -> {
-                try {
-                  startLatch.await();
-                } catch (final InterruptedException e) {
-                  Thread.currentThread().interrupt();
-                  return;
-                }
-                runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-              });
+        final CountDownLatch startLatch = new CountDownLatch(1);
+        final List<Future<?>> futures = new ArrayList<>();
+        final var executor = Executors.newFixedThreadPool(THREAD_COUNT);
+        try {
+          for (int i = 0; i < THREAD_COUNT; i++) {
+            futures.add(
+                executor.submit(
+                    () -> {
+                      try {
+                        startLatch.await();
+                      } catch (final InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                      }
+                      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                    }));
+          }
+          startLatch.countDown();
+          executor.shutdown();
+          assertThat(executor.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
+          // A worker that failed reports it here, not in a future nobody reads.
+          for (final Future<?> future : futures) {
+            future.get(15, TimeUnit.SECONDS);
+          }
+        } finally {
+          executor.shutdownNow();
         }
-        startLatch.countDown();
-        executor.shutdown();
-        assertThat(executor.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
-      } finally {
-        executor.shutdownNow();
+
+        final long applied =
+            runtime.diagnostics().snapshot().scenarios().stream()
+                .filter(r -> "rate-limit-exact".equals(r.id()))
+                .mapToLong(ChaosDiagnostics.ScenarioReport::appliedCount)
+                .sum();
+
+        assertThat(applied)
+            .as(
+                "with %d threads competing for %d permits, exactly %d permits should be consumed",
+                THREAD_COUNT, permits, permits)
+            .isEqualTo(permits);
       }
-
-      final long applied =
-          runtime.diagnostics().snapshot().scenarios().stream()
-              .filter(r -> "rate-limit-exact".equals(r.id()))
-              .mapToLong(ChaosDiagnostics.ScenarioReport::appliedCount)
-              .sum();
-
-      assertThat(applied)
-          .as(
-              "with %d threads competing for %d permits, exactly %d permits should be consumed",
-              THREAD_COUNT, permits, permits)
-          .isEqualTo(permits);
     }
   }
 
@@ -172,62 +189,69 @@ class RateLimitUnderHighConcurrencyTest {
     @Test
     @DisplayName("maxApplications caps total count even when rate-limit window permits more")
     void maxApplicationsCapsAbsoluteCountBelowRateLimit() throws Exception {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final long maxApplications = 3L;
-      final long permitsPerWindow = 20L;
-      final int threads = 50;
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final long maxApplications = 3L;
+        final long permitsPerWindow = 20L;
+        final int threads = 50;
 
-      runtime.activate(
-          ChaosScenario.builder("combined-cap")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ZERO))
-              .activationPolicy(
-                  new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC,
-                      1.0d,
-                      0,
-                      maxApplications,
-                      null,
-                      new ActivationPolicy.RateLimit(permitsPerWindow, Duration.ofSeconds(10)),
-                      null,
-                      false))
-              .build());
+        runtime.activate(
+            ChaosScenario.builder("combined-cap")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ZERO))
+                .activationPolicy(
+                    new ActivationPolicy(
+                        ActivationPolicy.StartMode.AUTOMATIC,
+                        1.0d,
+                        0,
+                        maxApplications,
+                        null,
+                        new ActivationPolicy.RateLimit(permitsPerWindow, Duration.ofSeconds(10)),
+                        null,
+                        false))
+                .build());
 
-      final CountDownLatch startLatch = new CountDownLatch(1);
-      final var executor = Executors.newFixedThreadPool(threads);
-      try {
-        for (int i = 0; i < threads; i++) {
-          executor.submit(
-              () -> {
-                try {
-                  startLatch.await();
-                } catch (final InterruptedException e) {
-                  Thread.currentThread().interrupt();
-                  return;
-                }
-                runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-              });
+        final CountDownLatch startLatch = new CountDownLatch(1);
+        final List<Future<?>> futures = new ArrayList<>();
+        final var executor = Executors.newFixedThreadPool(threads);
+        try {
+          for (int i = 0; i < threads; i++) {
+            futures.add(
+                executor.submit(
+                    () -> {
+                      try {
+                        startLatch.await();
+                      } catch (final InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                      }
+                      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                    }));
+          }
+          startLatch.countDown();
+          executor.shutdown();
+          assertThat(executor.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
+          // A worker that failed reports it here, not in a future nobody reads.
+          for (final Future<?> future : futures) {
+            future.get(15, TimeUnit.SECONDS);
+          }
+        } finally {
+          executor.shutdownNow();
         }
-        startLatch.countDown();
-        executor.shutdown();
-        assertThat(executor.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
-      } finally {
-        executor.shutdownNow();
+
+        final long applied =
+            runtime.diagnostics().snapshot().scenarios().stream()
+                .filter(r -> "combined-cap".equals(r.id()))
+                .mapToLong(ChaosDiagnostics.ScenarioReport::appliedCount)
+                .sum();
+
+        assertThat(applied)
+            .as(
+                "maxApplications=%d must cap total applications even with rate-limit permitting "
+                    + "up to %d, got %d",
+                maxApplications, permitsPerWindow, applied)
+            .isLessThanOrEqualTo(maxApplications);
       }
-
-      final long applied =
-          runtime.diagnostics().snapshot().scenarios().stream()
-              .filter(r -> "combined-cap".equals(r.id()))
-              .mapToLong(ChaosDiagnostics.ScenarioReport::appliedCount)
-              .sum();
-
-      assertThat(applied)
-          .as(
-              "maxApplications=%d must cap total applications even with rate-limit permitting "
-                  + "up to %d, got %d",
-              maxApplications, permitsPerWindow, applied)
-          .isLessThanOrEqualTo(maxApplications);
     }
   }
 }

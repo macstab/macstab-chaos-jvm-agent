@@ -1,0 +1,151 @@
+package com.macstab.chaos.jvm.instrumentation;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+/**
+ * The pool name the connection-acquire hook reports, read reflectively from stand-ins shaped like a
+ * pool: its {@code getPoolName()}, else the pool's class name.
+ */
+@DisplayName("JdbcTargetExtractor")
+class JdbcTargetExtractorTest {
+
+  /** A name whose rendering fails. */
+  static final class Broken {
+    @Override
+    public String toString() {
+      throw new IllegalStateException("broken");
+    }
+  }
+
+  /** A pool declaring getPoolName(), and an overload that is not the accessor. */
+  static class NamedPool {
+    private final Object name;
+
+    NamedPool(final Object name) {
+      this.name = name;
+    }
+
+    Object getPoolName() {
+      return name;
+    }
+
+    Object getPoolName(final String prefix) {
+      return prefix + name;
+    }
+  }
+
+  /** Inherits the accessor from its superclass. */
+  static final class SubPool extends NamedPool {
+    SubPool(final Object name) {
+      super(name);
+    }
+  }
+
+  /** Declares no accessor. */
+  static final class UnnamedPool {}
+
+  /** Declares no accessor, and names itself through toString(). */
+  static final class SelfNamedPool {
+    private final String name;
+
+    SelfNamedPool(final String name) {
+      this.name = name;
+    }
+
+    @Override
+    public String toString() {
+      return name;
+    }
+  }
+
+  @Test
+  @DisplayName("reads getPoolName(), also when a superclass declares it")
+  void readsThePoolName() {
+    assertThat(JdbcTargetExtractor.fromHikariPool(new NamedPool("orders-pool")))
+        .isEqualTo("orders-pool");
+    assertThat(JdbcTargetExtractor.fromHikariPool(new NamedPool("billing-pool")))
+        .as("read again through the cached accessor")
+        .isEqualTo("billing-pool");
+    assertThat(JdbcTargetExtractor.fromHikariPool(new SubPool("reports-pool")))
+        .isEqualTo("reports-pool");
+  }
+
+  @Test
+  @DisplayName("falls back to the class name without an accessor, a name, or when it fails")
+  void fallsBackToTheClassName() {
+    assertThat(JdbcTargetExtractor.fromHikariPool(new UnnamedPool()))
+        .isEqualTo(UnnamedPool.class.getName());
+    assertThat(JdbcTargetExtractor.fromHikariPool(new NamedPool(null)))
+        .isEqualTo(NamedPool.class.getName());
+    assertThat(JdbcTargetExtractor.fromHikariPool(new NamedPool(new Broken())))
+        .isEqualTo(NamedPool.class.getName());
+  }
+
+  @Test
+  @DisplayName("without an accessor, a pool's own toString() names it unless it is blank")
+  void readsTheOwnToString() {
+    assertThat(JdbcTargetExtractor.fromHikariPool(new SelfNamedPool("ledger-pool")))
+        .isEqualTo("ledger-pool");
+    assertThat(JdbcTargetExtractor.fromHikariPool(new SelfNamedPool(" ")))
+        .isEqualTo(SelfNamedPool.class.getName());
+  }
+
+  @Test
+  @DisplayName("is null without a pool")
+  void nullWithoutAPool() {
+    assertThat(JdbcTargetExtractor.fromHikariPool(null)).isNull();
+  }
+
+  /** A pool without getPoolName() and without a toString() of its own. */
+  static final class MissPool {}
+
+  @Test
+  @DisplayName("a pool type without getPoolName() is looked up once: the miss is cached")
+  @SuppressWarnings("unchecked") // the private cache, read by the test
+  void missIsCached() throws Exception {
+    assertThat(JdbcTargetExtractor.fromHikariPool(new MissPool()))
+        .isEqualTo(MissPool.class.getName());
+
+    final java.lang.reflect.Field field =
+        JdbcTargetExtractor.class.getDeclaredField("METHOD_CACHE");
+    field.setAccessible(true);
+    final java.util.Map<String, Object> cached =
+        ((ClassValue<java.util.Map<String, Object>>) field.get(null)).get(MissPool.class);
+    assertThat(cached).containsEntry("getPoolName", java.util.Optional.empty());
+  }
+
+  @Test
+  @DisplayName(
+      "whether a pool type declares its own toString() is looked up once: an acquire allocates"
+          + " nothing")
+  void ownToStringLookupIsCached() {
+    final java.lang.management.ThreadMXBean threads =
+        java.lang.management.ManagementFactory.getThreadMXBean();
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+        threads instanceof com.sun.management.ThreadMXBean allocation
+            && allocation.isThreadAllocatedMemorySupported(),
+        "the JVM measures a thread's allocations");
+    final com.sun.management.ThreadMXBean allocation = (com.sun.management.ThreadMXBean) threads;
+    final SelfNamedPool named = new SelfNamedPool("ledger-pool");
+    final MissPool unnamed = new MissPool();
+    final int acquires = 10_000;
+    for (int i = 0; i < acquires; i++) {
+      JdbcTargetExtractor.fromHikariPool(named);
+      JdbcTargetExtractor.fromHikariPool(unnamed);
+    }
+    final long thread = Thread.currentThread().threadId();
+
+    final long before = allocation.getThreadAllocatedBytes(thread);
+    for (int i = 0; i < acquires; i++) {
+      JdbcTargetExtractor.fromHikariPool(named);
+      JdbcTargetExtractor.fromHikariPool(unnamed);
+    }
+    final long allocated = allocation.getThreadAllocatedBytes(thread) - before;
+
+    // A reflective getMethod("toString") copies a Method on every call (over 100 bytes each).
+    assertThat(allocated).as("bytes allocated by %d acquires", 2 * acquires).isLessThan(acquires);
+  }
+}

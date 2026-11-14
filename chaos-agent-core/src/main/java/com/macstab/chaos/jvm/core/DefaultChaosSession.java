@@ -5,6 +5,7 @@ import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -92,8 +93,8 @@ final class DefaultChaosSession implements ChaosSession {
   /**
    * Activates the given scenario within this session.
    *
-   * <p>Delegates to {@link ChaosRuntime#activateInSession} and registers the resulting handle so
-   * that it is automatically destroyed when this session is {@linkplain #close() closed}.
+   * <p>Delegates to {@link ChaosControlPlaneImpl#activateInSession} and registers the resulting
+   * handle so that it is automatically destroyed when this session is {@linkplain #close() closed}.
    *
    * @param scenario the scenario to activate
    * @return a handle for controlling the activated scenario
@@ -104,6 +105,9 @@ final class DefaultChaosSession implements ChaosSession {
       throw new IllegalStateException("cannot activate scenario on a closed session");
     }
     final DefaultChaosActivationHandle handle = controlPlane.activateInSession(this, scenario);
+    // A handle the caller closed has nothing left for close() to end: dropped here, so a
+    // long-lived session keeps no closed scenario reachable and copies no growing list.
+    handles.removeIf(DefaultChaosActivationHandle::destroyed);
     handles.add(handle);
     // Guard against the race where close() iterated handles before add() above completed.
     // If the session was closed concurrently, destroy the handle immediately rather than leaking.
@@ -116,46 +120,34 @@ final class DefaultChaosSession implements ChaosSession {
   }
 
   /**
-   * Activates all scenarios in the given plan within this session and returns a composite handle.
-   *
-   * <p>Each scenario in {@link ChaosPlan#scenarios()} is activated individually via {@link
-   * #activate(ChaosScenario)}, and all resulting handles are aggregated into a {@link
-   * CompositeActivationHandle}.
+   * Activates all scenarios in the given plan within this session, as one unit: every scenario is
+   * validated before any is registered, the plan's observability settings apply to its scenarios,
+   * and a failure rolls back those already registered (see {@link
+   * ChaosControlPlaneImpl#activatePlan}).
    *
    * @param plan the chaos plan whose scenarios should all be activated
    * @return a composite handle that delegates operations to every activated scenario
    */
   @Override
   public ChaosActivationHandle activate(final ChaosPlan plan) {
-    // Same all-or-nothing contract as ChaosControlPlaneImpl.activate(ChaosPlan): if the 4th of
-    // 5 scenarios fails validation, the first 3 must be rolled back. Without this the plan is
-    // silently partially applied and the operator has no way to reason about state.
-    final List<ChaosActivationHandle> children = new java.util.ArrayList<>();
-    try {
-      for (final ChaosScenario scenario : plan.scenarios()) {
-        children.add(activate(scenario));
-      }
-      return new CompositeActivationHandle("session-plan:" + plan.metadata().name(), children);
-    } catch (final RuntimeException failure) {
-      for (final ChaosActivationHandle child : children) {
-        try {
+    if (closed.get()) {
+      throw new IllegalStateException("cannot activate a plan on a closed session");
+    }
+    return controlPlane.activatePlan(
+        plan,
+        "session:" + id,
+        "session-plan:",
+        scenario -> controlPlane.validateInSession(this, scenario),
+        this::activate,
+        child -> {
+          // Leave the session's handle list first, so close() never destroys it a second time.
           if (child instanceof DefaultChaosActivationHandle defaultHandle) {
-            // Remove from session's handle list BEFORE destroy so close() can't double-destroy
-            // this handle after a partial rollback. activate(ChaosScenario) at line 104 appends
-            // the handle to this.handles; without this remove, close() would iterate handles and
-            // destroy every already-rolled-back entry a second time, emitting duplicate STOPPED
-            // events for each to every observability listener.
             handles.remove(defaultHandle);
             defaultHandle.destroy();
           } else {
             child.stop();
           }
-        } catch (final RuntimeException rollback) {
-          failure.addSuppressed(rollback);
-        }
-      }
-      throw failure;
-    }
+        });
   }
 
   /**
@@ -182,7 +174,7 @@ final class DefaultChaosSession implements ChaosSession {
    */
   @Override
   public Runnable wrap(final Runnable runnable) {
-    return scopeContext.wrap(id, runnable);
+    return scopeContext.wrap(id, Objects.requireNonNull(runnable, "runnable"));
   }
 
   /**
@@ -196,7 +188,16 @@ final class DefaultChaosSession implements ChaosSession {
    */
   @Override
   public <T> Callable<T> wrap(final Callable<T> callable) {
-    return scopeContext.wrap(id, callable);
+    return scopeContext.wrap(id, Objects.requireNonNull(callable, "callable"));
+  }
+
+  /**
+   * The number of handles this session keeps; package-private as a test seam.
+   *
+   * @return the handles kept for {@link #close()}
+   */
+  int handleCount() {
+    return handles.size();
   }
 
   /**
@@ -217,6 +218,7 @@ final class DefaultChaosSession implements ChaosSession {
     if (!closed.compareAndSet(false, true)) {
       return;
     }
+    controlPlane.sessionClosed(id);
     // Aggregate failures across destroy() calls and always close the root binding. Without the
     // try/finally, the first handle that throws during destroy skips every remaining handle AND
     // leaks the thread's scope binding — leaving session IDs stuck on the scope stack for the
@@ -234,6 +236,9 @@ final class DefaultChaosSession implements ChaosSession {
         }
       }
     }
+    // The plans of this session may still hold observability settings (a plan handle that was
+    // never closed): its scenarios are gone, so are the settings.
+    controlPlane.clearScopeObservability("session:" + id);
     try {
       rootBinding.close();
     } catch (final RuntimeException bindingFailure) {

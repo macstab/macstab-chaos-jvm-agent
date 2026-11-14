@@ -1,7 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.NamePattern;
@@ -748,21 +747,39 @@ class SelectorMatcherTest {
     }
 
     @Test
-    @DisplayName("non-ANY signature pattern is rejected until runtime wiring lands")
-    void nonAnySignaturePatternIsRejected() {
-      // The runtime does not yet propagate the JVM method descriptor through InvocationContext,
-      // so a non-null signaturePattern would silently never match. MethodSelector's canonical
-      // constructor must reject such patterns at plan-build time to prevent zero-activation
-      // scenarios (see CRIT-4 in BUGS.md).
-      assertThatThrownBy(
-              () ->
-                  new ChaosSelector.MethodSelector(
-                      Set.of(OperationType.METHOD_ENTER),
-                      NamePattern.exact("com.example.Dao"),
-                      NamePattern.any(),
-                      NamePattern.exact("(Ljava/lang/String;)V")))
-          .isInstanceOf(IllegalArgumentException.class)
-          .hasMessageContaining("signaturePattern");
+    @DisplayName("a signature pattern is matched against the method descriptor")
+    void signaturePatternMatchesDescriptor() {
+      final ChaosSelector selector =
+          new ChaosSelector.MethodSelector(
+              Set.of(OperationType.METHOD_ENTER),
+              NamePattern.exact("com.example.Dao"),
+              NamePattern.any(),
+              NamePattern.exact("(Ljava/lang/String;)V"));
+
+      assertThat(SelectorMatcher.matches(selector, methodContext("(Ljava/lang/String;)V")))
+          .isTrue();
+      assertThat(SelectorMatcher.matches(selector, methodContext("(I)V"))).isFalse();
+      assertThat(SelectorMatcher.matches(selector, methodContext(null)))
+          .as("a call without a descriptor never matches a signature pattern")
+          .isFalse();
+    }
+
+    private InvocationContext methodContext(final String descriptor) {
+      return new InvocationContext(
+          OperationType.METHOD_ENTER,
+          "com.example.Dao",
+          "com.example.Dao",
+          "find",
+          false,
+          null,
+          null,
+          null,
+          InvocationContext.UNKNOWN,
+          null,
+          null,
+          InvocationContext.UNKNOWN,
+          descriptor,
+          InvocationContext.UNKNOWN);
     }
 
     @Test
@@ -849,6 +866,91 @@ class SelectorMatcherTest {
               null);
       assertThat(SelectorMatcher.matches(selector, matchContext)).isTrue();
       assertThat(SelectorMatcher.matches(selector, noMatchContext)).isFalse();
+    }
+  }
+
+  @Nested
+  @DisplayName("the JDK's own uses (L3a) are reached only by a pattern that names them")
+  class JdkOwnUses {
+
+    private InvocationContext context(final OperationType operation, final String className) {
+      return new InvocationContext(operation, className, null, null, false, null, null, null);
+    }
+
+    private InvocationContext fileRead(final String path) {
+      return new InvocationContext(
+          OperationType.FILE_IO_READ,
+          "java.io.FileInputStream",
+          null,
+          null,
+          false,
+          null,
+          null,
+          null,
+          1L,
+          path,
+          null,
+          InvocationContext.UNKNOWN,
+          null,
+          InvocationContext.UNKNOWN);
+    }
+
+    @Test
+    @DisplayName("a JDK-private ThreadLocal subclass, but not withInitial's")
+    void jdkThreadLocals() {
+      final String holdCounter =
+          "java.util.concurrent.locks.ReentrantReadWriteLock$Sync$ThreadLocalHoldCounter";
+      final ChaosSelector any =
+          new ChaosSelector.ThreadLocalSelector(
+              Set.of(OperationType.THREAD_LOCAL_GET), NamePattern.any());
+      final ChaosSelector named =
+          new ChaosSelector.ThreadLocalSelector(
+              Set.of(OperationType.THREAD_LOCAL_GET), NamePattern.exact(holdCounter));
+      assertThat(SelectorMatcher.matches(any, context(OperationType.THREAD_LOCAL_GET, holdCounter)))
+          .isFalse();
+      assertThat(
+              SelectorMatcher.matches(named, context(OperationType.THREAD_LOCAL_GET, holdCounter)))
+          .isTrue();
+      for (final String user :
+          Set.of(
+              "java.lang.ThreadLocal",
+              "java.lang.InheritableThreadLocal",
+              "java.lang.ThreadLocal$SuppliedThreadLocal")) {
+        assertThat(SelectorMatcher.matches(any, context(OperationType.THREAD_LOCAL_GET, user)))
+            .as(user)
+            .isTrue();
+      }
+    }
+
+    @Test
+    @DisplayName("the lock of a thread pool worker")
+    void poolWorkerLock() {
+      final String worker = "java.util.concurrent.ThreadPoolExecutor$Worker";
+      final ChaosSelector any =
+          new ChaosSelector.MonitorSelector(Set.of(OperationType.MONITOR_ENTER), NamePattern.any());
+      final ChaosSelector named =
+          new ChaosSelector.MonitorSelector(
+              Set.of(OperationType.MONITOR_ENTER), NamePattern.prefix("java.util.concurrent."));
+      assertThat(SelectorMatcher.matches(any, context(OperationType.MONITOR_ENTER, worker)))
+          .isFalse();
+      assertThat(SelectorMatcher.matches(named, context(OperationType.MONITOR_ENTER, worker)))
+          .isTrue();
+    }
+
+    @Test
+    @DisplayName("the random devices, unless a path pattern names them")
+    void randomDevices() {
+      final ChaosSelector any = ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_READ));
+      final ChaosSelector named =
+          new ChaosSelector.FileIoSelector(
+              Set.of(OperationType.FILE_IO_READ),
+              com.macstab.chaos.jvm.api.PathPattern.under("/dev"),
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(any, fileRead("/dev/urandom"))).isFalse();
+      assertThat(SelectorMatcher.matches(any, fileRead("/dev/random"))).isFalse();
+      assertThat(SelectorMatcher.matches(any, fileRead("/tmp/data"))).isTrue();
+      assertThat(SelectorMatcher.matches(named, fileRead("/dev/urandom"))).isTrue();
     }
   }
 

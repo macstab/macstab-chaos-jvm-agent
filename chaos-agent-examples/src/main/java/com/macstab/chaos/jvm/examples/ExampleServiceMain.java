@@ -11,7 +11,11 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-/** Example service demonstrating chaos platform integration with virtual threads and work pools. */
+/**
+ * Example service: a small platform-thread worker pool, a heartbeat scheduler and a resource read.
+ * It activates no scenario; with {@code -Dmacstab.chaos.install.local=true} it installs the agent
+ * locally, so a scenario activated from outside (a plan file, JMX) reaches its calls.
+ */
 public final class ExampleServiceMain {
 
   private static final int WORKER_THREAD_COUNT = 2;
@@ -61,15 +65,19 @@ public final class ExampleServiceMain {
     queue.put("payload");
 
     final CompletableFuture<String> resultFuture = new CompletableFuture<>();
-    workerPool.submit(() -> consumeQueueAndComplete(queue, resultFuture));
+    workerPool.execute(() -> consumeQueueAndComplete(queue, resultFuture));
 
-    heartbeatScheduler.scheduleAtFixedRate(
-        () -> System.out.println("heartbeat"),
-        HEARTBEAT_INITIAL_DELAY_MS,
-        HEARTBEAT_PERIOD_MS,
-        TimeUnit.MILLISECONDS);
-
-    return resultFuture.get(RESULT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+    final java.util.concurrent.ScheduledFuture<?> heartbeat =
+        heartbeatScheduler.scheduleAtFixedRate(
+            () -> System.out.println("heartbeat"),
+            HEARTBEAT_INITIAL_DELAY_MS,
+            HEARTBEAT_PERIOD_MS,
+            TimeUnit.MILLISECONDS);
+    try {
+      return resultFuture.get(RESULT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+    } finally {
+      heartbeat.cancel(false);
+    }
   }
 
   private static void consumeQueueAndComplete(

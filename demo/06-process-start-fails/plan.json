@@ -1,0 +1,3 @@
+{"scenarios": [{"id": "process-start-enoent", "scope": "JVM",
+  "selector": {"type": "process", "operations": ["PROCESS_START"]},
+  "effect": {"type": "errno", "errno": "ENOENT"}}]}

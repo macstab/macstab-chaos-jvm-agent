@@ -1,8 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.logging.Logger;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Creates objects with slow finalizers to back up the JVM finalizer queue.
@@ -19,37 +18,86 @@ import java.util.logging.Logger;
  * deprecation warning intentionally — the purpose of this stressor is specifically to exercise the
  * finalizer pathway.
  *
- * <p>{@link #close()} is a no-op: the objects are already GC-eligible at construction time.
+ * <p>{@link #close()} ends the stressor's finalizers: one sleeping returns at once, and the ones
+ * still queued return without sleeping, so the JVM's single Finalizer thread runs other objects'
+ * finalizers again however long the delay. A finalizer sleeps in a timed wait on the stressor's
+ * {@link Stop} monitor, which {@code close()} notifies; the Finalizer thread's interrupt flag is
+ * never touched.
  */
 final class FinalizerBacklogStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   private final int createdCount;
-  private final AtomicBoolean stopped = new AtomicBoolean(false);
+  private final long finalizerDelayNanos;
+  private final Stop stop = new Stop();
 
-  @SuppressWarnings({"deprecation", "removal"})
   FinalizerBacklogStressor(final ChaosEffect.FinalizerBacklogEffect effect) {
-    final long delayMs = effect.finalizerDelay().toMillis();
+    // In nanoseconds, saturated: a delay below a millisecond is kept, and one too large for
+    // nanoseconds lasts until close() (L17).
+    final long delayNanos = ManagedStressor.nanos(effect.finalizerDelay());
 
     // Create all objects without retaining references. They become GC-eligible immediately.
     for (int i = 0; i < effect.objectCount(); i++) {
-      new FinalizableObject(delayMs, stopped);
+      new FinalizableObject(delayNanos, stop);
     }
     this.createdCount = effect.objectCount();
+    this.finalizerDelayNanos = delayNanos;
     LOGGER.fine(
         () ->
-            "chaos finalizer-backlog stressor created "
+            "[chaos-agent] chaos finalizer-backlog stressor created "
                 + createdCount
                 + " objects with "
-                + delayMs
-                + " ms finalizer delay");
+                + effect.finalizerDelay()
+                + " finalizer delay");
   }
 
   @Override
   public void close() {
-    // Signal all pending FinalizableObject.finalize() calls to return early without sleeping.
-    stopped.set(true);
+    // Wakes the finalizer sleeping now; the pending ones return without sleeping.
+    stop.stop();
+  }
+
+  /**
+   * The stressor's stop signal, and the monitor its finalizers wait on: {@link #stop()} wakes a
+   * finalizer waiting in {@link #await(long)}.
+   */
+  static final class Stop {
+    private boolean stopped;
+
+    /** Ends every wait, now and later. */
+    synchronized void stop() {
+      stopped = true;
+      notifyAll();
+    }
+
+    /**
+     * Waits until {@code nanos} have elapsed or {@link #stop()} is called, whichever comes first.
+     * Counts the elapsed time, so a delay saturated at {@link Long#MAX_VALUE} does not overflow.
+     *
+     * @throws InterruptedException when the waiting thread is interrupted
+     */
+    synchronized void await(final long nanos) throws InterruptedException {
+      final long start = System.nanoTime();
+      long left = nanos;
+      while (!stopped && left > 0L) {
+        TimeUnit.NANOSECONDS.timedWait(this, left);
+        left = nanos - (System.nanoTime() - start);
+      }
+    }
+
+    synchronized boolean stopped() {
+      return stopped;
+    }
+  }
+
+  /**
+   * Returns the time each finalizer sleeps, in nanoseconds; package-private as a test seam.
+   *
+   * @return the finalizer delay
+   */
+  long finalizerDelayNanos() {
+    return finalizerDelayNanos;
   }
 
   /** Returns the number of finalizable objects created by this stressor instance. */
@@ -58,28 +106,35 @@ final class FinalizerBacklogStressor implements ManagedStressor {
   }
 
   /**
-   * An object with a slow finalizer. Each instance sleeps for {@code delayMs} milliseconds inside
+   * An object with a slow finalizer. Each instance sleeps for {@code delayNanos} nanoseconds inside
    * its {@code finalize()} method, backing up the JVM's single-threaded finalizer thread.
    */
   @SuppressWarnings({"deprecation", "removal"})
   private static final class FinalizableObject {
 
-    private final long delayMs;
-    private final AtomicBoolean stopped;
+    private final long delayNanos;
+    private final Stop stop;
 
-    FinalizableObject(final long delayMs, final AtomicBoolean stopped) {
-      this.delayMs = delayMs;
-      this.stopped = stopped;
+    FinalizableObject(final long delayNanos, final Stop stop) {
+      this.delayNanos = delayNanos;
+      this.stop = stop;
     }
 
+    // A finalizer is the point: the stressor fills the finalizer queue.
+    @SuppressWarnings({"Finalize", "removal"})
     @Override
     protected void finalize() {
-      if (stopped.get()) {
+      if (stop.stopped()) {
         return;
       }
-      if (delayMs > 0) {
+      if (delayNanos > 0) {
+        // Agent work on the JVM's Finalizer thread (L3): a user THREAD_SLEEP scenario never
+        // applies to this sleep.
+        DispatchDepth.increment();
         try {
-          Thread.sleep(delayMs);
+          // A timed wait close() ends, not a sleep: a delay as long as the scenario, or longer,
+          // must not hold the JVM's Finalizer thread once the scenario has stopped.
+          stop.await(delayNanos);
         } catch (final InterruptedException ignored) {
           // Do NOT restore the interrupt flag: finalize() runs on the shared JVM finalizer
           // thread, and setting its interrupt bit leaks our chaos signal into every subsequent
@@ -89,8 +144,10 @@ final class FinalizerBacklogStressor implements ManagedStressor {
           // (JDBC, NIO channels, resource closers) whose root cause would be impossible to
           // trace back to chaos-agent. Swallow silently and let the finalizer complete; the
           // stressor's backlog effect is only observable through delay accumulation, not
-          // through individual-object completion. The interrupt was delivered by close() or
-          // JVM shutdown and the thread is already being torn down.
+          // through individual-object completion. close() never interrupts: an interrupt here
+          // came from elsewhere (JVM shutdown) and the thread is already being torn down.
+        } finally {
+          DispatchDepth.decrement();
         }
       }
     }

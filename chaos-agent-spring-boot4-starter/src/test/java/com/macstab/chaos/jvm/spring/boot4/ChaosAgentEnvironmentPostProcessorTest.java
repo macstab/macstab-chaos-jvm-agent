@@ -36,7 +36,7 @@ class ChaosAgentEnvironmentPostProcessorTest {
 
   @Test
   @DisplayName(
-      "Phase 2 socket chaos fires after early attach via EnvironmentPostProcessor — macstab.chaos.enabled=true")
+      "socket chaos fires after early attach via EnvironmentPostProcessor — macstab.chaos.enabled=true")
   void socketChaosFiresAfterEarlyAttach() throws Exception {
     final ConfigurableApplicationContext ctx =
         new SpringApplication(MinimalApp.class)
@@ -83,15 +83,38 @@ class ChaosAgentEnvironmentPostProcessorTest {
             .hasValueSatisfying(count -> assertThat(count).isGreaterThan(0));
       }
 
-      // After handle.close() the scenario is STOPPED — no further interception.
-      assertThat(chaos.diagnostics().scenario("ep-test-sb4-socket-connect"))
-          .hasValueSatisfying(
-              r ->
-                  assertThat(r.state())
-                      .isEqualTo(com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioState.STOPPED));
+      // handle.close() stops the scenario and removes it from the registry.
+      assertThat(chaos.diagnostics().scenario("ep-test-sb4-socket-connect")).isEmpty();
     } finally {
       ctx.close();
     }
+  }
+
+  @Test
+  @DisplayName("early attach sees macstab.chaos.enabled set only in config data (properties file)")
+  void earlyAttachSeesConfigData() {
+    final ConfigurableApplicationContext ctx =
+        new SpringApplication(MinimalApp.class)
+            .run(
+                "--spring.main.web-application-type=none",
+                "--spring.config.location=classpath:chaos-enabled-by-config-data.properties");
+    try {
+      assertThat(
+              ctx.getEnvironment()
+                  .getProperty(ChaosAgentEnvironmentPostProcessor.ATTACH_MARKER_PROPERTY))
+          .as("the post-processor runs after config data and attaches early")
+          .isEqualTo("spring-boot-4");
+    } finally {
+      ctx.close();
+    }
+  }
+
+  @Test
+  @DisplayName("runs directly after ConfigDataEnvironmentPostProcessor")
+  void ordersAfterConfigData() {
+    assertThat(new ChaosAgentEnvironmentPostProcessor().getOrder())
+        .isGreaterThan(
+            org.springframework.boot.context.config.ConfigDataEnvironmentPostProcessor.ORDER);
   }
 
   @Test
@@ -119,4 +142,20 @@ class ChaosAgentEnvironmentPostProcessorTest {
   @SpringBootConfiguration
   @Import(ChaosAutoConfiguration.class)
   static class MinimalApp {}
+
+  @Test
+  @DisplayName("macstab.chaos.enabled=true from an untrusted source (remote config) is ignored")
+  void untrustedSourceIsIgnored() {
+    final org.springframework.core.env.StandardEnvironment environment =
+        new org.springframework.core.env.StandardEnvironment();
+    environment
+        .getPropertySources()
+        .addFirst(
+            new org.springframework.core.env.MapPropertySource(
+                "configserver:remote", java.util.Map.of("macstab.chaos.enabled", "true")));
+    new ChaosAgentEnvironmentPostProcessor().postProcessEnvironment(environment, null);
+    assertThat(environment.getProperty("macstab.chaos.agent.attach-phase"))
+        .as("not attached: the switch came from a source an attacker could control")
+        .isNull();
+  }
 }

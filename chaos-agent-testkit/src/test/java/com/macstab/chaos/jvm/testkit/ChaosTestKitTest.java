@@ -12,6 +12,16 @@ import org.junit.jupiter.api.Test;
 @DisplayName("ChaosTestKit")
 class ChaosTestKitTest {
 
+  @Test
+  @DisplayName("publishes its nullness: the package is @NullMarked")
+  void nullMarked() {
+    assertThat(
+            ChaosTestKit.class
+                .getPackage()
+                .isAnnotationPresent(org.jspecify.annotations.NullMarked.class))
+        .isTrue();
+  }
+
   @Nested
   @DisplayName("install")
   class Install {

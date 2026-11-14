@@ -11,7 +11,7 @@ on:
 # CRITICAL: serialize semantic-release runs - parallel runs produce duplicate tags.
 concurrency:
   group: semantic-release-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -21,17 +21,15 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 30
+    # Only a push to this repository's main: a pull request from a fork can use a branch named
+    # main too, and its code must never run with the release token.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
 
     steps:
-      - name: Debug workflow_run context
-        run: |
-          echo "=== Workflow Run Context ==="
-          echo "head_branch: ${{ github.event.workflow_run.head_branch }}"
-          echo "head_sha:    ${{ github.event.workflow_run.head_sha }}"
-          echo "github.ref:  ${{ github.ref }}"
-          echo "github.sha:  ${{ github.sha }}"
-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -48,27 +46,13 @@ jobs:
             exit 1
           fi
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install semantic-release
-        run: |
-          npm install -g \
-            semantic-release@23 \
-            @semantic-release/git@10 \
-            @semantic-release/changelog@6 \
-            @semantic-release/github@10 \
-            conventional-changelog-conventionalcommits@7
-
       - name: Run semantic-release
-        uses: docker://macstab/semantic-release-maven-gradle-nodejs-python-git-jq:1.5.2-slim
+        # Pinned by digest: a re-pushed tag cannot change what runs with the release token.
+        uses: docker://macstab/semantic-release-maven-gradle-nodejs-python-git-jq@sha256:9416a77355c013996df7bef6dd6825160b093bfca818337bf6a0a8797b6278f3 # 1.5.2-slim
         if: github.ref == 'refs/heads/main'
         with:
           entrypoint: /bin/sh
           workdir: /home/runner/work/${{ github.repository }}/${{ github.repository }}
-          branches: 'main'
           args: -c "pwd && cp /configs/$CONFIG_FILE .releaserc && git config --global --add safe.directory $GITHUB_WORKSPACE && npx semantic-release --branches $RELEASE_BRANCH"
         env:
           GITHUB_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
@@ -79,18 +63,21 @@ jobs:
           CONFIG_FILE: .releaserc-gradle.json
           DEBUG: semantic-release:*
 
-      - name: Merge main -> develop
-        uses: docker://macstab/semantic-release-maven-gradle-nodejs-python-git-jq:1.5.2-slim
-        if: ${{!startsWith(github.ref, 'refs/tags/') && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+      - name: Merge the release back into develop
+        uses: docker://macstab/semantic-release-maven-gradle-nodejs-python-git-jq@sha256:9416a77355c013996df7bef6dd6825160b093bfca818337bf6a0a8797b6278f3 # 1.5.2-slim
+        if: ${{ github.ref == 'refs/heads/main' }}
         with:
           entrypoint: /bin/sh
           workdir: /home/runner/work/${{ github.repository }}/${{ github.repository }}
-          args: "-c \"set -x && git config --global --add safe.directory $GITHUB_WORKSPACE && git config --global user.email '${{ secrets.BOT_USER_EMAIL }}' && git config --global user.name '${{ secrets.BOT_USER_NAME }}' && git remote set-url origin https://$GH_USERNAME:$GH_PASSWORD@github.com/${{ github.repository }}.git && git fetch --all --tags && git checkout ${INPUT_FROM_BRANCH} && git pull origin ${INPUT_FROM_BRANCH} && TAG_NAME=`git describe --tags --abbrev=0 2>/dev/null` && echo Release tag is $TAG_NAME && test -n \"$TAG_NAME\" || exit 0 && COMMIT_HASH=`git rev-parse HEAD` && echo Commit hash is $COMMIT_HASH && git checkout ${INPUT_TARGET_BRANCH} && git pull origin ${INPUT_TARGET_BRANCH} && (git cherry-pick -Xtheirs $COMMIT_HASH --allow-empty || git cherry-pick --skip) && git push https://$GH_USERNAME:$GH_PASSWORD@github.com/${{ github.repository }}.git ${INPUT_TARGET_BRANCH} \""
+          # A release commit (tagged HEAD of main) is merged; develop keeps its gradle.properties
+          # (its -SNAPSHOT version), and any other conflict fails the job.
+          args: .github/scripts/back-merge.sh
         env:
-          INPUT_FROM_BRANCH: 'main'
-          INPUT_TARGET_BRANCH: 'develop'
-          GH_USERNAME: ${{ secrets.BOT_USER_NAME }}
-          GH_PASSWORD: ${{ secrets.BOT_GITHUB_TOKEN }}
+          FROM_BRANCH: 'main'
+          TARGET_BRANCH: 'develop'
+          GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
+          BOT_USER_NAME: ${{ secrets.BOT_USER_NAME }}
+          BOT_USER_EMAIL: ${{ secrets.BOT_USER_EMAIL }}
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
           GIT_COMMITTER_NAME: github-actions[bot]

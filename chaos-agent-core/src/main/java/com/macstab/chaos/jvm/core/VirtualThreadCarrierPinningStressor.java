@@ -3,141 +3,201 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.logging.Logger;
+import java.util.function.Consumer;
+import org.jspecify.annotations.Nullable;
 
 /**
- * Pins JDK 21+ virtual-thread carrier platform threads by keeping them inside {@code synchronized}
- * blocks for a configurable duration per cycle.
+ * Takes {@code pinnedThreadCount} carrier threads of the virtual-thread scheduler out of service,
+ * so other virtual threads queue for a carrier: the throughput collapse a pinned carrier causes.
  *
- * <h2>JDK 21 carrier-pinning mechanics</h2>
+ * <h2>How a carrier is held</h2>
  *
- * <p>In JDK 21, a virtual thread that executes a {@code synchronized} block is "pinned" to its
- * carrier platform thread: the scheduler cannot unmount the virtual thread while it holds a
- * monitor, even if it would otherwise block on I/O or {@link Object#wait()}. A pinned carrier is
- * unavailable for mounting other virtual threads, effectively reducing the carrier pool and causing
- * throughput degradation or starvation under load.
+ * <p>The stressor starts {@code pinnedThreadCount} <em>virtual</em> threads. Each one mounts on a
+ * carrier and keeps it in cycles of {@link
+ * ChaosEffect.VirtualThreadCarrierPinningEffect#pinDuration()}, never unmounting between cycles:
  *
- * <p>This stressor simulates that condition without requiring virtual threads in the test: it
- * spawns {@code pinnedThreadCount} platform daemon threads (potential carriers), each of which
- * acquires and holds its own <em>private</em> {@code Object} monitor inside a {@code synchronized}
- * block for {@link ChaosEffect.VirtualThreadCarrierPinningEffect#pinDuration()} per cycle. Each
- * thread holds a distinct monitor so that the threads do not serialise on a single lock — which
- * would reduce the stressor to simulating only one pinned carrier regardless of configured count.
- * The loop runs until {@link #close()} sets the stop flag.
+ * <ul>
+ *   <li><b>JDK 21–23:</b> the virtual thread sleeps while holding a private monitor. Blocking
+ *       inside {@code synchronized} pins the carrier, so the carrier is held without using CPU —
+ *       exactly the pinning an application causes.
+ *   <li><b>JDK 24+:</b> JEP 491 lets virtual threads unmount inside {@code synchronized}, so a
+ *       monitor no longer pins. The virtual thread instead keeps its carrier busy with a spin-wait.
+ *       The carrier is just as unavailable to other virtual threads, but the stressor uses one CPU
+ *       per held carrier while active.
+ * </ul>
  *
- * <p>All threads start simultaneously via a {@link CountDownLatch} so that the full carrier
- * pressure is applied from the first cycle rather than staggered by OS thread-startup jitter.
+ * <p>The loops run on <em>virtual</em> threads on purpose: a platform thread is not a carrier, so
+ * holding one would never affect the virtual-thread scheduler and the effect would do nothing on
+ * any JDK.
  *
- * <p>{@link #close()} sets the stop flag and interrupts all threads. Because threads park inside
- * {@code LockSupport.parkNanos} they unblock immediately on interrupt.
+ * <p>The stressor's threads are agent-owned: they are started and run with the dispatch depth
+ * raised, so user scenarios (thread start, sleep, park) never apply to them. {@link #close()} stops
+ * and joins them.
  */
 final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
+
+  /** First JDK feature release in which {@code synchronized} no longer pins (JEP 491). */
+  private static final int MONITORS_UNPIN_FROM_FEATURE = 24;
+
+  private static final long JOIN_TIMEOUT_MILLIS = 1_000L;
 
   private final List<Thread> pinningThreads;
   private final AtomicBoolean stopped = new AtomicBoolean(false);
 
-  /**
-   * Creates and immediately starts {@link
-   * ChaosEffect.VirtualThreadCarrierPinningEffect#pinnedThreadCount()} carrier-pinning platform
-   * daemon threads.
-   *
-   * @param effect the effect configuration; must not be {@code null}
-   */
   VirtualThreadCarrierPinningStressor(final ChaosEffect.VirtualThreadCarrierPinningEffect effect) {
-    final long pinNanos = effect.pinDuration().toNanos();
-    final int count = effect.pinnedThreadCount();
-    final CountDownLatch ready = new CountDownLatch(count);
-    final List<Thread> threads = new ArrayList<>(count);
-
-    for (int i = 0; i < count; i++) {
-      final String name = "chaos-carrier-pin-" + i;
-      // Per-thread monitor: each carrier-pinning thread must hold a DIFFERENT monitor to
-      // simulate N independent pinned carriers. Sharing one monitor serialises the threads
-      // so that only one carrier is pinned at a time.
-      final Object pinMonitor = new Object();
-      final Thread thread =
-          new Thread(
-              () -> {
-                ready.countDown();
-                try {
-                  ready.await();
-                } catch (final InterruptedException e) {
-                  Thread.currentThread().interrupt();
-                  return;
-                }
-                while (!stopped.get()) {
-                  synchronized (pinMonitor) {
-                    final long deadline = System.nanoTime() + pinNanos;
-                    while (System.nanoTime() < deadline && !stopped.get()) {
-                      // Thread.sleep(0, nanos) holds the synchronized monitor (unlike wait())
-                      // and is not instrumented by the chaos agent (LockSupport.park* is), so
-                      // an active chaos delay scenario cannot recursively target this stressor.
-                      try {
-                        Thread.sleep(0, 10_000 /* 10 µs */);
-                      } catch (final InterruptedException ie) {
-                        stopped.set(true);
-                        Thread.currentThread().interrupt();
-                        return;
-                      }
-                    }
-                  }
-                }
-                LOGGER.fine(() -> "chaos carrier-pin thread terminated: " + name);
-              },
-              name);
-      thread.setDaemon(true);
-      thread.start();
-      threads.add(thread);
-    }
-    this.pinningThreads = List.copyOf(threads);
+    this(effect, NO_END);
   }
 
   /**
-   * Per-thread join deadline on {@link #close()}. Pinning threads park in small (10 µs) slices
-   * inside the synchronized block; the interrupt causes each to exit the monitor on its next
-   * iteration, so the expected wake-up time is well under a millisecond. 200 ms is a safety ceiling
-   * for OS scheduling jitter.
+   * Creates the stressor with the holding strategy of this JDK; its threads end the scenario
+   * through {@code onEnd} if one fails.
+   *
+   * @param effect the effect parameters
+   * @param onEnd the scenario's end callback, told when a stressor thread fails
    */
-  private static final long JOIN_TIMEOUT_MILLIS = 200L;
+  VirtualThreadCarrierPinningStressor(
+      final ChaosEffect.VirtualThreadCarrierPinningEffect effect, final Consumer<String> onEnd) {
+    this(effect, Runtime.version().feature() < MONITORS_UNPIN_FROM_FEATURE, onEnd);
+  }
 
   /**
-   * Signals all carrier-pinning threads to stop, interrupts them, and waits up to {@value
-   * #JOIN_TIMEOUT_MILLIS} ms per thread for termination. The class docstring promises the monitor
-   * is released on close(); without the join, close() returned while the synchronized (pinMonitor)
-   * frames were still unwinding, so a deactivate-then-recheck still observed pinned carriers.
+   * Creates the stressor with an explicit holding strategy.
+   *
+   * @param effect the effect parameters
+   * @param pinWithMonitor {@code true} to hold carriers by blocking inside {@code synchronized}
+   *     (JDK 21–23), {@code false} to hold them with a spin-wait (JDK 24+)
    */
+  VirtualThreadCarrierPinningStressor(
+      final ChaosEffect.VirtualThreadCarrierPinningEffect effect, final boolean pinWithMonitor) {
+    this(effect, pinWithMonitor, NO_END);
+  }
+
+  private VirtualThreadCarrierPinningStressor(
+      final ChaosEffect.VirtualThreadCarrierPinningEffect effect,
+      final boolean pinWithMonitor,
+      final Consumer<String> onEnd) {
+    final long pinNanos = ManagedStressor.nanos(effect.pinDuration());
+    final int count = effect.pinnedThreadCount();
+    final List<Thread> threads = new ArrayList<>(count);
+    for (int i = 0; i < count; i++) {
+      final String name = "chaos-carrier-pin-" + i;
+      final Runnable body =
+          pinWithMonitor ? () -> pinWithMonitor(pinNanos) : () -> occupyWithSpin(pinNanos);
+      threads.add(
+          AgentThreads.virtual(
+              name,
+              () -> {
+                // The body returns on the stop flag or on an interrupt.
+                body.run();
+                LOGGER.fine(() -> "[chaos-agent] chaos carrier-pin thread terminated: " + name);
+                ManagedStressor.interrupted(onEnd, "VirtualThreadCarrierPinning", stopped.get());
+              },
+              ManagedStressor.failure(onEnd, "VirtualThreadCarrierPinning")));
+    }
+    this.pinningThreads = AgentThreads.startAll(threads);
+  }
+
+  /**
+   * Returns {@code effect} with its thread count reduced so at least one carrier of the
+   * virtual-thread scheduler stays free, or {@code null} when the scheduler has a single carrier.
+   * {@link CompatibilityValidator} refuses that case at activation (L17); the {@code null} remains
+   * for a parallelism setting changed after the validation.
+   *
+   * <p>Holding every carrier stops every virtual thread in the JVM until the scenario ends: an
+   * application serving requests on virtual threads stops responding, which is a deadlock rather
+   * than pinning. Whether a plan does that depends on the machine — {@code pinnedThreadCount = 4}
+   * leaves carriers free on a 16-core workstation and holds all of them on a 4-core CI runner — so
+   * it requires {@code allowDestructiveEffects}.
+   *
+   * @param effect the requested effect
+   * @return the effect to run, or {@code null} to run nothing
+   */
+  static ChaosEffect.@Nullable VirtualThreadCarrierPinningEffect leavingOneCarrier(
+      final ChaosEffect.VirtualThreadCarrierPinningEffect effect) {
+    final int carriers = schedulerParallelism();
+    final int allowed = carriers - 1;
+    if (effect.pinnedThreadCount() <= allowed) {
+      return effect;
+    }
+    if (allowed < 1) {
+      LOGGER.warning(
+          () ->
+              "[chaos-agent] virtual-thread carrier pinning skipped: the scheduler has a single"
+                  + " carrier, and holding it needs allowDestructiveEffects");
+      return null;
+    }
+    LOGGER.warning(
+        () ->
+            "[chaos-agent] virtual-thread carrier pinning of "
+                + effect.pinnedThreadCount()
+                + " carriers capped at "
+                + allowed
+                + " of "
+                + carriers
+                + "; holding every carrier needs allowDestructiveEffects");
+    return new ChaosEffect.VirtualThreadCarrierPinningEffect(allowed, effect.pinDuration());
+  }
+
+  /** The default virtual-thread scheduler's parallelism (its number of carriers). */
+  static int schedulerParallelism() {
+    final String configured = System.getProperty("jdk.virtualThreadScheduler.parallelism");
+    if (configured != null) {
+      try {
+        return Integer.parseInt(configured.trim());
+      } catch (final NumberFormatException ignored) {
+        // the JDK rejects such a value too; fall back to its default
+      }
+    }
+    return Runtime.getRuntime().availableProcessors();
+  }
+
+  /**
+   * Holds the carrier by sleeping inside a private monitor. Each thread uses its own monitor so the
+   * threads do not serialise on one lock. The monitor is re-entered immediately after each cycle,
+   * without unmounting, so the carrier is never handed back while active.
+   */
+  private void pinWithMonitor(final long pinNanos) {
+    final Object monitor = new Object();
+    while (!stopped.get()) {
+      synchronized (monitor) {
+        final long start = System.nanoTime();
+        while (!stopped.get() && System.nanoTime() - start < pinNanos) {
+          try {
+            Thread.sleep(1L);
+          } catch (final InterruptedException interrupted) {
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Holds the carrier by never blocking; checks the stop flag and the interrupt between spin
+   * iterations. The interrupt alone ends it: the rollback of a failed start interrupts the threads
+   * it started without setting the stop flag.
+   */
+  void occupyWithSpin(final long pinNanos) {
+    final Thread self = Thread.currentThread();
+    while (!stopped.get() && !self.isInterrupted()) {
+      final long start = System.nanoTime();
+      while (!stopped.get() && !self.isInterrupted() && System.nanoTime() - start < pinNanos) {
+        Thread.onSpinWait();
+      }
+    }
+  }
+
   @Override
   public void close() {
     stopped.set(true);
-    for (final Thread thread : pinningThreads) {
-      thread.interrupt();
-    }
-    // Join all threads even when interrupted mid-loop. Returning early on the first
-    // InterruptedException leaves un-joined threads running — violating close()'s contract
-    // that carrier-pinning has stopped before the method returns. Collect the interrupt and
-    // restore it after the full join sweep.
-    boolean selfInterrupted = false;
-    for (final Thread thread : pinningThreads) {
-      try {
-        thread.join(JOIN_TIMEOUT_MILLIS);
-      } catch (final InterruptedException interrupted) {
-        selfInterrupted = true;
-      }
-    }
-    if (selfInterrupted) {
-      Thread.currentThread().interrupt();
-    }
+    // Join all threads even when interrupted mid-loop, then restore the interrupt: close() must
+    // not return while carriers are still held.
+    AgentThreads.stopAll(pinningThreads, JOIN_TIMEOUT_MILLIS);
   }
 
-  /**
-   * Returns the number of carrier-pinning threads that are still alive.
-   *
-   * @return count of live pinning threads; {@code 0} after {@link #close()} completes
-   */
   long aliveCount() {
     return pinningThreads.stream().filter(Thread::isAlive).count();
   }

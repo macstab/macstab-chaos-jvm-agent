@@ -1,15 +1,24 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
+import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.OperationType;
+import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.net.URI;
 import java.net.URL;
+import java.nio.ByteBuffer;
+import java.time.Duration;
+import java.util.Set;
 import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -68,17 +77,12 @@ class BootstrapDispatcherTest {
     }
 
     @Test
-    @DisplayName("decorateShutdownHook returns original hook unchanged")
-    void decorateShutdownHookReturnsFallback() throws Throwable {
-      final Thread hook = new Thread(() -> {});
-      assertThat(BootstrapDispatcher.decorateShutdownHook(hook)).isSameAs(hook);
-    }
-
-    @Test
-    @DisplayName("resolveShutdownHook returns original thread unchanged")
-    void resolveShutdownHookReturnsFallback() {
-      final Thread original = new Thread(() -> {});
-      assertThat(BootstrapDispatcher.resolveShutdownHook(original)).isSameAs(original);
+    @DisplayName("decorateShutdownHook without a delegate neither starts nor changes the hook")
+    void decorateShutdownHookWithoutDelegate() throws Throwable {
+      final Thread hook = new Thread(() -> {}, "hook");
+      BootstrapDispatcher.decorateShutdownHook(hook);
+      assertThat(hook.getState()).isEqualTo(Thread.State.NEW);
+      assertThat(hook.getName()).isEqualTo("hook");
     }
 
     @Test
@@ -96,29 +100,18 @@ class BootstrapDispatcherTest {
     }
 
     @Test
-    @DisplayName("adjustScheduleDelay returns original delay unchanged")
-    void adjustScheduleDelayReturnsFallback() throws Throwable {
-      assertThat(
-              BootstrapDispatcher.adjustScheduleDelay(
-                  "SCHEDULE_SUBMIT", executor, task, 500L, false))
-          .isEqualTo(500L);
-    }
-
-    @Test
-    @DisplayName("void dispatch methods complete without throwing")
-    void voidDispatchMethodsCompleteWithoutThrowing() {
+    @DisplayName("void dispatch methods return at once: nothing started, no depth left raised")
+    void voidDispatchMethodsCompleteWithoutThrowing() throws Throwable {
       final Thread thread = new Thread(() -> {});
-      assertThatCode(() -> BootstrapDispatcher.beforeThreadStart(thread))
-          .doesNotThrowAnyException();
-      assertThatCode(() -> BootstrapDispatcher.beforeWorkerRun(executor, thread, () -> {}))
-          .doesNotThrowAnyException();
-      assertThatCode(() -> BootstrapDispatcher.beforeQueueOperation("QUEUE_PUT", new Object()))
-          .doesNotThrowAnyException();
-      assertThatCode(
-              () -> BootstrapDispatcher.beforeExecutorShutdown("EXECUTOR_SHUTDOWN", executor, 0L))
-          .doesNotThrowAnyException();
-      assertThatCode(() -> BootstrapDispatcher.beforeClassLoad(null, "com.example.Foo"))
-          .doesNotThrowAnyException();
+      BootstrapDispatcher.beforeThreadStart(thread);
+      BootstrapDispatcher.beforeWorkerRun(executor, thread, () -> {});
+      BootstrapDispatcher.beforeQueueOperation("QUEUE_PUT", new Object());
+      BootstrapDispatcher.beforeExecutorShutdown("EXECUTOR_SHUTDOWN", executor, 0L);
+      BootstrapDispatcher.beforeClassLoad(null, "com.example.Foo");
+
+      assertThat(thread.getState()).isEqualTo(Thread.State.NEW);
+      assertThat(BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_QUEUE)).isFalse();
+      assertThat(BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_CLASS_LOAD)).isFalse();
     }
 
     @Test
@@ -425,11 +418,336 @@ class BootstrapDispatcherTest {
     }
   }
 
+  @Nested
+  @DisplayName("a delegate's answer")
+  class DelegateAnswer {
+
+    @Test
+    @DisplayName("a delegate's true reaches the advice of every yes/no hook")
+    void trueReachesTheAdvice() throws Throwable {
+      final MethodHandle[] handles = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
+      for (final int slot :
+          new int[] {
+            BootstrapDispatcher.BEFORE_GC_REQUEST,
+            BootstrapDispatcher.BEFORE_ASYNC_CANCEL,
+            BootstrapDispatcher.BEFORE_THREAD_LOCAL_GET,
+            BootstrapDispatcher.BEFORE_THREAD_LOCAL_SET
+          }) {
+        handles[slot] = answering(slot, true);
+      }
+      BootstrapDispatcher.install(new Object(), handles);
+
+      assertThat(BootstrapDispatcher.beforeGcRequest()).isTrue();
+      assertThat(BootstrapDispatcher.beforeAsyncCancel(new Object(), true)).isTrue();
+      assertThat(BootstrapDispatcher.beforeThreadLocalGet(new ThreadLocal<>())).isTrue();
+      assertThat(BootstrapDispatcher.beforeThreadLocalSet(new ThreadLocal<>(), "v")).isTrue();
+    }
+
+    @Test
+    @DisplayName("the session header goes to an internal host only")
+    void sessionHeaderForInternalHostsOnly() throws Exception {
+      final MethodHandle[] handles = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
+      handles[BootstrapDispatcher.CURRENT_SESSION_ID] =
+          answering(BootstrapDispatcher.CURRENT_SESSION_ID, "session-1");
+      BootstrapDispatcher.install(new Object(), handles);
+
+      assertThat(BootstrapDispatcher.sessionHeaderFor("orders")).isEqualTo("session-1");
+      assertThat(BootstrapDispatcher.sessionHeaderFor("api.stripe.com")).isNull();
+    }
+
+    @Test
+    @DisplayName("a dropped datagram is reported sent, with or without its buffer")
+    void droppedDatagram() throws Throwable {
+      final MethodHandle[] handles = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
+      handles[BootstrapDispatcher.BEFORE_DATAGRAM] =
+          answering(BootstrapDispatcher.BEFORE_DATAGRAM, Integer.MIN_VALUE);
+      BootstrapDispatcher.install(new Object(), handles);
+
+      assertThat(BootstrapDispatcher.beforeDatagramSend(executor, null, null, true)).isEqualTo(1);
+      assertThat(BootstrapDispatcher.dropDatagramPacket(executor, null))
+          .as("no packet: left to the JDK's own NullPointerException")
+          .isFalse();
+      assertThat(
+              BootstrapDispatcher.dropDatagramPacket(
+                  executor, new java.net.DatagramPacket(new byte[4], 4)))
+          .as("a packet without an address, sent to the connected peer")
+          .isTrue();
+      assertThat(BootstrapDispatcher.corruptDatagramPacket(executor, null)).isTrue();
+    }
+
+    @Test
+    @DisplayName("an idle datagram send allocates nothing: the idle check runs before the address")
+    void idleDatagramSendDoesNotAllocate() throws Throwable {
+      final MethodHandle[] handles = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
+      handles[BootstrapDispatcher.IDLE] = answering(BootstrapDispatcher.IDLE, true);
+      handles[BootstrapDispatcher.BEFORE_DATAGRAM] =
+          answering(BootstrapDispatcher.BEFORE_DATAGRAM, 4);
+      BootstrapDispatcher.install(new Object(), handles);
+      final java.net.DatagramPacket packet =
+          new java.net.DatagramPacket(
+              new byte[4], 4, new java.net.InetSocketAddress("127.0.0.1", 9));
+      final int calls = 10_000;
+      final com.sun.management.ThreadMXBean threads =
+          (com.sun.management.ThreadMXBean)
+              java.lang.management.ManagementFactory.getThreadMXBean();
+      final long threadId = Thread.currentThread().threadId();
+      // The first round warms up the method-handle adaptation, which allocates once.
+      for (int i = 0; i < calls; i++) {
+        BootstrapDispatcher.dropDatagramPacket(executor, packet);
+      }
+
+      int dropped = 0;
+      final long before = threads.getThreadAllocatedBytes(threadId);
+      for (int i = 0; i < calls; i++) {
+        if (BootstrapDispatcher.dropDatagramPacket(executor, packet)) {
+          dropped++;
+        }
+      }
+      final long allocated = threads.getThreadAllocatedBytes(threadId) - before;
+
+      assertThat(dropped).isZero();
+      // The packet's InetSocketAddress costs 40 bytes per call, i.e. 400 KB over 10,000 calls.
+      assertThat(allocated).as("bytes allocated by idle datagram sends").isLessThan(calls);
+    }
+
+    @Test
+    @DisplayName("an idle reverse lookup allocates nothing: the idle check runs before the address")
+    void idleReverseLookupDoesNotAllocate() throws Throwable {
+      final MethodHandle[] handles = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
+      handles[BootstrapDispatcher.IDLE] = answering(BootstrapDispatcher.IDLE, true);
+      handles[BootstrapDispatcher.BEFORE_DNS_REVERSE] =
+          java.lang.invoke.MethodHandles.empty(
+              JdkInstrumentationInstaller.buildMethodHandles()[
+                  BootstrapDispatcher.BEFORE_DNS_REVERSE]
+                  .type()
+                  .changeParameterType(0, Object.class));
+      BootstrapDispatcher.install(new Object(), handles);
+      final java.net.InetAddress address =
+          java.net.InetAddress.getByAddress(new byte[] {10, 0, 0, 1});
+      final int calls = 10_000;
+      final com.sun.management.ThreadMXBean threads =
+          (com.sun.management.ThreadMXBean)
+              java.lang.management.ManagementFactory.getThreadMXBean();
+      final long threadId = Thread.currentThread().threadId();
+      // The first round warms up the method-handle adaptation, which allocates once.
+      for (int i = 0; i < calls; i++) {
+        BootstrapDispatcher.reverseLookupFails(address);
+      }
+
+      int failed = 0;
+      final long before = threads.getThreadAllocatedBytes(threadId);
+      for (int i = 0; i < calls; i++) {
+        if (BootstrapDispatcher.reverseLookupFails(address)) {
+          failed++;
+        }
+      }
+      final long allocated = threads.getThreadAllocatedBytes(threadId) - before;
+
+      assertThat(failed).isZero();
+      // getHostAddress() builds a String of at least 40 bytes per call.
+      assertThat(allocated).as("bytes allocated by idle reverse lookups").isLessThan(calls);
+    }
+
+    /** A handle of the delegate's shape for {@code slot} that returns {@code answer}. */
+    private MethodHandle answering(final int slot, final Object answer) throws Exception {
+      final MethodType type =
+          JdkInstrumentationInstaller.buildMethodHandles()[slot]
+              .type()
+              .changeParameterType(0, Object.class);
+      return MethodHandles.dropArguments(
+          MethodHandles.constant(type.returnType(), answer), 0, type.parameterList());
+    }
+  }
+
+  @Nested
+  @DisplayName("scopes and internal calls")
+  class Scopes {
+
+    @Test
+    @DisplayName("leaving a scope that was not entered leaves it at its outermost level")
+    void unbalancedExitScope() {
+      assertThat(BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_FILE_CLOSE)).isTrue();
+      assertThat(BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_FILE_CLOSE)).isTrue();
+      assertThat(BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_FILE_CLOSE)).isTrue();
+    }
+
+    @Test
+    @DisplayName("inScope reports an entered scope without entering it")
+    void inScopePeeks() {
+      assertThat(BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_REDIS_SETUP)).isFalse();
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_REDIS_SETUP);
+      try {
+        assertThat(BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_REDIS_SETUP)).isTrue();
+        assertThat(BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_REDIS_SETUP)).isTrue();
+      } finally {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_REDIS_SETUP);
+      }
+      assertThat(BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_REDIS_SETUP)).isFalse();
+    }
+
+    @Test
+    @DisplayName("ending an internal call that was not begun keeps dispatching to the bridge")
+    void unbalancedEndInternalCall() throws Throwable {
+      final AtomicInteger calls = new AtomicInteger();
+      installTickBridge(
+          (e, t, p) -> {
+            calls.incrementAndGet();
+            return false;
+          });
+      BootstrapDispatcher.endInternalCall();
+      assertThat(BootstrapDispatcher.beforeScheduledTick(executor, task, false)).isFalse();
+      assertThat(calls).hasValue(1);
+    }
+  }
+
+  @Nested
+  @DisplayName("helpers the advice calls")
+  class AdviceHelpers {
+
+    @Test
+    @DisplayName("the header filter of a copied request keeps every header")
+    void allHeadersKeepsEveryHeader() {
+      final java.net.http.HttpRequest original =
+          java.net.http.HttpRequest.newBuilder(URI.create("http://orders/"))
+              .header("Authorization", "Bearer t")
+              .header("X-Trace", "1")
+              .build();
+      final java.net.http.HttpRequest copy =
+          java.net.http.HttpRequest.newBuilder(original, BootstrapDispatcher.ALL_HEADERS).build();
+      assertThat(copy.headers().map()).isEqualTo(original.headers().map());
+    }
+
+    @Test
+    @DisplayName("archives are .jar, .zip and .jmod files")
+    void archives() {
+      assertThat(BootstrapDispatcher.isArchive("/lib/app.jar")).isTrue();
+      assertThat(BootstrapDispatcher.isArchive("/lib/data.zip")).isTrue();
+      assertThat(BootstrapDispatcher.isArchive("/jmods/java.base.jmod")).isTrue();
+      assertThat(BootstrapDispatcher.isArchive("/data/orders.csv")).isFalse();
+      assertThat(BootstrapDispatcher.isArchive(null)).isFalse();
+    }
+
+    @Test
+    @DisplayName("a corrupted single-byte read flips one bit, end of stream stays")
+    void corruptByte() {
+      assertThat(BootstrapDispatcher.corruptByte(-1)).isEqualTo(-1);
+      assertThat(Integer.bitCount(BootstrapDispatcher.corruptByte(0))).isEqualTo(1);
+      BootstrapDispatcher.beginInternalCall();
+      try {
+        assertThat(Integer.bitCount(BootstrapDispatcher.corruptByte(0)))
+            .as("seeded without the bridge inside agent work")
+            .isEqualTo(1);
+      } finally {
+        BootstrapDispatcher.endInternalCall();
+      }
+      BootstrapDispatcher.install(new Object(), null);
+      assertThat(Integer.bitCount(BootstrapDispatcher.corruptByte(0)))
+          .as("seeded without the bridge before its handles are published")
+          .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("a corrupted array read flips one bit of the bytes read, nothing without bytes")
+    void corruptBytes() {
+      final byte[] buffer = new byte[8];
+      BootstrapDispatcher.corruptBytes(null, 0, 4);
+      BootstrapDispatcher.corruptBytes(buffer, 0, 0);
+      assertThat(bitsSet(ByteBuffer.wrap(buffer))).isZero();
+      BootstrapDispatcher.corruptBytes(buffer, 2, 3);
+      assertThat(bitsSet(ByteBuffer.wrap(buffer))).isEqualTo(1);
+      assertThat(buffer[0]).isZero();
+      assertThat(buffer[1]).isZero();
+      assertThat(buffer[5]).isZero();
+    }
+
+    @Test
+    @DisplayName("a corrupted channel read flips one bit of the bytes before the position")
+    void corruptBuffer() {
+      final ByteBuffer buffer = ByteBuffer.allocate(8);
+      buffer.position(6);
+      BootstrapDispatcher.corruptBuffer(buffer, 3);
+      assertThat(bitsSet(buffer)).isEqualTo(1);
+      for (final int untouched : new int[] {0, 1, 2, 6, 7}) {
+        assertThat(buffer.get(untouched)).as("byte %d", untouched).isZero();
+      }
+    }
+
+    @Test
+    @DisplayName("a channel read without bytes, read-only or shorter than claimed is not corrupted")
+    void corruptBufferRefusals() {
+      final ByteBuffer buffer = ByteBuffer.allocate(8);
+      buffer.position(2);
+      BootstrapDispatcher.corruptBuffer(null, 1);
+      BootstrapDispatcher.corruptBuffer(buffer, 0);
+      BootstrapDispatcher.corruptBuffer(buffer, 3);
+      final ByteBuffer readOnly = ByteBuffer.allocate(8).asReadOnlyBuffer();
+      readOnly.position(4);
+      BootstrapDispatcher.corruptBuffer(readOnly, 4);
+      assertThat(bitsSet(buffer)).isZero();
+      assertThat(bitsSet(readOnly)).isZero();
+    }
+
+    @Test
+    @DisplayName("calls without a buffer or packet pass through")
+    void missingBuffers() throws Throwable {
+      assertThat(BootstrapDispatcher.beforeSocketChannelWrite(executor, (ByteBuffer) null))
+          .isNull();
+      assertThat(BootstrapDispatcher.beforeDatagramSend(executor, null, null, true)).isZero();
+      assertThat(BootstrapDispatcher.dropDatagramPacket(executor, null)).isFalse();
+      assertThat(BootstrapDispatcher.corruptDatagramPacket(executor, null)).isFalse();
+    }
+
+    private int bitsSet(final ByteBuffer buffer) {
+      int bits = 0;
+      for (int i = 0; i < buffer.capacity(); i++) {
+        bits += Integer.bitCount(buffer.get(i) & 0xFF);
+      }
+      return bits;
+    }
+  }
+
   // — bridge test infrastructure —
 
   @FunctionalInterface
   interface TickBehavior {
     boolean tick(Object executor, Object task, boolean periodic) throws Throwable;
+  }
+
+  @Nested
+  @DisplayName("dispatch allocation")
+  class DispatchAllocation {
+
+    private static final int CALLS = 10_000;
+
+    @Test
+    @DisplayName("a dispatch that changes nothing allocates no per-call objects")
+    void dispatchDoesNotAllocatePerCall() throws Throwable {
+      final Runnable task = () -> {};
+      BootstrapDispatcher.install(null, null);
+      allocatedBytesOver(task);
+      final long notInstalled = allocatedBytesOver(task);
+      installDecorateBridge((operation, executor, runnable) -> runnable);
+      // The first round warms up the method-handle adaptation, which allocates once.
+      allocatedBytesOver(task);
+      final long installed = allocatedBytesOver(task);
+
+      // A capturing lambda per call costs at least 24 bytes, i.e. 240 KB over 10,000 calls; the
+      // bound leaves room for the measurement's own noise but not for any per-call object.
+      assertThat(notInstalled).as("bytes allocated with no delegate").isLessThan(CALLS);
+      assertThat(installed).as("bytes allocated with a pass-through delegate").isLessThan(CALLS);
+    }
+
+    private long allocatedBytesOver(final Runnable task) throws Throwable {
+      final com.sun.management.ThreadMXBean threads =
+          (com.sun.management.ThreadMXBean)
+              java.lang.management.ManagementFactory.getThreadMXBean();
+      final long threadId = Thread.currentThread().threadId();
+      final long before = threads.getThreadAllocatedBytes(threadId);
+      for (int i = 0; i < CALLS; i++) {
+        BootstrapDispatcher.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, task);
+      }
+      return threads.getThreadAllocatedBytes(threadId) - before;
+    }
   }
 
   @FunctionalInterface
@@ -498,10 +816,16 @@ class BootstrapDispatcherTest {
   private static void installThreadStartBridge(final ThreadStartBehavior behavior)
       throws Exception {
     final MethodHandle[] handles = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
+    // The dispatcher passes (thread, poolWorker); the behaviour only looks at the thread.
     handles[BootstrapDispatcher.BEFORE_THREAD_START] =
-        MethodHandles.lookup()
-            .findVirtual(
-                ThreadStartBehavior.class, "act", MethodType.methodType(void.class, Thread.class));
+        MethodHandles.dropArguments(
+            MethodHandles.lookup()
+                .findVirtual(
+                    ThreadStartBehavior.class,
+                    "act",
+                    MethodType.methodType(void.class, Thread.class)),
+            2,
+            boolean.class);
     BootstrapDispatcher.install(behavior, handles);
   }
 
@@ -561,5 +885,76 @@ class BootstrapDispatcherTest {
                 "act",
                 MethodType.methodType(void.class, ClassLoader.class, String.class));
     BootstrapDispatcher.install(behavior, handles);
+  }
+
+  /**
+   * The JDK's own use of a general primitive (L3a): inside {@link
+   * BootstrapDispatcher#SCOPE_JDK_INTERNAL} the timer submission, the direct-buffer allocation and
+   * the ZIP deflate are not evaluated, while an executor submission still is.
+   */
+  @Nested
+  @DisplayName("inside SCOPE_JDK_INTERNAL")
+  class InsideJdkInternalScope {
+
+    @Test
+    @DisplayName(
+        "SCHEDULE_SUBMIT, DIRECT_BUFFER_ALLOCATE and ZIP_DEFLATE are skipped, EXECUTOR_SUBMIT is not")
+    void onlyTheListedOperationsAreSkipped() throws Throwable {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      try (AutoCloseable connected = JdkInstrumentationInstaller.connectDispatcher(runtime)) {
+        final ChaosActivationHandle schedule =
+            delay(
+                runtime,
+                "schedule",
+                ChaosSelector.scheduling(Set.of(OperationType.SCHEDULE_SUBMIT)));
+        final ChaosActivationHandle submit =
+            delay(runtime, "submit", ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)));
+        final ChaosActivationHandle direct =
+            delay(
+                runtime,
+                "direct",
+                ChaosSelector.jvmRuntime(Set.of(OperationType.DIRECT_BUFFER_ALLOCATE)));
+        final ChaosActivationHandle deflate =
+            delay(runtime, "deflate", ChaosSelector.jvmRuntime(Set.of(OperationType.ZIP_DEFLATE)));
+
+        BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDK_INTERNAL);
+        try {
+          callAll();
+        } finally {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDK_INTERNAL);
+        }
+        assertThat(schedule.matchedCount()).as("SCHEDULE_SUBMIT inside").isZero();
+        assertThat(submit.matchedCount()).as("EXECUTOR_SUBMIT inside").isEqualTo(2L);
+        assertThat(direct.matchedCount()).as("DIRECT_BUFFER_ALLOCATE inside").isZero();
+        assertThat(deflate.matchedCount()).as("ZIP_DEFLATE inside").isZero();
+
+        callAll();
+        assertThat(schedule.matchedCount()).as("SCHEDULE_SUBMIT outside").isEqualTo(2L);
+        assertThat(direct.matchedCount()).as("DIRECT_BUFFER_ALLOCATE outside").isEqualTo(1L);
+        assertThat(deflate.matchedCount()).as("ZIP_DEFLATE outside").isEqualTo(1L);
+      } finally {
+        runtime.close();
+      }
+    }
+
+    private void callAll() throws Throwable {
+      BootstrapDispatcher.decorateExecutorRunnable("SCHEDULE_SUBMIT", executor, () -> {});
+      BootstrapDispatcher.decorateExecutorCallable("SCHEDULE_SUBMIT", executor, () -> "x");
+      BootstrapDispatcher.decorateExecutorRunnable("EXECUTOR_SUBMIT", executor, () -> {});
+      BootstrapDispatcher.decorateExecutorCallable("EXECUTOR_SUBMIT", executor, () -> "x");
+      BootstrapDispatcher.beforeDirectBufferAllocate(16);
+      BootstrapDispatcher.beforeZipDeflate();
+    }
+
+    private ChaosActivationHandle delay(
+        final ChaosRuntime runtime, final String id, final ChaosSelector selector) {
+      return runtime.activate(
+          ChaosScenario.builder(id)
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(selector)
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .activationPolicy(ActivationPolicy.always())
+              .build());
+    }
   }
 }

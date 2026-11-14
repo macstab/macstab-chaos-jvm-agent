@@ -10,7 +10,6 @@ import java.util.logging.Logger;
  * invocation.
  */
 public final class ScheduledRunnableWrapper implements Runnable {
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
 
   // Weak reference to break the retention cycle between ScheduledThreadPoolExecutor and this
   // wrapper. The pool's internal queue holds the wrapper for the full periodic schedule; a
@@ -42,17 +41,13 @@ public final class ScheduledRunnableWrapper implements Runnable {
   public void run() {
     // Split the try scope in two: the chaos hook must not mask application exceptions.
     //
-    // Before: a single try enclosed both beforeScheduledTick() and delegate.run(). When the
-    // task was periodic, the catch swallowed EVERY throwable — including genuine
-    // RuntimeException/Error from the application's own delegate.run(). The scheduler's
-    // self-cancellation contract (any exception from a periodic task permanently cancels all
-    // future executions) was silently defeated: broken tasks kept firing forever, operator
-    // dashboards missed the failure, and the health-check / metric worker that was supposed
-    // to page someone kept "succeeding" on schedule.
-    //
-    // After: beforeScheduledTick's exceptions (chaos-injected) are swallowed for periodic
-    // tasks to preserve cadence — the original intent. But delegate.run()'s exceptions are
-    // always propagated, restoring the JDK contract for real application failures.
+    // beforeScheduledTick's exceptions (chaos-injected) are swallowed for periodic tasks to
+    // preserve cadence. delegate.run()'s exceptions are always propagated, keeping the
+    // scheduler's self-cancellation contract (any exception from a periodic task permanently
+    // cancels all future executions). A single try around both would swallow genuine
+    // RuntimeException/Error from the application too: broken tasks would keep firing forever
+    // and a health-check / metric worker that is supposed to page someone would keep
+    // "succeeding" on schedule.
     final Object executor = executorRef.get();
     final boolean proceed;
     try {
@@ -67,13 +62,25 @@ public final class ScheduledRunnableWrapper implements Runnable {
         if (chaosFailure instanceof InterruptedException) {
           Thread.currentThread().interrupt();
         }
-        LOGGER.log(
-            Level.WARNING,
-            "chaos: suppressing chaos-injected exception from beforeScheduledTick to preserve"
-                + " periodicity (task="
-                + delegate.getClass().getName()
-                + ")",
-            chaosFailure);
+        // The agent's own logging: a handler's file write is no FILE_IO of the application.
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          // A bridge class (bootstrap class loader): JUL, not the agent's AgentLog. Looked up here,
+          // not
+          // in a static field, so loading the class does not initialise the LogManager.
+          Logger.getLogger("com.macstab.chaos.jvm")
+              .log(
+                  Level.WARNING,
+                  chaosFailure,
+                  () ->
+                      "[chaos-agent] suppressing chaos-injected exception from"
+                          + " beforeScheduledTick to"
+                          + " preserve periodicity (task="
+                          + delegate.getClass().getName()
+                          + ")");
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
         return;
       }
       // Restore the interrupt flag before sneaky-rethrow: otherwise an InterruptedException

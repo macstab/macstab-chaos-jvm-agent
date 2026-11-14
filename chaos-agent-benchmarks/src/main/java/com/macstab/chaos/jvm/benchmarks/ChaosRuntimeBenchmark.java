@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.benchmarks;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
@@ -42,13 +43,19 @@ public class ChaosRuntimeBenchmark {
   public ChaosRuntimeBenchmark() {}
 
   private static final Executor DUMMY_EXECUTOR = Runnable::run;
+
+  @SuppressWarnings("UnnecessaryLambda") // one shared task, so the benchmark measures dispatch
   private static final Runnable DUMMY_TASK = () -> {};
+
   private static final Duration ZERO_DELAY = Duration.ofMillis(0);
-  private static final ActivationPolicy ONE_SHOT_POLICY =
-      new ActivationPolicy(
-          ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false);
+  private static final ActivationPolicy ONE_SHOT_POLICY = ActivationPolicy.count(1);
   private static final String BENCHMARK_SQL = "SELECT 1";
   private static final int NON_MATCHING_SCENARIO_COUNT = 9;
+  private static final String NO_MATCH_SQL_PATTERN = "SELECT\\s+\\*\\s+FROM\\s+no_match_table";
+
+  /** The statement every benchmark runs, a field so the JIT cannot fold it into a constant. */
+  @SuppressWarnings("FieldCanBeFinal") // non-final on purpose: no constant folding
+  private String sql = BENCHMARK_SQL;
 
   /** Baseline state used to measure raw executor throughput without the chaos agent installed. */
   @State(Scope.Benchmark)
@@ -101,7 +108,7 @@ public class ChaosRuntimeBenchmark {
               .selector(
                   new ChaosSelector.JdbcSelector(
                       Set.of(OperationType.JDBC_STATEMENT_EXECUTE),
-                      NamePattern.regex("SELECT\\s+\\*\\s+FROM\\s+no_match_table")))
+                      NamePattern.regex(NO_MATCH_SQL_PATTERN)))
               .effect(ChaosEffect.delay(Duration.ofMillis(1)))
               .activationPolicy(ActivationPolicy.always())
               .build());
@@ -124,9 +131,13 @@ public class ChaosRuntimeBenchmark {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
-    /** Registers the matching no-effect scenario before the trial. */
+    /**
+     * Registers the matching no-effect scenario and spends its one application before the trial.
+     *
+     * @throws Throwable if the dispatcher surfaces an unexpected failure
+     */
     @Setup(Level.Trial)
-    public void setup() {
+    public void setup() throws Throwable {
       runtime = new ChaosRuntime();
       runtime.activate(
           ChaosScenario.builder("bench-match-no-effect")
@@ -138,6 +149,7 @@ public class ChaosRuntimeBenchmark {
               .activationPolicy(ONE_SHOT_POLICY)
               .build());
       dispatcher = runtime.dispatcher();
+      exhaust(runtime, dispatcher, "bench-match-no-effect");
     }
 
     /** Closes the runtime after the measurement trial. */
@@ -159,20 +171,32 @@ public class ChaosRuntimeBenchmark {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
-    /** Registers the session-scoped scenario before the trial. */
+    /**
+     * Registers the session-scoped scenario before the trial, from a thread of its own: opening a
+     * session binds the opening thread to it, and the benchmark thread must stay outside.
+     *
+     * @throws InterruptedException if the setup is interrupted
+     */
     @Setup(Level.Trial)
-    public void setup() {
+    public void setup() throws InterruptedException {
       runtime = new ChaosRuntime();
-      final var session = runtime.openSession("bench-session");
-      session.activate(
-          ChaosScenario.builder("bench-session-miss")
-              .scope(ChaosScenario.ScenarioScope.SESSION)
-              .selector(
-                  new ChaosSelector.JdbcSelector(
-                      Set.of(OperationType.JDBC_STATEMENT_EXECUTE), NamePattern.any()))
-              .effect(ChaosEffect.delay(ZERO_DELAY))
-              .activationPolicy(ActivationPolicy.always())
-              .build());
+      final Thread opener =
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    final var session = runtime.openSession("bench-session");
+                    session.activate(
+                        ChaosScenario.builder("bench-session-miss")
+                            .scope(ChaosScenario.ScenarioScope.SESSION)
+                            .selector(
+                                new ChaosSelector.JdbcSelector(
+                                    Set.of(OperationType.JDBC_STATEMENT_EXECUTE),
+                                    NamePattern.any()))
+                            .effect(ChaosEffect.delay(ZERO_DELAY))
+                            .activationPolicy(ActivationPolicy.always())
+                            .build());
+                  });
+      opener.join();
       dispatcher = runtime.dispatcher();
     }
 
@@ -184,8 +208,8 @@ public class ChaosRuntimeBenchmark {
   }
 
   /**
-   * State with nine non-matching scenarios plus one matching scenario to measure registry scan
-   * cost.
+   * State with nine scenarios on the same operation whose statement pattern does not match, plus
+   * one matching scenario spent in setup: every call evaluates ten scenarios of its operation.
    */
   @State(Scope.Benchmark)
   public static class TenScenariosState {
@@ -195,9 +219,13 @@ public class ChaosRuntimeBenchmark {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
-    /** Registers the mix of non-matching and matching scenarios before the trial. */
+    /**
+     * Registers the mix of non-matching and matching scenarios before the trial.
+     *
+     * @throws Throwable if the dispatcher surfaces an unexpected failure
+     */
     @Setup(Level.Trial)
-    public void setup() {
+    public void setup() throws Throwable {
       runtime = new ChaosRuntime();
       for (int i = 0; i < NON_MATCHING_SCENARIO_COUNT; i++) {
         runtime.activate(
@@ -205,7 +233,8 @@ public class ChaosRuntimeBenchmark {
                 .scope(ChaosScenario.ScenarioScope.JVM)
                 .selector(
                     new ChaosSelector.JdbcSelector(
-                        Set.of(OperationType.JDBC_CONNECTION_ACQUIRE), NamePattern.any()))
+                        Set.of(OperationType.JDBC_STATEMENT_EXECUTE),
+                        NamePattern.regex(NO_MATCH_SQL_PATTERN)))
                 .effect(ChaosEffect.delay(ZERO_DELAY))
                 .activationPolicy(ActivationPolicy.always())
                 .build());
@@ -220,12 +249,29 @@ public class ChaosRuntimeBenchmark {
               .activationPolicy(ONE_SHOT_POLICY)
               .build());
       dispatcher = runtime.dispatcher();
+      exhaust(runtime, dispatcher, "bench-match");
     }
 
     /** Closes the runtime after the measurement trial. */
     @TearDown(Level.Trial)
     public void tearDown() {
       runtime.close();
+    }
+  }
+
+  /**
+   * Spends the one application of a one-shot scenario, so the measurement loop sees it exhausted,
+   * and checks that it is: otherwise the loop would measure a live scenario.
+   */
+  private static void exhaust(
+      final ChaosRuntime runtime, final ChaosDispatcher dispatcher, final String id)
+      throws Throwable {
+    dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL);
+    final ChaosDiagnostics.ScenarioState state =
+        runtime.diagnostics().scenario(id).orElseThrow().state();
+    if (state != ChaosDiagnostics.ScenarioState.INACTIVE) {
+      throw new IllegalStateException(
+          "scenario " + id + " must be exhausted (INACTIVE) after setup but is " + state);
     }
   }
 
@@ -245,39 +291,33 @@ public class ChaosRuntimeBenchmark {
    * Measures dispatcher overhead when the runtime is installed but has no active scenarios.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void agentInstalled_zeroScenarios(ZeroScenariosState state, Blackhole bh)
-      throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
+  public void agentInstalled_zeroScenarios(ZeroScenariosState state) throws Throwable {
+    state.dispatcher.client().beforeJdbcStatementExecute(sql);
   }
 
   /**
    * Measures dispatcher overhead when exactly one non-matching scenario is active.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state, Blackhole bh)
-      throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
+  public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state) throws Throwable {
+    state.dispatcher.client().beforeJdbcStatementExecute(sql);
   }
 
   /**
    * Measures dispatcher overhead when exactly one matching scenario applies a no-op effect.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state, Blackhole bh)
-      throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
+  public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state) throws Throwable {
+    state.dispatcher.client().beforeJdbcStatementExecute(sql);
   }
 
   /**
@@ -285,23 +325,21 @@ public class ChaosRuntimeBenchmark {
    * session.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void sessionIdMiss(SessionMissState state, Blackhole bh) throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
+  public void sessionIdMiss(SessionMissState state) throws Throwable {
+    state.dispatcher.client().beforeJdbcStatementExecute(sql);
   }
 
   /**
    * Measures dispatcher overhead when ten scenarios are registered but only one matches.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void tenScenarios_oneMatch(TenScenariosState state, Blackhole bh) throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
+  public void tenScenarios_oneMatch(TenScenariosState state) throws Throwable {
+    state.dispatcher.client().beforeJdbcStatementExecute(sql);
   }
 }

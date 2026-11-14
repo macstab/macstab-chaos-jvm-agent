@@ -129,6 +129,17 @@ class ChaosAutoConfigurationTest {
     public void addEventListener(final ChaosEventListener listener) {}
 
     @Override
+    public boolean removeEventListener(final ChaosEventListener listener) {
+
+      return false;
+    }
+
+    @Override
     public void close() {}
+
+    @Override
+    public ChaosSession.ScopeBinding bindSession(final String sessionId) {
+      return () -> {};
+    }
   }
 }

@@ -6,10 +6,10 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.logging.Logger;
+import java.util.function.Consumer;
 
 /**
- * Creates high contention on a shared monitor by spawning threads that compete for a single {@link
+ * Creates high contention on a shared lock by spawning threads that compete for a single {@link
  * ReentrantLock}.
  *
  * <p>Each contending thread repeatedly acquires the lock, holds it for {@link
@@ -28,28 +28,43 @@ import java.util.logging.Logger;
  */
 final class MonitorContentionStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   private final List<Thread> contentionThreads;
   private final AtomicBoolean stopped = new AtomicBoolean(false);
 
   MonitorContentionStressor(final ChaosEffect.MonitorContentionEffect effect) {
+    this(effect, NO_END);
+  }
+
+  /**
+   * Creates and starts the contending threads, which end the scenario through {@code onEnd} if one
+   * fails.
+   *
+   * @param effect the effect parameters
+   * @param onEnd the scenario's end callback, told when a stressor thread fails
+   */
+  MonitorContentionStressor(
+      final ChaosEffect.MonitorContentionEffect effect, final Consumer<String> onEnd) {
     final ReentrantLock lock = new ReentrantLock(!effect.unfair()); // fair=true unless unfair
-    final long holdNanos = effect.lockHoldDuration().toNanos();
+    final long holdNanos = ManagedStressor.nanos(effect.lockHoldDuration());
     final int count = effect.contendingThreadCount();
     final CountDownLatch ready = new CountDownLatch(count);
     final List<Thread> threads = new ArrayList<>(count);
 
     for (int i = 0; i < count; i++) {
       final String name = "chaos-contention-" + i;
-      final Thread thread =
-          new Thread(
+      threads.add(
+          AgentThreads.platform(
+              name,
+              true,
               () -> {
                 ready.countDown();
                 try {
                   ready.await();
                 } catch (final InterruptedException e) {
                   Thread.currentThread().interrupt();
+                  ManagedStressor.interrupted(onEnd, "MonitorContention", stopped.get());
                   return;
                 }
                 while (!stopped.get()) {
@@ -59,21 +74,22 @@ final class MonitorContentionStressor implements ManagedStressor {
                   try {
                     lock.lockInterruptibly();
                   } catch (final InterruptedException e) {
-                    stopped.set(true);
+                    // This thread alone ends: the scenario ends through onEnd and stops the rest.
                     Thread.currentThread().interrupt();
+                    ManagedStressor.interrupted(onEnd, "MonitorContention", stopped.get());
                     return;
                   }
                   try {
-                    final long holdDeadline = System.nanoTime() + holdNanos;
-                    while (System.nanoTime() < holdDeadline && !stopped.get()) {
-                      // Thread.sleep(0, nanos) holds the lock (unlike wait()) and is not
-                      // instrumented by the chaos agent (LockSupport.park* is), preventing
-                      // a chaos delay scenario from recursively targeting this stressor.
+                    final long holdStart = System.nanoTime();
+                    while (System.nanoTime() - holdStart < holdNanos && !stopped.get()) {
+                      // Thread.sleep(0, nanos) holds the lock (unlike wait()). The stressor's
+                      // threads run with the dispatch depth raised (L3), so no THREAD_SLEEP,
+                      // THREAD_PARK or MONITOR_ENTER scenario applies to them.
                       try {
                         Thread.sleep(0, 10_000 /* 10 µs */);
                       } catch (final InterruptedException ie) {
-                        stopped.set(true);
                         Thread.currentThread().interrupt();
+                        ManagedStressor.interrupted(onEnd, "MonitorContention", stopped.get());
                         return;
                       }
                     }
@@ -81,14 +97,12 @@ final class MonitorContentionStressor implements ManagedStressor {
                     lock.unlock();
                   }
                 }
-                LOGGER.fine(() -> "chaos monitor-contention thread terminated: " + name);
+                LOGGER.fine(
+                    () -> "[chaos-agent] chaos monitor-contention thread terminated: " + name);
               },
-              name);
-      thread.setDaemon(true);
-      thread.start();
-      threads.add(thread);
+              ManagedStressor.failure(onEnd, "MonitorContention")));
     }
-    this.contentionThreads = List.copyOf(threads);
+    this.contentionThreads = AgentThreads.startAll(threads);
   }
 
   /**
@@ -101,24 +115,11 @@ final class MonitorContentionStressor implements ManagedStressor {
   @Override
   public void close() {
     stopped.set(true);
-    for (final Thread thread : contentionThreads) {
-      thread.interrupt();
-    }
     // Join after interrupt — without this, close() returns while contending threads are still
     // draining their 10 µs park loops, and test suites asserting "no contention threads alive"
     // immediately after deactivate observe flaky counts. Bounded join honours ManagedStressor's
     // "wait for termination" contract.
-    boolean selfInterrupted = false;
-    for (final Thread thread : contentionThreads) {
-      try {
-        thread.join(JOIN_TIMEOUT_MILLIS);
-      } catch (final InterruptedException interrupted) {
-        selfInterrupted = true;
-      }
-    }
-    if (selfInterrupted) {
-      Thread.currentThread().interrupt();
-    }
+    AgentThreads.stopAll(contentionThreads, JOIN_TIMEOUT_MILLIS);
   }
 
   /** Returns the number of contending threads that are still alive. */

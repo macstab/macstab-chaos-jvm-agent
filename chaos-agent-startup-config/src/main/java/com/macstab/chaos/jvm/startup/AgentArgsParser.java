@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.startup;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Parses the raw {@code -javaagent:} argument string into an {@link AgentArgs} value object.
@@ -28,7 +29,7 @@ public final class AgentArgsParser {
    * @return parsed arguments, never null
    * @throws IllegalArgumentException if a token is malformed or the input exceeds safety limits
    */
-  public static AgentArgs parse(final String agentArgs) {
+  public static AgentArgs parse(final @Nullable String agentArgs) {
     if (agentArgs == null || agentArgs.isBlank()) {
       return new AgentArgs(Map.of());
     }
@@ -45,14 +46,20 @@ public final class AgentArgsParser {
     for (int i = 0; i < argLength; i++) {
       final char ch = agentArgs.charAt(i);
       if (escaped) {
+        // Only ';', '=' and '\\' are escapable. Any other backslash is kept as written, so
+        // Windows paths (configFile=C:\\chaos\\plan.json) and JSON escapes in configJson (\\",
+        // \\d) reach the consumer unchanged; dropping every backslash would mangle both.
+        if (ch != ';' && ch != '=' && ch != '\\') {
+          current.append('\\');
+        }
         current.append(ch);
         escaped = false;
         continue;
       }
       if (ch == '\\') {
         if (i == argLength - 1) {
-          throw new IllegalArgumentException(
-              "trailing backslash at position " + i + " in agent args");
+          current.append(ch);
+          continue;
         }
         escaped = true;
         continue;
@@ -73,7 +80,13 @@ public final class AgentArgsParser {
       return;
     }
     final int separator = token.indexOf('=');
-    if (separator <= 0) {
+    if (separator < 0) {
+      // A bare key is a boolean flag (debugDumpOnStart is the same as debugDumpOnStart=true), as
+      // documented; rejecting it would throw from premain and abort the JVM.
+      addFlag(target, token.trim());
+      return;
+    }
+    if (separator == 0) {
       throw new IllegalArgumentException(
           "invalid agent arg token '" + token + "': expected key=value");
     }
@@ -94,5 +107,15 @@ public final class AgentArgsParser {
               + "': previous value overwritten (last-wins)");
     }
     target.put(key, value);
+  }
+
+  private static void addFlag(final Map<String, String> target, final String key) {
+    if (target.containsKey(key)) {
+      System.err.println(
+          "[chaos-agent] duplicate agent arg key '"
+              + key
+              + "': previous value overwritten (last-wins)");
+    }
+    target.put(key, "true");
   }
 }

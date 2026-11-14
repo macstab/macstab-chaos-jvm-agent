@@ -64,80 +64,81 @@ class SessionIsolationParallelTest {
             + EXPECTED_PER_SESSION
             + " applications")
     void eachSessionAccumulatesExactlyItsOwnApplications() throws Exception {
-      final ChaosRuntime runtime = new ChaosRuntime();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
 
-      final List<ChaosSession> sessions = new ArrayList<>(SESSION_COUNT);
-      for (int s = 0; s < SESSION_COUNT; s++) {
-        final ChaosSession session = runtime.openSession("session-" + s);
-        session.activate(
-            ChaosScenario.builder("scenario-" + s)
-                .scope(ScenarioScope.SESSION)
-                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-                .effect(ChaosEffect.delay(Duration.ZERO))
-                .activationPolicy(ActivationPolicy.always())
-                .build());
-        sessions.add(session);
-      }
-
-      final CountDownLatch startLatch = new CountDownLatch(1);
-      final var executor = Executors.newFixedThreadPool(SESSION_COUNT * THREADS_PER_SESSION);
-      final List<Future<?>> futures = new ArrayList<>();
-
-      try {
+        final List<ChaosSession> sessions = new ArrayList<>(SESSION_COUNT);
         for (int s = 0; s < SESSION_COUNT; s++) {
-          final ChaosSession session = sessions.get(s);
-          for (int t = 0; t < THREADS_PER_SESSION; t++) {
-            futures.add(
-                executor.submit(
-                    session.wrap(
-                        () -> {
-                          try {
-                            startLatch.await();
-                          } catch (final InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            return;
-                          }
-                          for (int i = 0; i < ITERATIONS_PER_THREAD; i++) {
-                            runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-                          }
-                        })));
+          final ChaosSession session = runtime.openSession("session-" + s);
+          session.activate(
+              ChaosScenario.builder("scenario-" + s)
+                  .scope(ScenarioScope.SESSION)
+                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                  .effect(ChaosEffect.delay(Duration.ZERO))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+          sessions.add(session);
+        }
+
+        final CountDownLatch startLatch = new CountDownLatch(1);
+        final var executor = Executors.newFixedThreadPool(SESSION_COUNT * THREADS_PER_SESSION);
+        final List<Future<?>> futures = new ArrayList<>();
+
+        try {
+          for (int s = 0; s < SESSION_COUNT; s++) {
+            final ChaosSession session = sessions.get(s);
+            for (int t = 0; t < THREADS_PER_SESSION; t++) {
+              futures.add(
+                  executor.submit(
+                      session.wrap(
+                          () -> {
+                            try {
+                              startLatch.await();
+                            } catch (final InterruptedException e) {
+                              Thread.currentThread().interrupt();
+                              return;
+                            }
+                            for (int i = 0; i < ITERATIONS_PER_THREAD; i++) {
+                              runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                            }
+                          })));
+            }
           }
+
+          startLatch.countDown();
+          for (final Future<?> f : futures) {
+            f.get(15, TimeUnit.SECONDS);
+          }
+        } finally {
+          executor.shutdownNow();
         }
 
-        startLatch.countDown();
-        for (final Future<?> f : futures) {
-          f.get(15, TimeUnit.SECONDS);
+        // Capture counts while scenarios are still registered, before closing sessions.
+        final Map<String, Long> countsByScenario = new HashMap<>();
+        for (int s = 0; s < SESSION_COUNT; s++) {
+          final String scenarioId = "scenario-" + s;
+          final long applied =
+              runtime.diagnostics().snapshot().scenarios().stream()
+                  .filter(r -> scenarioId.equals(r.id()))
+                  .mapToLong(ChaosDiagnostics.ScenarioReport::appliedCount)
+                  .sum();
+          countsByScenario.put(scenarioId, applied);
         }
-      } finally {
-        executor.shutdownNow();
-      }
 
-      // Capture counts while scenarios are still registered, before closing sessions.
-      final Map<String, Long> countsByScenario = new HashMap<>();
-      for (int s = 0; s < SESSION_COUNT; s++) {
-        final String scenarioId = "scenario-" + s;
-        final long applied =
-            runtime.diagnostics().snapshot().scenarios().stream()
-                .filter(r -> scenarioId.equals(r.id()))
-                .mapToLong(ChaosDiagnostics.ScenarioReport::appliedCount)
-                .sum();
-        countsByScenario.put(scenarioId, applied);
-      }
+        for (final ChaosSession s : sessions) {
+          s.close();
+        }
 
-      for (final ChaosSession s : sessions) {
-        s.close();
-      }
+        for (int s = 0; s < SESSION_COUNT; s++) {
+          final String scenarioId = "scenario-" + s;
+          final long applied = countsByScenario.get(scenarioId);
 
-      for (int s = 0; s < SESSION_COUNT; s++) {
-        final String scenarioId = "scenario-" + s;
-        final long applied = countsByScenario.get(scenarioId);
-
-        assertThat(applied)
-            .as(
-                "session %d scenario '%s' must have exactly %d applications — "
-                    + "more means bleed-in from other sessions, fewer means missed applications",
-                s, scenarioId, EXPECTED_PER_SESSION)
-            .isEqualTo(EXPECTED_PER_SESSION);
+          assertThat(applied)
+              .as(
+                  "session %d scenario '%s' must have exactly %d applications — "
+                      + "more means bleed-in from other sessions, fewer means missed applications",
+                  s, scenarioId, EXPECTED_PER_SESSION)
+              .isEqualTo(EXPECTED_PER_SESSION);
+        }
       }
     }
   }
@@ -149,71 +150,78 @@ class SessionIsolationParallelTest {
     @Test
     @DisplayName("threads without session binding leave all session appliedCounts at zero")
     void unboundThreadsDoNotTriggerSessionScenarios() throws Exception {
-      final ChaosRuntime runtime = new ChaosRuntime();
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
 
-      final List<ChaosSession> sessions = new ArrayList<>(SESSION_COUNT);
-      for (int s = 0; s < SESSION_COUNT; s++) {
-        final ChaosSession session = runtime.openSession("unbound-session-" + s);
-        session.activate(
-            ChaosScenario.builder("unbound-scenario-" + s)
-                .scope(ScenarioScope.SESSION)
-                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-                .effect(ChaosEffect.delay(Duration.ZERO))
-                .activationPolicy(ActivationPolicy.always())
-                .build());
-        sessions.add(session);
-      }
-
-      final int unboundThreads = 50;
-      final CountDownLatch startLatch = new CountDownLatch(1);
-      final var executor = Executors.newFixedThreadPool(unboundThreads);
-      try {
-        for (int t = 0; t < unboundThreads; t++) {
-          executor.submit(
-              () -> {
-                try {
-                  startLatch.await();
-                } catch (final InterruptedException e) {
-                  Thread.currentThread().interrupt();
-                  return;
-                }
-                // No session.wrap() — this thread is unbound
-                for (int i = 0; i < ITERATIONS_PER_THREAD; i++) {
-                  runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-                }
-              });
+        final List<ChaosSession> sessions = new ArrayList<>(SESSION_COUNT);
+        for (int s = 0; s < SESSION_COUNT; s++) {
+          final ChaosSession session = runtime.openSession("unbound-session-" + s);
+          session.activate(
+              ChaosScenario.builder("unbound-scenario-" + s)
+                  .scope(ScenarioScope.SESSION)
+                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                  .effect(ChaosEffect.delay(Duration.ZERO))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+          sessions.add(session);
         }
-        startLatch.countDown();
-        executor.shutdown();
-        assertThat(executor.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
-      } finally {
-        executor.shutdownNow();
-      }
 
-      // Capture counts while sessions are still open.
-      final Map<String, Long> counts = new HashMap<>();
-      for (int s = 0; s < SESSION_COUNT; s++) {
-        final String scenarioId = "unbound-scenario-" + s;
-        final long applied =
-            runtime.diagnostics().snapshot().scenarios().stream()
-                .filter(r -> scenarioId.equals(r.id()))
-                .mapToLong(ChaosDiagnostics.ScenarioReport::appliedCount)
-                .sum();
-        counts.put(scenarioId, applied);
-      }
+        final int unboundThreads = 50;
+        final CountDownLatch startLatch = new CountDownLatch(1);
+        final List<Future<?>> futures = new ArrayList<>();
+        final var executor = Executors.newFixedThreadPool(unboundThreads);
+        try {
+          for (int t = 0; t < unboundThreads; t++) {
+            futures.add(
+                executor.submit(
+                    () -> {
+                      try {
+                        startLatch.await();
+                      } catch (final InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return;
+                      }
+                      // No session.wrap() — this thread is unbound
+                      for (int i = 0; i < ITERATIONS_PER_THREAD; i++) {
+                        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                      }
+                    }));
+          }
+          startLatch.countDown();
+          executor.shutdown();
+          assertThat(executor.awaitTermination(15, TimeUnit.SECONDS)).isTrue();
+          // A worker that failed reports it here, not in a future nobody reads.
+          for (final Future<?> future : futures) {
+            future.get(15, TimeUnit.SECONDS);
+          }
+        } finally {
+          executor.shutdownNow();
+        }
 
-      for (final ChaosSession s : sessions) {
-        s.close();
-      }
+        // Capture counts while sessions are still open.
+        final Map<String, Long> counts = new HashMap<>();
+        for (int s = 0; s < SESSION_COUNT; s++) {
+          final String scenarioId = "unbound-scenario-" + s;
+          final long applied =
+              runtime.diagnostics().snapshot().scenarios().stream()
+                  .filter(r -> scenarioId.equals(r.id()))
+                  .mapToLong(ChaosDiagnostics.ScenarioReport::appliedCount)
+                  .sum();
+          counts.put(scenarioId, applied);
+        }
 
-      for (int s = 0; s < SESSION_COUNT; s++) {
-        final String scenarioId = "unbound-scenario-" + s;
-        assertThat(counts.get(scenarioId))
-            .as(
-                "session-scoped scenario '%s' must record zero applications "
-                    + "when all threads are unbound (no session.wrap() used)",
-                scenarioId)
-            .isZero();
+        for (final ChaosSession s : sessions) {
+          s.close();
+        }
+
+        for (int s = 0; s < SESSION_COUNT; s++) {
+          final String scenarioId = "unbound-scenario-" + s;
+          assertThat(counts.get(scenarioId))
+              .as(
+                  "session-scoped scenario '%s' must record zero applications "
+                      + "when all threads are unbound (no session.wrap() used)",
+                  scenarioId)
+              .isZero();
+        }
       }
     }
   }
@@ -225,33 +233,41 @@ class SessionIsolationParallelTest {
     @Test
     @DisplayName("effects applied before close() are observed; after close(), the effect stops")
     void effectObservedBeforeCloseAndAbsentAfterClose() {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final ChaosSession session = runtime.openSession("close-test");
-      session.activate(
-          ChaosScenario.builder("close-scenario")
-              .scope(ScenarioScope.SESSION)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(80)))
-              .activationPolicy(ActivationPolicy.always())
-              .build());
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final java.util.concurrent.atomic.AtomicInteger applied =
+            new java.util.concurrent.atomic.AtomicInteger();
+        runtime.addEventListener(
+            event -> {
+              if (event.type() == com.macstab.chaos.jvm.api.ChaosEvent.Type.APPLIED
+                  && event.scenarioId().equals("close-scenario")) {
+                applied.incrementAndGet();
+              }
+            });
+        final ChaosSession session = runtime.openSession("close-test");
+        session.activate(
+            ChaosScenario.builder("close-scenario")
+                .scope(ScenarioScope.SESSION)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ofMillis(80)))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
 
-      // Pre-close: the opening thread is automatically bound (root binding in constructor).
-      final long beforeClose =
-          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      assertThat(beforeClose)
-          .as("call before close() must experience the session delay")
-          .isGreaterThanOrEqualTo(60L);
-
-      session.close();
-
-      // Post-close: session is gone; thread no longer bound; effect must not apply.
-      for (int i = 0; i < 5; i++) {
-        final long afterClose =
+        // Pre-close: the opening thread is automatically bound (root binding in constructor).
+        final long beforeClose =
             measureMillis(
                 () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-        assertThat(afterClose)
-            .as("call %d after close() must not be delayed", i + 1)
-            .isLessThan(50L);
+        assertThat(beforeClose)
+            .as("call before close() must experience the session delay")
+            .isGreaterThanOrEqualTo(60L);
+
+        session.close();
+        final int appliedAtClose = applied.get();
+
+        // Post-close: session is gone; thread no longer bound; effect must not apply.
+        for (int i = 0; i < 5; i++) {
+          runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+        }
+        assertThat(applied).as("nothing applies after close()").hasValue(appliedAtClose);
       }
     }
   }

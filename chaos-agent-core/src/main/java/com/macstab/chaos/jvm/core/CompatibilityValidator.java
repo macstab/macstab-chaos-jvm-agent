@@ -1,13 +1,21 @@
 package com.macstab.chaos.jvm.core;
 
+import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException;
 import com.macstab.chaos.jvm.api.ChaosValidationException;
+import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
+import java.lang.reflect.Constructor;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Validates that a {@link ChaosScenario} is consistent with the current {@link FeatureSet} and with
@@ -20,11 +28,12 @@ import java.util.Set;
  * <p>Constraints checked include:
  *
  * <ul>
- *   <li>Scope / selector compatibility (e.g. session-scoped scenarios must not use selectors that
- *       are meaningless in a session context).
- *   <li>Stress-effect binding (e.g. {@code HEAP_PRESSURE} effect requires sufficient available
- *       heap).
- *   <li>Interceptor availability (e.g. virtual-thread selectors require JDK 21+).
+ *   <li>Scope / operation compatibility (a session-scoped scenario must not select an operation
+ *       that never runs in a session).
+ *   <li>Stress-effect binding (each stress target takes its own effect type) and the direct memory
+ *       limit.
+ *   <li>Effect / operation support (an effect is refused where the real call cannot carry it out,
+ *       for example a reject where no real call fails).
  * </ul>
  *
  * <h2>Thread safety</h2>
@@ -34,25 +43,75 @@ import java.util.Set;
 final class CompatibilityValidator {
   private CompatibilityValidator() {}
 
+  /** Operations evaluated without a session: their calls carry none, whatever thread makes them. */
+  private static final Set<OperationType> SESSIONLESS_OPS =
+      EnumSet.of(
+          OperationType.CLASS_LOAD,
+          OperationType.CLASS_DEFINE,
+          OperationType.RESOURCE_LOAD,
+          OperationType.SHUTDOWN_HOOK_REGISTER);
+
   /**
-   * Validates {@code scenario} against {@code featureSet} and the internal chaos model invariants.
+   * Validates {@code scenario} for an activation in {@code activationScope}: first that its scope
+   * fits there, then {@link #validate(ChaosScenario, FeatureSet)}. A session-scoped scenario is
+   * refused outside a session, where it would apply to every thread, and a session accepts only
+   * session-scoped scenarios. These refusals are {@link ChaosActivationException}s (where the
+   * scenario is activated is wrong, not the scenario), the others {@link ChaosValidationException}
+   * or {@link ChaosUnsupportedFeatureException}.
+   *
+   * @param scenario the scenario to validate
+   * @param featureSet the runtime feature flags describing the active JVM capabilities
+   * @param activationScope {@code JVM} for the control plane, {@code SESSION} for a session
+   * @throws ChaosActivationException if the scenario's scope does not fit {@code activationScope}
+   * @throws ChaosValidationException if any structural or semantic constraint is violated
+   * @throws ChaosUnsupportedFeatureException if the scenario needs more than the runtime provides
+   */
+  static void validate(
+      final ChaosScenario scenario,
+      final FeatureSet featureSet,
+      final ChaosScenario.ScenarioScope activationScope) {
+    if (activationScope == ChaosScenario.ScenarioScope.SESSION) {
+      if (scenario.scope() != ChaosScenario.ScenarioScope.SESSION) {
+        throw new ChaosActivationException(
+            "session activation requires scenario scope SESSION for " + scenario.id());
+      }
+    } else if (scenario.scope() == ChaosScenario.ScenarioScope.SESSION) {
+      throw new ChaosActivationException(
+          "session-scoped scenario "
+              + scenario.id()
+              + " must be activated on a session (ChaosSession.activate); outside one it"
+              + " would apply to every thread");
+    }
+    validate(scenario, featureSet);
+  }
+
+  /**
+   * Validates {@code scenario} against {@code featureSet} and the internal chaos model invariants,
+   * wherever it is activated.
    *
    * <p>Validation is fail-fast: the method throws on the first constraint violation it encounters.
    * The following checks are performed in order:
    *
    * <ol>
    *   <li><b>Session-scope exclusions</b> — {@link ChaosScenario.ScenarioScope#SESSION} scenarios
-   *       may not use JVM-global selectors ({@code ThreadSelector}, {@code ShutdownSelector},
-   *       {@code ClassLoadingSelector}, {@code StressSelector}).
-   *   <li><b>Virtual-thread availability</b> — a {@code ThreadSelector} with {@link
-   *       ChaosSelector.ThreadKind#VIRTUAL} requires JDK 21+ at runtime.
+   *       may not select an operation that runs outside any session (class loading, class
+   *       definition, resource loading and shutdown-hook registration).
    *   <li><b>Stress-scope constraint</b> — stress scenarios must use {@link
    *       ChaosScenario.ScenarioScope#JVM} scope.
    *   <li><b>Stress-effect binding</b> — each {@link ChaosSelector.StressTarget} value must be
    *       paired with its corresponding {@link ChaosEffect} subtype.
+   *   <li><b>Direct memory limit</b> — direct-buffer pressure must fit under {@code
+   *       -XX:MaxDirectMemorySize} ({@link ChaosUnsupportedFeatureException}).
+   *   <li><b>Runtime flags</b> — a safepoint storm without retransforms under {@code
+   *       -XX:+DisableExplicitGC}, a finalizer backlog under {@code --finalization=disabled} and
+   *       carrier pinning without {@code allowDestructiveEffects} on a single-carrier scheduler
+   *       produce no load ({@link ChaosUnsupportedFeatureException}).
+   *   <li><b>Stressor limits</b> — heap pressure must fit in the free heap ({@link
+   *       ChaosUnsupportedFeatureException}); interned strings must be distinct and within their
+   *       caps; stressor intervals must be at least one millisecond.
    *   <li><b>Interceptor constraints</b> — effect/selector combinations must be semantically
    *       compatible (e.g. {@code ExceptionInjectionEffect} requires {@code MethodSelector} with
-   *       {@code METHOD_ENTER} only; {@code GateEffect} is not valid with {@code StressSelector}).
+   *       {@code METHOD_ENTER} only; a reject only where the real call can fail).
    * </ol>
    *
    * @param scenario the scenario to validate; must not be {@code null}
@@ -60,39 +119,334 @@ final class CompatibilityValidator {
    *     {@code null}
    * @throws com.macstab.chaos.jvm.api.ChaosValidationException if any structural or semantic
    *     constraint is violated
-   * @throws com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException if the scenario requires a
-   *     JVM capability (e.g. virtual threads) that is not available at runtime
+   * @throws com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException if the scenario needs more
+   *     than the runtime provides (direct-buffer pressure above the direct memory limit, heap
+   *     pressure above the free heap, a stressor this JVM's flags leave without load)
    */
   static void validate(final ChaosScenario scenario, final FeatureSet featureSet) {
     if (scenario.scope() == ChaosScenario.ScenarioScope.SESSION) {
-      if (scenario.selector() instanceof ChaosSelector.ThreadSelector
-          || scenario.selector() instanceof ChaosSelector.ShutdownSelector
-          || scenario.selector() instanceof ChaosSelector.ClassLoadingSelector
-          || scenario.selector() instanceof ChaosSelector.StressSelector) {
-        throw new ChaosValidationException(
-            "selector "
-                + scenario.selector().getClass().getSimpleName()
-                + " is JVM-global and cannot be session scoped");
+      for (final OperationType operation : SelectorOperations.of(scenario.selector())) {
+        if (SESSIONLESS_OPS.contains(operation)) {
+          throw new ChaosValidationException(
+              operation
+                  + " never runs in a session (the JVM loads classes and registers shutdown"
+                  + " hooks for every thread), so a session-scoped scenario could never apply;"
+                  + " scope it JVM");
+        }
       }
-    }
-    if (scenario.selector() instanceof ChaosSelector.ThreadSelector threadSelector
-        && threadSelector.kind() == ChaosSelector.ThreadKind.VIRTUAL
-        && !featureSet.supportsVirtualThreads()) {
-      throw new ChaosUnsupportedFeatureException(
-          "virtual-thread chaos requires JDK 21+ at runtime");
     }
     if (scenario.selector() instanceof ChaosSelector.StressSelector stressSelector) {
       if (scenario.scope() != ChaosScenario.ScenarioScope.JVM) {
         throw new ChaosValidationException("stress scenarios must be JVM scoped");
       }
       validateStressBinding(stressSelector.target(), scenario.effect());
-      if (stressSelector.target() == ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING
-          && !featureSet.supportsVirtualThreads()) {
-        throw new ChaosUnsupportedFeatureException(
-            "VIRTUAL_THREAD_CARRIER_PINNING requires JDK 21+ at runtime");
-      }
+      validateStressActivationPolicy(scenario.activationPolicy());
+      validateDirectMemoryLimit(scenario.effect(), featureSet);
+      validateRuntimeFlags(scenario.effect(), featureSet);
+      validateCarrierPinning(scenario);
+      validateStressorLimits(scenario.effect());
+    }
+    if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect) {
+      validateClockSkewActivationPolicy(scenario.activationPolicy());
     }
     validateInterceptorConstraints(scenario);
+  }
+
+  /**
+   * Refuses direct-buffer pressure above the JVM's direct memory limit: the allocation could only
+   * fail. An unknown limit allows it. Memory already reserved by the application makes a size under
+   * the limit no guarantee; the stressor frees what it took when it runs out.
+   */
+  private static void validateDirectMemoryLimit(
+      final ChaosEffect effect, final FeatureSet featureSet) {
+    if (effect instanceof ChaosEffect.DirectBufferPressureEffect direct) {
+      final long limit = featureSet.directMemoryLimit();
+      if (limit != FeatureSet.UNKNOWN_LIMIT && direct.totalBytes() > limit) {
+        throw new ChaosUnsupportedFeatureException(
+            "direct-buffer pressure of "
+                + direct.totalBytes()
+                + " bytes exceeds the JVM's direct memory limit of "
+                + limit
+                + " bytes (-XX:MaxDirectMemorySize)");
+      }
+    }
+  }
+
+  /**
+   * Refuses a stressor that this JVM's flags leave without any load (U-36, L17), each refusal a
+   * {@link ChaosUnsupportedFeatureException}:
+   *
+   * <ul>
+   *   <li>a safepoint storm without class retransforms ({@code retransformClassCount = 0}) under
+   *       {@code -XX:+DisableExplicitGC}: {@code System.gc()} does nothing, so no safepoint is
+   *       reached (retransforms reach one under every flag);
+   *   <li>a finalizer backlog under {@code --finalization=disabled}: the JVM runs no finalizer.
+   * </ul>
+   *
+   * <p>Not refused, because the load is real though smaller: a reference-queue flood under {@code
+   * -XX:+DisableExplicitGC} (only the collections the application causes enqueue its references),
+   * and every stressor under ZGC, Shenandoah or {@code -XX:+ExplicitGCInvokesConcurrent} (shorter
+   * pauses). The flags are read only for the stressors in the table, at their first validation.
+   */
+  private static void validateRuntimeFlags(final ChaosEffect effect, final FeatureSet featureSet) {
+    if (effect instanceof ChaosEffect.SafepointStormEffect storm
+        && storm.retransformClassCount() == 0
+        && !featureSet.explicitGc()) {
+      throw new ChaosUnsupportedFeatureException(
+          "a safepoint storm without class retransforms (retransformClassCount=0) reaches no"
+              + " safepoint under -XX:+DisableExplicitGC, where System.gc() does nothing; set"
+              + " retransformClassCount above 0");
+    }
+    if (effect instanceof ChaosEffect.FinalizerBacklogEffect && !featureSet.finalization()) {
+      throw new ChaosUnsupportedFeatureException(
+          "a finalizer backlog cannot build up under --finalization=disabled, where the JVM runs"
+              + " no finalizer");
+    }
+  }
+
+  /**
+   * Refuses carrier pinning without {@code allowDestructiveEffects} on a virtual-thread scheduler
+   * with a single carrier ({@code -Djdk.virtualThreadScheduler.parallelism=1}, a one-CPU
+   * container): the stressor must leave one carrier free (L18), so it would hold none (L17, {@link
+   * ChaosUnsupportedFeatureException}).
+   */
+  private static void validateCarrierPinning(final ChaosScenario scenario) {
+    if (scenario.effect() instanceof ChaosEffect.VirtualThreadCarrierPinningEffect
+        && !scenario.activationPolicy().allowDestructiveEffects()
+        && VirtualThreadCarrierPinningStressor.schedulerParallelism() < 2) {
+      throw new ChaosUnsupportedFeatureException(
+          "virtual-thread carrier pinning holds no carrier on a scheduler with a single carrier"
+              + " (jdk.virtualThreadScheduler.parallelism or the processor count is 1): it leaves"
+              + " one carrier free unless allowDestructiveEffects is set");
+    }
+  }
+
+  /**
+   * Refuses stressor parameters a stressor cannot honour, instead of clamping them: heap pressure,
+   * a thread-local leak, interned strings or a reference-queue flood cycle above the free heap (it
+   * depends on the runtime's state, {@link ChaosUnsupportedFeatureException}), a thread-local leak
+   * whose entries overflow an {@code int}, more interned strings than their length can make
+   * distinct or than the caps allow, and an interval below the millisecond a stressor sleeps in.
+   */
+  private static void validateStressorLimits(final ChaosEffect effect) {
+    switch (effect) {
+      case ChaosEffect.HeapPressureEffect heap ->
+          validateHeapLimit("heap pressure of " + heap.bytes() + " bytes exceeds", heap.bytes());
+      case ChaosEffect.StringInternPressureEffect intern -> validateStringIntern(intern);
+      case ChaosEffect.ReferenceQueueFloodEffect flood -> {
+        requireMillisecond("floodInterval", flood.floodInterval());
+        validateHeapLimit(
+            "referenceQueueFlood of "
+                + flood.referenceCount()
+                + " references per cycle needs about "
+                + saturatedProduct(flood.referenceCount(), REFERENCE_BYTES)
+                + " bytes, which exceeds",
+            saturatedProduct(flood.referenceCount(), REFERENCE_BYTES));
+      }
+      case ChaosEffect.ThreadLocalLeakEffect leak -> validateThreadLocalLeak(leak);
+      case ChaosEffect.SafepointStormEffect storm ->
+          requireMillisecond("gcInterval", storm.gcInterval());
+      case ChaosEffect.KeepAliveEffect keepAlive ->
+          requireMillisecond("heartbeat", keepAlive.heartbeat());
+      default -> {
+        // no limit beyond the effect's own
+      }
+    }
+  }
+
+  /**
+   * What one reference of a flood cycle keeps reachable: the {@code WeakReference} and its slot in
+   * the cycle's anchor list, rounded up. Its 1 KiB referent is only weakly reachable, so a
+   * collection reclaims it during the cycle. Measured: 36 bytes per reference with compressed
+   * references, 56 without.
+   */
+  static final long REFERENCE_BYTES = 64L;
+
+  /**
+   * What one thread-local leak entry keeps reachable besides its value, rounded up: its {@code
+   * ThreadLocal}, its holder, its {@code ThreadLocalMap.Entry} and table slots (the table grows to
+   * three times the entries at most, and holds old and new tables while it resizes), and, until the
+   * activation returns, its planting task and its slots in the stressor's lists. About 90 bytes
+   * with compressed references and 125 without; measured at the activation's peak, 4,000,000
+   * entries of 1-byte values need 400 to 450 MB of heap with compressed references and 450 to 600
+   * MB without.
+   */
+  static final long THREAD_LOCAL_ENTRY_BYTES = 160L;
+
+  /**
+   * What one interned string keeps reachable besides its {@code byte[]}: the {@code String} object
+   * (24 bytes) and its slots in the stressor's two lists, rounded up. The string table's entry
+   * lives outside the heap.
+   */
+  static final long INTERNED_STRING_BYTES = 40L;
+
+  /** The header of a {@code byte[]}: its mark word, class pointer and length. */
+  private static final long ARRAY_HEADER_BYTES = 16L;
+
+  /**
+   * Refuses a thread-local leak whose entries overflow an {@code int} (an invalid scenario) or
+   * whose entries exceed the free heap (the runtime cannot hold them): the common pool's
+   * parallelism × {@code entriesPerThread} entries, each a {@code valueSizeBytes} array, rounded up
+   * to 8 bytes with its header, and {@link #THREAD_LOCAL_ENTRY_BYTES}.
+   */
+  private static void validateThreadLocalLeak(final ChaosEffect.ThreadLocalLeakEffect leak) {
+    final long parallelism = java.util.concurrent.ForkJoinPool.commonPool().getParallelism();
+    final long entries = parallelism * leak.entriesPerThread();
+    if (entries > Integer.MAX_VALUE) {
+      throw new ChaosValidationException(
+          "threadLocalLeak entriesPerThread "
+              + leak.entriesPerThread()
+              + " times the common pool's parallelism of "
+              + parallelism
+              + " is "
+              + entries
+              + " entries, more than "
+              + Integer.MAX_VALUE);
+    }
+    final long perEntry =
+        ((ARRAY_HEADER_BYTES + leak.valueSizeBytes() + 7L) & ~7L) + THREAD_LOCAL_ENTRY_BYTES;
+    final long bytes = saturatedProduct(entries, perEntry);
+    validateHeapLimit(
+        "threadLocalLeak of "
+            + entries
+            + " entries of "
+            + leak.valueSizeBytes()
+            + "-byte values needs about "
+            + bytes
+            + " bytes, which exceeds",
+        bytes);
+  }
+
+  /** {@code a × b}, saturated at {@link Long#MAX_VALUE}, for non-negative factors. */
+  private static long saturatedProduct(final long a, final long b) {
+    try {
+      return Math.multiplyExact(a, b);
+    } catch (final ArithmeticException overflow) {
+      return Long.MAX_VALUE;
+    }
+  }
+
+  /**
+   * Refuses a stressor that retains more than the heap left free: the maximum heap less what is in
+   * use now. A snapshot: the application allocating meanwhile can still make the stressor run out,
+   * which fails its start.
+   *
+   * @param what the refusal's start, naming the stressor and its size, ending in "exceeds"
+   * @param bytes what the stressor retains
+   */
+  private static void validateHeapLimit(final String what, final long bytes) {
+    final Runtime jvm = Runtime.getRuntime();
+    final long max = jvm.maxMemory();
+    if (max == Long.MAX_VALUE) {
+      return;
+    }
+    final long free = max - (jvm.totalMemory() - jvm.freeMemory());
+    if (bytes > free) {
+      throw new ChaosUnsupportedFeatureException(
+          what
+              + " the free heap of "
+              + free
+              + " bytes (the maximum heap, -Xmx, less what is in use)");
+    }
+  }
+
+  private static void validateStringIntern(final ChaosEffect.StringInternPressureEffect intern) {
+    if (intern.internCount() > StringInternPressureStressor.MAX_INTERN_COUNT) {
+      throw new ChaosValidationException(
+          "stringInternPressure internCount "
+              + intern.internCount()
+              + " exceeds the limit of "
+              + StringInternPressureStressor.MAX_INTERN_COUNT
+              + " strings");
+    }
+    if (intern.stringLengthBytes() > StringInternPressureStressor.MAX_STRING_LENGTH_BYTES) {
+      throw new ChaosValidationException(
+          "stringInternPressure stringLengthBytes "
+              + intern.stringLengthBytes()
+              + " exceeds the limit of "
+              + StringInternPressureStressor.MAX_STRING_LENGTH_BYTES
+              + " bytes");
+    }
+    // One Latin-1 character per byte: 256^length distinct strings (above 3 bytes, more than the
+    // count cap).
+    if (intern.stringLengthBytes() < 4) {
+      final long distinct = 1L << (8 * intern.stringLengthBytes());
+      if (intern.internCount() > distinct) {
+        throw new ChaosValidationException(
+            "stringInternPressure cannot make "
+                + intern.internCount()
+                + " distinct strings of "
+                + intern.stringLengthBytes()
+                + " bytes: there are 256^"
+                + intern.stringLengthBytes()
+                + " = "
+                + distinct
+                + "; raise stringLengthBytes");
+      }
+    }
+    final long perString =
+        ((ARRAY_HEADER_BYTES + intern.stringLengthBytes() + 7L) & ~7L) + INTERNED_STRING_BYTES;
+    final long bytes = saturatedProduct(intern.internCount(), perString);
+    validateHeapLimit(
+        "stringInternPressure of "
+            + intern.internCount()
+            + " strings of "
+            + intern.stringLengthBytes()
+            + " bytes needs about "
+            + bytes
+            + " bytes, which exceeds",
+        bytes);
+  }
+
+  /**
+   * Refuses an interval below one millisecond: the stressor sleeps whole ones, so it would spin.
+   */
+  private static void requireMillisecond(final String field, final java.time.Duration interval) {
+    if (interval.compareTo(java.time.Duration.ofMillis(1)) < 0) {
+      throw new ChaosValidationException(
+          field
+              + " "
+              + interval
+              + " is below 1 ms; the stressor sleeps whole milliseconds and would spin");
+    }
+  }
+
+  /**
+   * Rejects activation-policy fields that cannot apply to a stressor. A stressor runs as background
+   * load from {@code start()} until it is stopped or its {@code activeFor} window ends; it is never
+   * evaluated per call, so per-call gating (probability, warm-up, rate limit, application cap)
+   * never took effect. Rejecting them makes the misconfiguration visible instead of silent.
+   */
+  private static void validateStressActivationPolicy(final ActivationPolicy policy) {
+    if (policy.maxApplications() != null
+        || policy.rateLimit() != null
+        || policy.activateAfterMatches() > 0
+        || policy.probability() < 1.0d
+        || policy.activeFrom() != null
+        || policy.replayMatches() != null) {
+      throw new ChaosValidationException(
+          "stress scenarios run from start until stop, activeFor or activeUntil ends;"
+              + " maxApplications, rateLimit, activateAfterMatches, probability, activeFrom and"
+              + " replayMatches do not apply to them");
+    }
+  }
+
+  /**
+   * A clock skew is applied on every clock read while its time bounds hold; it is not a per-call
+   * application, so the counting and sampling fields of the policy have no meaning for it and are
+   * rejected rather than silently ignored.
+   */
+  private static void validateClockSkewActivationPolicy(final ActivationPolicy policy) {
+    if (policy.maxApplications() != null
+        || policy.rateLimit() != null
+        || policy.activateAfterMatches() > 0
+        || policy.probability() < 1.0d
+        || policy.replayMatches() != null) {
+      throw new ChaosValidationException(
+          "a clock skew applies to every clock read while active (bounded by activeFor,"
+              + " activeFrom and activeUntil); maxApplications, rateLimit, activateAfterMatches,"
+              + " probability and replayMatches do not apply to it");
+    }
   }
 
   /**
@@ -192,8 +546,8 @@ final class CompatibilityValidator {
         }
       }
       case VIRTUAL_THREAD_CARRIER_PINNING -> {
-        // The enum-switch was previously non-exhaustive — a user-supplied pairing like
-        // (VIRTUAL_THREAD_CARRIER_PINNING, HeapPressureEffect) slipped through and failed
+        // Without this case a user-supplied pairing like
+        // (VIRTUAL_THREAD_CARRIER_PINNING, HeapPressureEffect) would slip through and fail
         // far downstream with a ClassCastException inside the stressor factory. The JDK-21
         // feature gate lives in validate(); this case exists to enforce the effect-type
         // contract so every StressTarget has a binding rule.
@@ -215,8 +569,6 @@ final class CompatibilityValidator {
    * <ul>
    *   <li>Stressor effects (heap, metaspace, GC, etc.) must use {@link
    *       ChaosSelector.StressSelector}.
-   *   <li>{@link ChaosEffect.GateEffect} is incompatible with {@link ChaosSelector.StressSelector}
-   *       because stressors activate on lifecycle events, not per-invocation gates.
    *   <li>{@link ChaosEffect.ExceptionalCompletionEffect} requires {@link
    *       ChaosSelector.AsyncSelector}.
    *   <li>{@link ChaosEffect.ExceptionInjectionEffect} requires {@link
@@ -224,8 +576,8 @@ final class CompatibilityValidator {
    *   <li>{@link ChaosEffect.ReturnValueCorruptionEffect} requires {@link
    *       ChaosSelector.MethodSelector} with {@code METHOD_EXIT} operations only.
    *   <li>{@link ChaosEffect.ClockSkewEffect} requires {@link ChaosSelector.JvmRuntimeSelector}.
-   *   <li>{@link ChaosEffect.SpuriousWakeupEffect} requires {@link ChaosSelector.NioSelector}
-   *       containing {@code NIO_SELECTOR_SELECT}.
+   *   <li>{@link ChaosEffect.SpuriousWakeupEffect} requires {@link ChaosSelector.NioSelector} with
+   *       {@code NIO_SELECTOR_SELECT} as its only operation.
    *   <li>{@link ChaosSelector.NioSelector} operations must all be NIO operation types.
    *   <li>{@link ChaosSelector.NetworkSelector} operations must all be socket operation types.
    *   <li>{@link ChaosSelector.ThreadLocalSelector} operations must be confined to {@code
@@ -242,10 +594,9 @@ final class CompatibilityValidator {
 
     validateDestructiveEffectGuard(effect, scenario);
     validateStressorEffectRequiresStressSelector(effect, selector);
-    validateGateEffectNotWithStressSelector(effect, selector);
     validateEffectSelectorAffinity(effect, selector);
-    validateSelectorOperationSets(selector);
-    validateOperationTypeSelectorAffinity(selector);
+    validateEffectOperationSupport(effect, selector);
+    validateNetworkHostFilter(selector);
   }
 
   /**
@@ -258,12 +609,12 @@ final class CompatibilityValidator {
     if ((effect instanceof ChaosEffect.DeadlockEffect
             || effect instanceof ChaosEffect.ThreadLeakEffect)
         && !scenario.activationPolicy().allowDestructiveEffects()) {
-      throw new ChaosActivationException(
+      throw new ChaosValidationException(
           effect.getClass().getSimpleName()
-              + " creates non-recoverable JVM state (deadlocked or permanently-parked threads "
-              + "that cannot be terminated without JVM restart). "
-              + "Activate only with ActivationPolicy.withDestructiveEffects() or "
-              + "allowDestructiveEffects=true in your JSON plan.");
+              + " holds deadlocked or leaked threads, with their locks and memory, until the"
+              + " scenario is stopped (leaked non-daemon threads also keep the JVM from exiting"
+              + " until then). Activate only with ActivationPolicy.withDestructiveEffects() or"
+              + " allowDestructiveEffects=true in your JSON plan.");
     }
   }
 
@@ -279,36 +630,30 @@ final class CompatibilityValidator {
     }
   }
 
-  private static boolean isStressorEffect(final ChaosEffect effect) {
-    return effect instanceof ChaosEffect.HeapPressureEffect
-        || effect instanceof ChaosEffect.MetaspacePressureEffect
-        || effect instanceof ChaosEffect.DirectBufferPressureEffect
-        || effect instanceof ChaosEffect.GcPressureEffect
-        || effect instanceof ChaosEffect.FinalizerBacklogEffect
-        || effect instanceof ChaosEffect.KeepAliveEffect
-        || effect instanceof ChaosEffect.ThreadLeakEffect
-        || effect instanceof ChaosEffect.ThreadLocalLeakEffect
-        || effect instanceof ChaosEffect.DeadlockEffect
-        || effect instanceof ChaosEffect.MonitorContentionEffect
-        || effect instanceof ChaosEffect.CodeCachePressureEffect
-        || effect instanceof ChaosEffect.SafepointStormEffect
-        || effect instanceof ChaosEffect.StringInternPressureEffect
-        || effect instanceof ChaosEffect.ReferenceQueueFloodEffect
-        || effect instanceof ChaosEffect.VirtualThreadCarrierPinningEffect;
-  }
-
   /**
-   * Rejects {@link ChaosEffect.GateEffect} paired with {@link ChaosSelector.StressSelector} because
-   * stressors activate on lifecycle events, not per-invocation gates.
+   * The effects a stressor carries out; they run beside the application and need a {@link
+   * ChaosSelector.StressSelector}.
    */
-  private static void validateGateEffectNotWithStressSelector(
-      final ChaosEffect effect, final ChaosSelector selector) {
-    if (effect instanceof ChaosEffect.GateEffect
-        && selector instanceof ChaosSelector.StressSelector) {
-      throw new ChaosValidationException(
-          "GateEffect is not valid with StressSelector — stressors activate independently of the"
-              + " gate mechanism");
-    }
+  static final Set<Class<? extends ChaosEffect>> STRESSOR_EFFECTS =
+      Set.of(
+          ChaosEffect.HeapPressureEffect.class,
+          ChaosEffect.MetaspacePressureEffect.class,
+          ChaosEffect.DirectBufferPressureEffect.class,
+          ChaosEffect.GcPressureEffect.class,
+          ChaosEffect.FinalizerBacklogEffect.class,
+          ChaosEffect.KeepAliveEffect.class,
+          ChaosEffect.ThreadLeakEffect.class,
+          ChaosEffect.ThreadLocalLeakEffect.class,
+          ChaosEffect.DeadlockEffect.class,
+          ChaosEffect.MonitorContentionEffect.class,
+          ChaosEffect.CodeCachePressureEffect.class,
+          ChaosEffect.SafepointStormEffect.class,
+          ChaosEffect.StringInternPressureEffect.class,
+          ChaosEffect.ReferenceQueueFloodEffect.class,
+          ChaosEffect.VirtualThreadCarrierPinningEffect.class);
+
+  private static boolean isStressorEffect(final ChaosEffect effect) {
+    return STRESSOR_EFFECTS.contains(effect.getClass());
   }
 
   /**
@@ -333,15 +678,16 @@ final class CompatibilityValidator {
 
   private static void validateExceptionInjectionSelector(
       final ChaosEffect effect, final ChaosSelector selector) {
-    if (!(effect instanceof ChaosEffect.ExceptionInjectionEffect)) {
+    if (!(effect instanceof ChaosEffect.ExceptionInjectionEffect injection)) {
       return;
     }
-    if (!(selector instanceof ChaosSelector.MethodSelector)) {
+    // The class must be one the agent can throw: refused now, not when the method is called.
+    FailureFactory.injectedConstructor(injection.exceptionClassName());
+    if (!(selector instanceof ChaosSelector.MethodSelector methodSelector)) {
       throw new ChaosValidationException("ExceptionInjectionEffect requires MethodSelector");
     }
     // METHOD_EXIT is semantically wrong for injection: the method body has already run.
-    if (selector instanceof ChaosSelector.MethodSelector methodSelector
-        && methodSelector.operations().contains(OperationType.METHOD_EXIT)) {
+    if (methodSelector.operations().contains(OperationType.METHOD_EXIT)) {
       throw new ChaosValidationException(
           "ExceptionInjectionEffect requires METHOD_ENTER operations only;"
               + " found METHOD_EXIT in the selector");
@@ -353,12 +699,11 @@ final class CompatibilityValidator {
     if (!(effect instanceof ChaosEffect.ReturnValueCorruptionEffect)) {
       return;
     }
-    if (!(selector instanceof ChaosSelector.MethodSelector)) {
+    if (!(selector instanceof ChaosSelector.MethodSelector methodSelector)) {
       throw new ChaosValidationException("ReturnValueCorruptionEffect requires MethodSelector");
     }
     // METHOD_ENTER is wrong: the return value does not exist yet at entry.
-    if (selector instanceof ChaosSelector.MethodSelector methodSelector
-        && methodSelector.operations().contains(OperationType.METHOD_ENTER)) {
+    if (methodSelector.operations().contains(OperationType.METHOD_ENTER)) {
       throw new ChaosValidationException(
           "ReturnValueCorruptionEffect requires METHOD_EXIT operations only;"
               + " found METHOD_ENTER in the selector");
@@ -370,139 +715,461 @@ final class CompatibilityValidator {
     if (!(effect instanceof ChaosEffect.SpuriousWakeupEffect)) {
       return;
     }
-    if (!(selector instanceof ChaosSelector.NioSelector)) {
+    if (!(selector instanceof ChaosSelector.NioSelector nioSelector)) {
       throw new ChaosValidationException("SpuriousWakeupEffect requires NioSelector");
     }
-    if (selector instanceof ChaosSelector.NioSelector nioSelector
-        && !nioSelector.operations().contains(OperationType.NIO_SELECTOR_SELECT)) {
+    // A wakeup is a select() that returns 0 keys: on any other NIO call the same terminal would
+    // skip the call instead.
+    if (!nioSelector.operations().equals(Set.of(OperationType.NIO_SELECTOR_SELECT))) {
       throw new ChaosValidationException(
-          "SpuriousWakeupEffect requires NioSelector with NIO_SELECTOR_SELECT operation");
+          "SpuriousWakeupEffect requires NioSelector with NIO_SELECTOR_SELECT as its only"
+              + " operation, not "
+              + nioSelector.operations());
     }
   }
 
   /**
-   * Validates that each selector's declared operations are confined to the operation types that are
-   * legal for that selector kind.
+   * Rejects a host filter on {@code SOCKET_ACCEPT}: the remote host of an accepted connection is
+   * only known after {@code accept()} returns, so the pattern can never match before the call is
+   * intercepted.
    */
-  private static void validateSelectorOperationSets(final ChaosSelector selector) {
-    if (selector instanceof ChaosSelector.NioSelector nioSelector) {
-      validateOperationSet(nioSelector.operations(), NIO_OPS, "NioSelector", "NIO operation");
-    }
-    if (selector instanceof ChaosSelector.NetworkSelector networkSelector) {
-      validateOperationSet(
-          networkSelector.operations(), NETWORK_OPS, "NetworkSelector", "socket operation");
-    }
-    if (selector instanceof ChaosSelector.ThreadLocalSelector threadLocalSelector) {
-      validateOperationSet(
-          threadLocalSelector.operations(), THREAD_LOCAL_OPS, "ThreadLocalSelector", "valid");
-    }
-    if (selector instanceof ChaosSelector.HttpClientSelector httpClientSelector) {
-      validateOperationSet(
-          httpClientSelector.operations(), HTTP_OPS, "HttpClientSelector", "valid");
-    }
-    if (selector instanceof ChaosSelector.JdbcSelector jdbcSelector) {
-      validateOperationSet(jdbcSelector.operations(), JDBC_OPS, "JdbcSelector", "valid");
+  private static void validateNetworkHostFilter(final ChaosSelector selector) {
+    if (selector instanceof ChaosSelector.NetworkSelector network
+        && network.operations().contains(OperationType.SOCKET_ACCEPT)
+        && ((network.remoteHostPattern() != null
+                && network.remoteHostPattern().mode() != NamePattern.MatchMode.ANY)
+            || network.remoteCidr() != null
+            || network.remotePort() != null)) {
+      throw new ChaosValidationException(
+          "NetworkSelector remoteHostPattern, remoteCidr and remotePort cannot apply to"
+              + " SOCKET_ACCEPT: the peer is unknown until accept() returns; use a separate"
+              + " scenario without a peer filter for accepts");
     }
   }
 
-  private static void validateOperationSet(
-      final Set<OperationType> operations,
-      final Set<OperationType> allowedOps,
-      final String selectorName,
-      final String validDescription) {
-    for (final OperationType operation : operations) {
-      if (!allowedOps.contains(operation)) {
-        throw new ChaosValidationException(
-            selectorName
-                + " operation "
-                + operation
-                + " is not "
-                + validDescription
-                + "; valid ops: "
-                + allowedOps);
+  /** The operations each data-delivery effect applies to. */
+  private static final java.util.Map<Class<? extends ChaosEffect>, Set<OperationType>>
+      DELIVERY_EFFECT_OPS =
+          java.util.Map.of(
+              ChaosEffect.ConnectionResetEffect.class,
+              EnumSet.of(OperationType.SOCKET_CLOSE),
+              ChaosEffect.TrickleEffect.class,
+              EnumSet.of(OperationType.SOCKET_READ),
+              ChaosEffect.CorruptReadEffect.class,
+              EnumSet.of(
+                  OperationType.SOCKET_READ,
+                  OperationType.FILE_IO_READ,
+                  OperationType.DATAGRAM_RECEIVE),
+              ChaosEffect.TimeoutEffect.class,
+              EnumSet.of(
+                  OperationType.SOCKET_READ,
+                  OperationType.SOCKET_CONNECT,
+                  OperationType.NIO_SELECTOR_SELECT,
+                  OperationType.PROCESS_WAIT),
+              ChaosEffect.TornWriteEffect.class,
+              EnumSet.of(
+                  OperationType.FILE_IO_WRITE,
+                  OperationType.SOCKET_WRITE,
+                  OperationType.NIO_CHANNEL_WRITE),
+              ChaosEffect.DnsAnswerEffect.class,
+              EnumSet.of(OperationType.DNS_ANSWER),
+              ChaosEffect.DnsRewriteEffect.class,
+              EnumSet.of(OperationType.DNS_RESOLVE),
+              ChaosEffect.RedirectEffect.class,
+              EnumSet.of(OperationType.SOCKET_CONNECT));
+
+  /**
+   * The operations each {@link ChaosEffect.Errno} applies to: the calls the kernel reports it for.
+   * A network error applies to every socket call. A file error applies per call: a call on an open
+   * descriptor (read, write, sync, truncate, map, close) never reports a missing file or a
+   * permission, and a path call (open, delete, move) never reports a full disk on delete. A program
+   * that cannot be started reports any file error, and {@code EAGAIN} or {@code ENOMEM} of {@code
+   * fork}.
+   */
+  private static final java.util.Map<ChaosEffect.Errno, Set<OperationType>> ERRNO_OPS =
+      new java.util.EnumMap<>(ChaosEffect.Errno.class);
+
+  static {
+    final Set<OperationType> socketCalls =
+        EnumSet.of(
+            OperationType.SOCKET_CONNECT,
+            OperationType.SOCKET_ACCEPT,
+            OperationType.SOCKET_READ,
+            OperationType.SOCKET_WRITE,
+            OperationType.SOCKET_CLOSE,
+            OperationType.SOCKET_BIND,
+            OperationType.SOCKET_SHUTDOWN,
+            OperationType.DATAGRAM_SEND,
+            OperationType.DATAGRAM_RECEIVE,
+            OperationType.NIO_CHANNEL_CONNECT,
+            OperationType.NIO_CHANNEL_ACCEPT,
+            OperationType.NIO_CHANNEL_READ,
+            OperationType.NIO_CHANNEL_WRITE);
+    for (final ChaosEffect.Errno errno : ChaosEffect.Errno.values()) {
+      if (errno.family() == ChaosEffect.Errno.Family.NETWORK) {
+        ERRNO_OPS.put(errno, socketCalls);
       }
     }
+    // connects and accepts open a descriptor
+    final Set<OperationType> descriptorOpens =
+        EnumSet.of(
+            OperationType.FILE_IO_OPEN,
+            OperationType.SOCKET_CONNECT,
+            OperationType.SOCKET_ACCEPT,
+            OperationType.NIO_CHANNEL_CONNECT,
+            OperationType.NIO_CHANNEL_ACCEPT,
+            OperationType.PROCESS_START);
+    ERRNO_OPS.put(ChaosEffect.Errno.EMFILE, descriptorOpens);
+    ERRNO_OPS.put(ChaosEffect.Errno.ENFILE, descriptorOpens);
+    final Set<OperationType> noSpace =
+        EnumSet.of(
+            OperationType.FILE_IO_WRITE,
+            OperationType.FILE_IO_SYNC,
+            OperationType.FILE_IO_CLOSE,
+            OperationType.FILE_IO_OPEN,
+            OperationType.PROCESS_START);
+    ERRNO_OPS.put(ChaosEffect.Errno.ENOSPC, noSpace);
+    ERRNO_OPS.put(ChaosEffect.Errno.EDQUOT, noSpace);
+    ERRNO_OPS.put(
+        ChaosEffect.Errno.EROFS,
+        EnumSet.of(
+            OperationType.FILE_IO_OPEN,
+            OperationType.FILE_IO_DELETE,
+            OperationType.FILE_IO_MOVE,
+            OperationType.FILE_IO_MOVE_TARGET,
+            OperationType.PROCESS_START));
+    ERRNO_OPS.put(
+        ChaosEffect.Errno.ENOENT,
+        EnumSet.of(
+            OperationType.FILE_IO_OPEN,
+            OperationType.FILE_IO_DELETE,
+            OperationType.FILE_IO_MOVE,
+            OperationType.FILE_IO_MOVE_TARGET,
+            OperationType.PROCESS_START));
+    ERRNO_OPS.put(
+        ChaosEffect.Errno.EACCES,
+        EnumSet.of(
+            OperationType.FILE_IO_OPEN,
+            OperationType.FILE_IO_DELETE,
+            OperationType.FILE_IO_MOVE,
+            OperationType.FILE_IO_MOVE_TARGET,
+            // a mapping wider than the descriptor's open mode
+            OperationType.FILE_IO_MAP,
+            // binding a privileged port
+            OperationType.SOCKET_BIND,
+            OperationType.PROCESS_START));
+    ERRNO_OPS.put(
+        ChaosEffect.Errno.EIO,
+        EnumSet.of(
+            OperationType.FILE_IO_READ,
+            OperationType.FILE_IO_WRITE,
+            OperationType.FILE_IO_SYNC,
+            OperationType.FILE_IO_TRUNCATE,
+            OperationType.FILE_IO_CLOSE,
+            OperationType.FILE_IO_DELETE,
+            OperationType.FILE_IO_MOVE,
+            OperationType.FILE_IO_MOVE_TARGET,
+            OperationType.PROCESS_START));
+    // pthread_create of a platform thread, fork of a process
+    ERRNO_OPS.put(
+        ChaosEffect.Errno.EAGAIN,
+        EnumSet.of(OperationType.THREAD_START, OperationType.PROCESS_START));
+    // and mmap of a file region
+    ERRNO_OPS.put(
+        ChaosEffect.Errno.ENOMEM,
+        EnumSet.of(
+            OperationType.THREAD_START, OperationType.FILE_IO_MAP, OperationType.PROCESS_START));
   }
 
   /**
-   * Validates that operation types requiring a specific selector kind are not used with the wrong
-   * selector (e.g. HTTP operations outside {@link ChaosSelector.HttpClientSelector}, JDBC
-   * operations outside {@link ChaosSelector.JdbcSelector}).
+   * Operations whose interception point can carry out a {@link ChaosEffect.SuppressEffect}: it
+   * skips the call, substitutes a no-op or returns an empty result, or — where skipping cannot be
+   * expressed (thread start, exit) — fails the call with the documented exception. Every other
+   * interception point can only delay or throw, so SUPPRESS is rejected there instead of being
+   * silently ignored.
    */
-  private static void validateOperationTypeSelectorAffinity(final ChaosSelector selector) {
-    if (!(selector instanceof ChaosSelector.HttpClientSelector)
-        && selectorContainsAny(selector, HTTP_OPS)) {
-      throw new ChaosValidationException(
-          "HTTP_CLIENT_SEND / HTTP_CLIENT_SEND_ASYNC operations require HttpClientSelector");
-    }
-    if (!(selector instanceof ChaosSelector.JdbcSelector)
-        && selectorContainsAny(selector, JDBC_OPS)) {
-      throw new ChaosValidationException("JDBC_* operations require JdbcSelector");
-    }
-  }
+  private static final Set<OperationType> SUPPRESS_OPS =
+      EnumSet.of(
+          OperationType.THREAD_START,
+          OperationType.VIRTUAL_THREAD_START,
+          OperationType.THREAD_SLEEP,
+          OperationType.EXECUTOR_SUBMIT,
+          OperationType.SCHEDULE_SUBMIT,
+          OperationType.SCHEDULE_TICK,
+          OperationType.QUEUE_OFFER,
+          OperationType.QUEUE_POLL,
+          OperationType.ASYNC_COMPLETE,
+          OperationType.ASYNC_COMPLETE_EXCEPTIONALLY,
+          OperationType.ASYNC_CANCEL,
+          OperationType.RESOURCE_LOAD,
+          OperationType.SYSTEM_GC_REQUEST,
+          OperationType.SYSTEM_EXIT_REQUEST,
+          OperationType.NIO_SELECTOR_SELECT,
+          OperationType.THREAD_LOCAL_GET,
+          OperationType.THREAD_LOCAL_SET,
+          // a dropped datagram: the send reports success, nothing goes on the wire
+          OperationType.DATAGRAM_SEND);
 
-  private static final Set<OperationType> HTTP_OPS =
-      Set.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC);
-
-  private static final Set<OperationType> JDBC_OPS =
-      Set.of(
+  /**
+   * HTTP client and JDBC operations, which took a suppress in 1.x that threw an agent exception no
+   * real client throws (ADR 0005). A reject fails them with the client's own exception.
+   */
+  private static final Set<OperationType> REJECT_INSTEAD_OF_SUPPRESS_OPS =
+      EnumSet.of(
+          OperationType.HTTP_CLIENT_SEND,
+          OperationType.HTTP_CLIENT_SEND_ASYNC,
           OperationType.JDBC_CONNECTION_ACQUIRE,
           OperationType.JDBC_STATEMENT_EXECUTE,
           OperationType.JDBC_PREPARED_STATEMENT,
           OperationType.JDBC_TRANSACTION_COMMIT,
           OperationType.JDBC_TRANSACTION_ROLLBACK);
 
-  private static final Set<OperationType> NIO_OPS =
-      Set.of(
-          OperationType.NIO_SELECTOR_SELECT,
-          OperationType.NIO_CHANNEL_READ,
-          OperationType.NIO_CHANNEL_WRITE,
-          OperationType.NIO_CHANNEL_CONNECT,
-          OperationType.NIO_CHANNEL_ACCEPT);
+  /** Clock reads: they only return a (possibly skewed) time and cannot be delayed or failed. */
+  private static final Set<OperationType> CLOCK_READ_OPS =
+      EnumSet.of(
+          OperationType.INSTANT_NOW,
+          OperationType.CLOCK_READ,
+          OperationType.LOCAL_DATE_TIME_NOW,
+          OperationType.ZONED_DATE_TIME_NOW,
+          OperationType.DATE_NEW,
+          OperationType.SYSTEM_CLOCK_MILLIS,
+          OperationType.SYSTEM_CLOCK_NANOS);
 
-  private static final Set<OperationType> NETWORK_OPS =
-      Set.of(
-          OperationType.SOCKET_CONNECT,
-          OperationType.SOCKET_ACCEPT,
-          OperationType.SOCKET_READ,
-          OperationType.SOCKET_WRITE,
-          OperationType.SOCKET_CLOSE);
+  /**
+   * Why a reject is refused on an operation, for each operation no real call of which fails that
+   * way: the failure would be one the caller never sees from the real call (ADR 0005). Each reason
+   * names what to use instead.
+   */
+  private static final java.util.Map<OperationType, String> REJECT_REFUSALS =
+      new java.util.EnumMap<>(OperationType.class);
 
-  private static final Set<OperationType> THREAD_LOCAL_OPS =
-      Set.of(OperationType.THREAD_LOCAL_GET, OperationType.THREAD_LOCAL_SET);
+  static {
+    // The read loop runs on the event loop outside the pipeline's exception handling: a throwable
+    // there reaches the event loop, not the channel's handlers.
+    REJECT_REFUSALS.put(
+        OperationType.NETTY_CHANNEL_READ,
+        "the read runs outside the pipeline's exception handling; delay or gate the read, or"
+            + " reject NETTY_CHANNEL_WRITE, which fails through the pipeline");
+    // A worker evaluates the run before the pool records the task's outcome: a throwable there
+    // kills the worker and leaves the task's future incomplete for good.
+    final String workerRun =
+        "the pool cannot fail the task there (its future never completes and the worker dies);"
+            + " delay or gate the run, or reject EXECUTOR_SUBMIT";
+    REJECT_REFUSALS.put(OperationType.EXECUTOR_WORKER_RUN, workerRun);
+    REJECT_REFUSALS.put(OperationType.FORK_JOIN_TASK_RUN, workerRun);
+    // take() and poll() fail only by interruption: no consumer handles another exception, and a
+    // thread pool's worker dies on it and is replaced, over and over.
+    final String queueRead =
+        "the JDK's take() and poll() do not fail that way (a pool worker dies on it); delay or"
+            + " gate them, suppress QUEUE_POLL, or reject QUEUE_PUT or QUEUE_OFFER on a bounded"
+            + " queue";
+    REJECT_REFUSALS.put(OperationType.QUEUE_TAKE, queueRead);
+    REJECT_REFUSALS.put(OperationType.QUEUE_POLL, queueRead);
+    REJECT_REFUSALS.put(
+        OperationType.THREAD_PARK, "LockSupport.park never fails; delay or gate the park");
+    REJECT_REFUSALS.put(
+        OperationType.MONITOR_ENTER,
+        "entering a monitor never fails; delay or gate it, or use a monitorContention stressor");
+    REJECT_REFUSALS.put(
+        OperationType.SYSTEM_GC_REQUEST, "System.gc() never fails; suppress or delay the request");
+    final String threadLocal = "ThreadLocal.get() and set() never fail; suppress or delay them";
+    REJECT_REFUSALS.put(OperationType.THREAD_LOCAL_GET, threadLocal);
+    REJECT_REFUSALS.put(OperationType.THREAD_LOCAL_SET, threadLocal);
+    REJECT_REFUSALS.put(
+        OperationType.ASYNC_CANCEL,
+        "CompletableFuture.cancel never fails; suppress or delay it, or fail the future with"
+            + " exceptionalCompletion");
+    REJECT_REFUSALS.put(
+        OperationType.ZIP_DEFLATE,
+        "Deflater.deflate never fails; delay it, or reject ZIP_INFLATE, which fails with"
+            + " DataFormatException");
+    REJECT_REFUSALS.put(
+        OperationType.SYSTEM_EXIT_REQUEST,
+        "System.exit and Runtime.halt never fail; suppress the exit (it is refused with the"
+            + " documented exception) or delay it");
+    REJECT_REFUSALS.put(
+        OperationType.EXECUTOR_SHUTDOWN,
+        "ExecutorService.shutdown() and shutdownNow() never fail; delay or gate them");
+  }
 
-  private static boolean selectorContainsAny(
-      final ChaosSelector selector, final Set<OperationType> needles) {
-    return switch (selector) {
-      case ChaosSelector.ThreadSelector threadSel -> containsAny(threadSel.operations(), needles);
-      case ChaosSelector.ExecutorSelector executorSel ->
-          containsAny(executorSel.operations(), needles);
-      case ChaosSelector.QueueSelector queueSel -> containsAny(queueSel.operations(), needles);
-      case ChaosSelector.AsyncSelector asyncSel -> containsAny(asyncSel.operations(), needles);
-      case ChaosSelector.SchedulingSelector schedulingSel ->
-          containsAny(schedulingSel.operations(), needles);
-      case ChaosSelector.ShutdownSelector shutdownSel ->
-          containsAny(shutdownSel.operations(), needles);
-      case ChaosSelector.ClassLoadingSelector classLoadingSel ->
-          containsAny(classLoadingSel.operations(), needles);
-      case ChaosSelector.MethodSelector methodSel -> containsAny(methodSel.operations(), needles);
-      case ChaosSelector.MonitorSelector monitorSel ->
-          containsAny(monitorSel.operations(), needles);
-      case ChaosSelector.JvmRuntimeSelector jvmRuntimeSel ->
-          containsAny(jvmRuntimeSel.operations(), needles);
-      case ChaosSelector.NioSelector nioSel -> containsAny(nioSel.operations(), needles);
-      case ChaosSelector.NetworkSelector networkSel ->
-          containsAny(networkSel.operations(), needles);
-      case ChaosSelector.ThreadLocalSelector threadLocalSel ->
-          containsAny(threadLocalSel.operations(), needles);
-      case ChaosSelector.HttpClientSelector httpClientSel ->
-          containsAny(httpClientSel.operations(), needles);
-      case ChaosSelector.JdbcSelector jdbcSel -> containsAny(jdbcSel.operations(), needles);
-      case ChaosSelector.DnsSelector dnsSel -> containsAny(dnsSel.operations(), needles);
-      case ChaosSelector.SslSelector sslSel -> containsAny(sslSel.operations(), needles);
-      case ChaosSelector.FileIoSelector fileIoSel -> containsAny(fileIoSel.operations(), needles);
-      case ChaosSelector.StressSelector ignored -> false;
-    };
+  /**
+   * Operations a reject applies to: every operation whose real call can fail, so the reject raises
+   * what the call raises ({@code FailureFactory}) or returns what a refused call returns. Clock
+   * reads take only a skew, and the stressors' lifecycle is not selectable.
+   */
+  private static final Set<OperationType> REJECT_OPS = rejectOps();
+
+  private static Set<OperationType> rejectOps() {
+    final Set<OperationType> operations = EnumSet.complementOf(EnumSet.of(OperationType.LIFECYCLE));
+    operations.removeAll(REJECT_REFUSALS.keySet());
+    operations.removeAll(CLOCK_READ_OPS);
+    return operations;
+  }
+
+  /**
+   * Rejects effects the selected operations cannot carry out: any effect other than a clock skew on
+   * clock reads and a clock skew on operations that are not clock reads, SUPPRESS on an operation
+   * that does not honour it, and a reject where no real call fails. These combinations validated
+   * before but had no effect, or one no real call has.
+   */
+  private static void validateEffectOperationSupport(
+      final ChaosEffect effect, final ChaosSelector selector) {
+    final Set<OperationType> operations = SelectorOperations.of(selector);
+    validateClockReads(effect, operations);
+    if (effect instanceof ChaosEffect.SuppressEffect) {
+      for (final OperationType operation : operations) {
+        if (REJECT_INSTEAD_OF_SUPPRESS_OPS.contains(operation)) {
+          throw new ChaosValidationException(
+              "SuppressEffect is not supported for "
+                  + operation
+                  + ": no real client skips the call without failing it; use reject, which fails"
+                  + " it with the client's own exception (IOException for HTTP, SQLException for"
+                  + " JDBC)");
+        }
+        if (!SUPPRESS_OPS.contains(operation)) {
+          throw new ChaosValidationException(
+              "SuppressEffect is not supported for "
+                  + operation
+                  + "; this call cannot be skipped (use "
+                  + (REJECT_OPS.contains(operation) ? "delay or reject" : "delay")
+                  + "). Operations supporting suppress: "
+                  + SUPPRESS_OPS);
+        }
+      }
+    }
+    final Set<OperationType> deliveryOps = DELIVERY_EFFECT_OPS.get(effect.getClass());
+    if (deliveryOps != null && !deliveryOps.containsAll(operations)) {
+      throw new ChaosValidationException(
+          effect.getClass().getSimpleName()
+              + " applies only to "
+              + deliveryOps
+              + ", not "
+              + operations);
+    }
+    if (effect instanceof ChaosEffect.ErrnoEffect errnoEffect) {
+      final Set<OperationType> allowed = ERRNO_OPS.get(errnoEffect.errno());
+      for (final OperationType operation : operations) {
+        if (allowed == null || !allowed.contains(operation)) {
+          throw new ChaosValidationException(
+              errnoEffect.errno()
+                  + " is a "
+                  + errnoEffect.errno().family().name().toLowerCase(java.util.Locale.ROOT)
+                  + " error and does not apply to "
+                  + operation
+                  + ", where the kernel never reports it; it applies to "
+                  + allowed);
+        }
+      }
+    }
+    if (effect instanceof ChaosEffect.RejectEffect) {
+      for (final OperationType operation : operations) {
+        if (!REJECT_OPS.contains(operation)) {
+          throw new ChaosValidationException(
+              "RejectEffect is not supported for "
+                  + operation
+                  + ": "
+                  + REJECT_REFUSALS.getOrDefault(operation, "no real call of it fails"));
+        }
+      }
+      if (operations.contains(OperationType.RPC_CALL)) {
+        validateGrpcFailingStream();
+      }
+    }
+  }
+
+  private static final String GRPC_FAILING_STREAM = "io.grpc.internal.FailingClientStream";
+
+  /**
+   * The {@code FailingClientStream} constructors the gRPC reject can build; {@code
+   * ClientCallExtractor} in the instrumentation builds the stream against the same list, a copy the
+   * core cannot share ({@code GrpcFailingStreamShapesTest} keeps the two equal).
+   */
+  private static final List<List<String>> GRPC_FAILING_STREAM_SHAPES =
+      List.of(
+          List.of("io.grpc.Status"),
+          List.of("io.grpc.Status", "io.grpc.internal.ClientStreamListener$RpcProgress"),
+          List.of("io.grpc.Status", "[Lio.grpc.ClientStreamTracer;"),
+          List.of(
+              "io.grpc.Status",
+              "io.grpc.internal.ClientStreamListener$RpcProgress",
+              "[Lio.grpc.ClientStreamTracer;"));
+
+  /**
+   * A gRPC reject fails the call through gRPC's own {@code FailingClientStream} (a throw where the
+   * stream is created would panic the channel for a call started before its name resolved). The
+   * class is looked up through the activating thread's context class loader, then the system class
+   * loader (the loader of the call path is not known before a call): not visible, the reject is
+   * accepted (a version without a known constructor then fails the call by a throw and is named in
+   * the hook failures); visible without a known constructor, it is refused.
+   */
+  private static void validateGrpcFailingStream() {
+    final Class<?> failing = visibleGrpcFailingStream();
+    if (failing == null) {
+      return;
+    }
+    try {
+      for (final Constructor<?> constructor : failing.getConstructors()) {
+        final List<String> parameters = new ArrayList<>();
+        for (final Class<?> parameter : constructor.getParameterTypes()) {
+          parameters.add(parameter.getName());
+        }
+        if (GRPC_FAILING_STREAM_SHAPES.contains(parameters)) {
+          return;
+        }
+      }
+    } catch (final LinkageError | SecurityException unreadable) {
+      // Unreadable constructors: refused below, as no known one was found.
+    }
+    throw new ChaosValidationException(
+        "RejectEffect is not supported for RPC_CALL with this gRPC version: the reject fails the"
+            + " call through "
+            + GRPC_FAILING_STREAM
+            + ", and its constructors are none of "
+            + GRPC_FAILING_STREAM_SHAPES
+            + "; delay the call instead");
+  }
+
+  private static @Nullable Class<?> visibleGrpcFailingStream() {
+    for (final ClassLoader loader :
+        Arrays.asList(
+            Thread.currentThread().getContextClassLoader(), ClassLoader.getSystemClassLoader())) {
+      if (loader == null) {
+        continue;
+      }
+      try {
+        return Class.forName(GRPC_FAILING_STREAM, false, loader);
+      } catch (final ClassNotFoundException | LinkageError notVisible) {
+        // the next loader
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Clock reads only return a (possibly skewed) time: they take a clock skew and nothing else, and
+   * a clock skew applies to nothing else. Checked first, so no other rule recommends an effect a
+   * clock read refuses.
+   */
+  private static void validateClockReads(
+      final ChaosEffect effect, final Set<OperationType> operations) {
+    if (effect instanceof ChaosEffect.ClockSkewEffect) {
+      for (final OperationType operation : operations) {
+        if (!CLOCK_READ_OPS.contains(operation)) {
+          throw new ChaosValidationException(
+              "ClockSkewEffect only applies to clock reads "
+                  + CLOCK_READ_OPS
+                  + ", not "
+                  + operation);
+        }
+      }
+    } else if (containsAny(operations, CLOCK_READ_OPS)) {
+      throw new ChaosValidationException(
+          "clock reads "
+              + CLOCK_READ_OPS
+              + " only support ClockSkewEffect; "
+              + effect.getClass().getSimpleName()
+              + " would never apply to them");
+    }
   }
 
   private static boolean containsAny(

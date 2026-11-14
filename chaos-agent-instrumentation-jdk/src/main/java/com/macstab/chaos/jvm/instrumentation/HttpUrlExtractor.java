@@ -1,19 +1,26 @@
 package com.macstab.chaos.jvm.instrumentation;
 
+import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.reflect.Method;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Reflective URL-extraction helpers for intercepted HTTP client calls.
  *
- * <p>All client types ({@code java.net.http.HttpRequest}, {@code okhttp3.Call}, Apache
- * HttpComponents request classes, Reactor Netty {@code HttpClientRequest}) are {@code compileOnly}
- * dependencies in the agent. They may or may not be on the application classpath at runtime.
- * Accessing them via {@link Method#invoke} keeps the instrumentation module free of any hard link.
+ * <p>All client types ({@code okhttp3.Call}, Apache HttpComponents request classes, Reactor Netty
+ * {@code HttpClient}) are {@code compileOnly} dependencies in the agent. (The JDK {@code
+ * HttpClient} advice reads {@code HttpRequest.uri()} directly and needs no extraction.) They may or
+ * may not be on the application classpath at runtime. Accessing them via {@link Method#invoke}
+ * keeps the instrumentation module free of any hard link.
  *
  * <p>Failures are swallowed and returned as {@code null} — the caller treats a {@code null} URL as
  * "no URL filter will match" which matches the {@link com.macstab.chaos.jvm.api.NamePattern#any()}
@@ -52,24 +59,77 @@ public final class HttpUrlExtractor {
     }
   }
 
+  /** OkHttp 4's end of a call: {@code RealCall.noMoreExchanges$okhttp(IOException)}. */
+  private static final String OKHTTP_NO_MORE_EXCHANGES = "noMoreExchanges$okhttp";
+
+  /**
+   * {@code noMoreExchanges} per call class, typed {@code (Object, IOException)Object}; empty when
+   * the class has none (OkHttp 3) or it cannot be made callable. A {@link MethodHandle}, not a
+   * {@link Method}: calling it is no {@code Method.invoke}, so a REFLECTION_INVOKE scenario never
+   * sees the agent's own call, while the listeners it runs still run as application code.
+   */
+  private static final ClassValue<Optional<MethodHandle>> OKHTTP_END = new OkHttpEnd();
+
+  /** Finds {@code noMoreExchanges} of a call class ({@link #OKHTTP_END}). */
+  private static final class OkHttpEnd extends ClassValue<Optional<MethodHandle>> {
+    @Override
+    protected Optional<MethodHandle> computeValue(final Class<?> callType) {
+      try {
+        final Method method =
+            callType.getDeclaredMethod(OKHTTP_NO_MORE_EXCHANGES, java.io.IOException.class);
+        try {
+          method.setAccessible(true);
+        } catch (final RuntimeException encapsulated) {
+          // public: callable without it when its package is exported
+        }
+        return Optional.of(
+            MethodHandles.lookup()
+                .unreflect(method)
+                .asType(
+                    MethodType.methodType(Object.class, Object.class, java.io.IOException.class)));
+      } catch (final ReflectiveOperationException | RuntimeException absent) {
+        return Optional.empty();
+      }
+    }
+  }
+
   private HttpUrlExtractor() {}
 
   /**
-   * Extracts the URL from a {@code java.net.http.HttpRequest} by calling {@code uri().toString()}
-   * reflectively.
+   * Ends an OkHttp call the agent rejected the way OkHttp ends a call whose network failed. {@code
+   * getResponseWithInterceptorChain} throws what {@code noMoreExchanges(e)} returns for an {@link
+   * java.io.IOException} its chain threw: that releases the call, exits its timeout (an expired
+   * call timeout turns the failure into an {@code InterruptedIOException}) and reports {@code
+   * EventListener.callFailed}. For any other failure its {@code finally} calls {@code
+   * noMoreExchanges(null)}, which reports {@code callEnd}. The reject is thrown from the advice
+   * before that body runs, so the advice runs this same step. Only the lookup is agent-internal;
+   * {@code noMoreExchanges} itself runs as the application's code, as it does in OkHttp.
    *
-   * @param request the {@code HttpRequest} instance; may be {@code null}
-   * @return the URL string, or {@code null} if extraction fails
+   * @param call the {@code RealCall}
+   * @param rejected what the dispatch threw
+   * @return what to throw: {@code noMoreExchanges}' answer for an {@code IOException}, else {@code
+   *     rejected}; also {@code rejected} when the call has no such method (OkHttp 3) or it cannot
+   *     be made callable, and the listener's own failure when it throws, as OkHttp lets it
+   *     propagate
    */
-  public static String fromJavaHttpRequest(final Object request) {
-    if (request == null) {
-      return null;
-    }
+  public static Throwable okHttpCallFailed(final Object call, final Throwable rejected) {
+    final Optional<MethodHandle> end;
+    BootstrapDispatcher.beginInternalCall();
     try {
-      final Object uri = invoke(request, "uri");
-      return uri == null ? null : uri.toString();
-    } catch (final Throwable ignored) {
-      return null;
+      end = OKHTTP_END.get(call.getClass());
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
+    if (end.isEmpty()) {
+      return rejected;
+    }
+    final java.io.@Nullable IOException failure =
+        rejected instanceof java.io.IOException io ? io : null;
+    try {
+      final Object thrown = (Object) end.get().invokeExact(call, failure);
+      return failure != null && thrown instanceof Throwable replacement ? replacement : rejected;
+    } catch (final Throwable listenerFailed) {
+      return listenerFailed;
     }
   }
 
@@ -79,7 +139,7 @@ public final class HttpUrlExtractor {
    * @param call the {@code okhttp3.Call} instance; may be {@code null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  public static String fromOkHttpCall(final Object call) {
+  public static @Nullable String fromOkHttpCall(final @Nullable Object call) {
     if (call == null) {
       return null;
     }
@@ -96,121 +156,107 @@ public final class HttpUrlExtractor {
   }
 
   /**
-   * Builds a URL-like string from an Apache HttpComponents 4.x {@code HttpHost} and {@code
-   * HttpRequest} pair.
+   * The URL of an Apache HttpComponents 4.x {@code doExecute(HttpHost, HttpRequest, HttpContext)}:
+   * an absolute request target ({@code getRequestLine().getUri()}) wins; else the host's URI
+   * ({@code HttpHost.toURI()}) followed by the target; else, without a host, the request's {@code
+   * getURI()}, or its target when it has none.
    *
-   * @param host an {@code org.apache.http.HttpHost} instance; may be {@code null}
-   * @param request an {@code org.apache.http.HttpRequest} instance; may be {@code null}
-   * @return the combined URL string, or {@code null} if extraction fails
+   * @param host the {@code org.apache.http.HttpHost}, or {@code null} when the caller gave none
+   * @param request the {@code org.apache.http.HttpRequest}; may be {@code null}
+   * @return the URL string, or {@code null} if extraction fails
    */
-  public static String fromApacheHc4Request(final Object host, final Object request) {
+  public static @Nullable String fromApacheHc4(
+      final @Nullable Object host, final @Nullable Object request) {
     try {
-      final String hostPart = host == null ? "" : host.toString();
-      final String requestPath = extractApacheHc4RequestPath(request);
-      final String combined = hostPart + requestPath;
+      final Object requestLine = request == null ? null : invoke(request, "getRequestLine");
+      final Object target = requestLine == null ? null : invoke(requestLine, "getUri");
+      final Object uri = host == null && request != null ? invoke(request, "getURI") : null;
+      return compose(host, target, uri);
+    } catch (final Throwable ignored) {
+      return null;
+    }
+  }
+
+  /**
+   * The URL of an Apache HttpComponents 5.x {@code doExecute(HttpHost, ClassicHttpRequest,
+   * HttpContext)}: an absolute request target ({@code getRequestUri()}) wins; else the host's URI
+   * ({@code HttpHost.toURI()}) followed by the target; else, without a host (as {@code
+   * executeOpen(null, request, context)} passes it), the request's full {@code getUri()}, or its
+   * target when it has none.
+   *
+   * @param host the {@code org.apache.hc.core5.http.HttpHost}, or {@code null} when the caller gave
+   *     none
+   * @param request the {@code org.apache.hc.core5.http.ClassicHttpRequest}; may be {@code null}
+   * @return the URL string, or {@code null} if extraction fails
+   */
+  public static @Nullable String fromApacheHc5(
+      final @Nullable Object host, final @Nullable Object request) {
+    try {
+      final Object target = request == null ? null : invoke(request, "getRequestUri");
+      final Object uri = host == null && request != null ? invoke(request, "getUri") : null;
+      return compose(host, target, uri);
+    } catch (final Throwable ignored) {
+      return null;
+    }
+  }
+
+  /**
+   * The one URL rule of the Apache clients: an absolute {@code target} wins; else {@code
+   * host.toURI()} followed by {@code target}; else, without a host, {@code uri}, else {@code
+   * target}.
+   */
+  private static @Nullable String compose(
+      final @Nullable Object host, final @Nullable Object target, final @Nullable Object uri)
+      throws Throwable {
+    final String path = target == null ? "" : target.toString();
+    if (isAbsolute(path)) {
+      return path;
+    }
+    if (host != null) {
+      final Object hostUri = invoke(host, "toURI");
+      final String combined = (hostUri == null ? "" : hostUri.toString()) + path;
+      return combined.isEmpty() ? null : combined;
+    }
+    if (uri != null) {
+      return uri.toString();
+    }
+    return path.isEmpty() ? null : path;
+  }
+
+  /**
+   * The URL of a Reactor Netty request from its {@code HttpClientConfig}: an absolute {@code uri()}
+   * wins; else {@code baseUrl()} followed by {@code uri()}; a missing part is left out.
+   *
+   * @param configuration the {@code reactor.netty.http.client.HttpClientConfig}; may be {@code
+   *     null}
+   * @return the URL string, or {@code null} if extraction fails
+   */
+  public static @Nullable String fromReactorNettyConfig(final @Nullable Object configuration) {
+    if (configuration == null) {
+      return null;
+    }
+    try {
+      final Object uri = invoke(configuration, "uri");
+      final String path = uri == null ? "" : uri.toString();
+      if (isAbsolute(path)) {
+        return path;
+      }
+      final Object baseUrl = invoke(configuration, "baseUrl");
+      final String combined = (baseUrl == null ? "" : baseUrl.toString()) + path;
       return combined.isEmpty() ? null : combined;
     } catch (final Throwable ignored) {
       return null;
     }
   }
 
-  private static String extractApacheHc4RequestPath(final Object request) throws Throwable {
-    if (request == null) {
-      return "";
-    }
-    final Object requestLine = invoke(request, "getRequestLine");
-    if (requestLine == null) {
-      return "";
-    }
-    final Object uri = invoke(requestLine, "getUri");
-    return uri == null ? "" : uri.toString();
+  /** Whether {@code url} is an absolute {@code http} or {@code https} URL. */
+  private static boolean isAbsolute(final String url) {
+    return url.regionMatches(true, 0, "http://", 0, "http://".length())
+        || url.regionMatches(true, 0, "https://", 0, "https://".length());
   }
 
-  /**
-   * Extracts the URI from an Apache HttpComponents 4.x {@code HttpUriRequest} via {@code getURI()}.
-   * Falls back to {@code getRequestLine().getUri()} if {@code getURI()} is absent (e.g., a plain
-   * {@code HttpRequest} passed through the HttpUriRequest-first matcher by a driver subclass).
-   *
-   * @param request an {@code org.apache.http.client.methods.HttpUriRequest} (or superclass); may be
-   *     {@code null}
-   * @return the URL string, or {@code null} if extraction fails
-   */
-  public static String fromApacheHc4UriRequest(final Object request) {
-    if (request == null) {
-      return null;
-    }
-    try {
-      final Object uri = invoke(request, "getURI");
-      if (uri != null) {
-        return uri.toString();
-      }
-    } catch (final Throwable ignored) {
-      // fall through to request-line path
-    }
-    try {
-      final Object requestLine = invoke(request, "getRequestLine");
-      if (requestLine != null) {
-        final Object uri = invoke(requestLine, "getUri");
-        return uri == null ? null : uri.toString();
-      }
-    } catch (final Throwable ignored) {
-      return null;
-    }
-    return null;
-  }
-
-  /**
-   * Extracts the URI from an Apache HttpComponents 5.x {@code ClassicHttpRequest} via {@code
-   * getRequestUri}.
-   *
-   * @param request an {@code org.apache.hc.core5.http.ClassicHttpRequest} instance; may be {@code
-   *     null}
-   * @return the URI string, or {@code null} if extraction fails
-   */
-  public static String fromApacheHc5Request(final Object request) {
-    if (request == null) {
-      return null;
-    }
-    // HC5 ClassicHttpRequest exposes getUri() returning a full java.net.URI (scheme+host+path).
-    // Prefer it over getRequestUri() which returns only the request-target path string
-    // (e.g. "/api/v1/resource"), making host-pattern matching against "https://host/*" fail.
-    try {
-      final Object uri = invoke(request, "getUri");
-      if (uri != null) {
-        return uri.toString();
-      }
-    } catch (final Throwable ignored) {
-      // fall through to path-only fallback
-    }
-    try {
-      final Object uri = invoke(request, "getRequestUri");
-      return uri == null ? null : uri.toString();
-    } catch (final Throwable ignored) {
-      return null;
-    }
-  }
-
-  /**
-   * Extracts a URL-like string from a Reactor Netty {@code HttpClientRequest} by calling {@code
-   * uri()}.
-   *
-   * @param request an {@code reactor.netty.http.client.HttpClientRequest} instance; may be {@code
-   *     null}
-   * @return the URL string, or {@code null} if extraction fails
-   */
-  public static String fromReactorNettyRequest(final Object request) {
-    if (request == null) {
-      return null;
-    }
-    try {
-      final Object uri = invoke(request, "uri");
-      return uri == null ? null : uri.toString();
-    } catch (final Throwable ignored) {
-      return null;
-    }
-  }
-
-  private static Object invoke(final Object target, final String methodName) throws Throwable {
+  private static @Nullable Object invoke(final Object target, final String methodName)
+      throws Throwable {
     final Class<?> targetClass = target.getClass();
     final ConcurrentHashMap<String, Method> perClass = METHOD_CACHE.get(targetClass);
     Method method = perClass.get(methodName);
@@ -221,10 +267,10 @@ public final class HttpUrlExtractor {
         // module has not opened the defining package for reflective access. Without catching
         // it specifically, the outer catch(Throwable) in every public entry point would hide
         // the concrete reason (module encapsulation) behind a silent null, leaking the real
-        // diagnostic. Swallow InaccessibleObjectException here because several of the HTTP
-        // client types (HttpRequest in java.net.http) ARE reachable without setAccessible
-        // when called from a module that reads java.net.http — we still cache the Method so
-        // invoke() can try it as-is. If the eventual invoke fails, the outer catch returns
+        // diagnostic. Swallow InaccessibleObjectException here because a public method of a
+        // client type can be reachable without setAccessible even when its module does not
+        // open the package — we still cache the Method so invoke() can try it as-is. If the
+        // eventual invoke fails, the outer catch returns
         // null and the extractor falls back to "no URL filter".
         try {
           method.setAccessible(true);
@@ -247,13 +293,13 @@ public final class HttpUrlExtractor {
         perClass.putIfAbsent(methodName, NEGATIVE_CACHE_MARKER);
       }
     }
-    if (method == null || method == NEGATIVE_CACHE_MARKER) {
+    if (method == null || isNegativeMarker(method)) {
       return null;
     }
     return method.invoke(target);
   }
 
-  private static Method findMethod(final Class<?> start, final String methodName) {
+  private static @Nullable Method findMethod(final Class<?> start, final String methodName) {
     final Set<Class<?>> visitedInterfaces = new HashSet<>();
     final Deque<Class<?>> interfaceQueue = new ArrayDeque<>();
     Class<?> current = start;
@@ -289,5 +335,10 @@ public final class HttpUrlExtractor {
       }
     }
     return null;
+  }
+
+  @SuppressWarnings("ReferenceEquality") // the marker is one instance, compared by identity
+  private static boolean isNegativeMarker(final Method method) {
+    return method == NEGATIVE_CACHE_MARKER;
   }
 }

@@ -28,9 +28,14 @@ public class DownstreamClient {
    * Fetches a ping response from the downstream service.
    *
    * @return the response body string
+   * @throws IllegalStateException if the downstream answered without a body
    */
   @Retry(name = "downstream")
   public String fetch() {
-    return restTemplate.getForObject(downstreamUrl + "/ping", String.class);
+    final String body = restTemplate.getForObject(downstreamUrl + "/ping", String.class);
+    if (body == null) {
+      throw new IllegalStateException("downstream answered without a body");
+    }
+    return body;
   }
 }

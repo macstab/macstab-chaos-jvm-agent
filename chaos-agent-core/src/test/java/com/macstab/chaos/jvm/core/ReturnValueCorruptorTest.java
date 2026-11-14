@@ -3,12 +3,28 @@ package com.macstab.chaos.jvm.core;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.List;
+import java.util.Map;
+import java.util.NavigableSet;
 import java.util.Optional;
+import java.util.PriorityQueue;
+import java.util.Queue;
+import java.util.Set;
+import java.util.SortedMap;
+import java.util.concurrent.BlockingDeque;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ConcurrentNavigableMap;
+import javax.management.AttributeList;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 @DisplayName("ReturnValueCorruptor")
 class ReturnValueCorruptorTest {
@@ -97,6 +113,79 @@ class ReturnValueCorruptorTest {
     void fallsBackToZeroForPrimitive() {
       assertThat(corrupt(ChaosEffect.ReturnValueStrategy.EMPTY, int.class, 5)).isEqualTo(0);
     }
+
+    @Test
+    @DisplayName(
+        "returns the empty primitive optionals for OptionalInt, OptionalLong, OptionalDouble")
+    void returnsEmptyPrimitiveOptionals() {
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY,
+                  java.util.OptionalInt.class,
+                  java.util.OptionalInt.of(1)))
+          .isEqualTo(java.util.OptionalInt.empty());
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY,
+                  java.util.OptionalLong.class,
+                  java.util.OptionalLong.of(1L)))
+          .isEqualTo(java.util.OptionalLong.empty());
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY,
+                  java.util.OptionalDouble.class,
+                  java.util.OptionalDouble.of(1d)))
+          .isEqualTo(java.util.OptionalDouble.empty());
+    }
+
+    @Test
+    @DisplayName("returns an empty string for CharSequence")
+    void returnsEmptyStringForCharSequence() {
+      assertThat(corrupt(ChaosEffect.ReturnValueStrategy.EMPTY, CharSequence.class, "abc"))
+          .isEqualTo("");
+    }
+
+    @Test
+    @DisplayName("returns a zero-length array of the declared component type")
+    void returnsZeroLengthArrays() {
+      assertThat(corrupt(ChaosEffect.ReturnValueStrategy.EMPTY, int[].class, new int[] {1}))
+          .isInstanceOfSatisfying(int[].class, array -> assertThat(array).isEmpty());
+      assertThat(corrupt(ChaosEffect.ReturnValueStrategy.EMPTY, String[].class, new String[] {"a"}))
+          .isInstanceOfSatisfying(String[].class, array -> assertThat(array).isEmpty());
+    }
+
+    @Test
+    @DisplayName("returns empty streams for Stream, IntStream, LongStream and DoubleStream")
+    void returnsEmptyStreams() {
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY,
+                  java.util.stream.Stream.class,
+                  java.util.stream.Stream.of(1)))
+          .isInstanceOfSatisfying(
+              java.util.stream.Stream.class, stream -> assertThat(stream.count()).isZero());
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY,
+                  java.util.stream.IntStream.class,
+                  java.util.stream.IntStream.of(1)))
+          .isInstanceOfSatisfying(
+              java.util.stream.IntStream.class, stream -> assertThat(stream.count()).isZero());
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY,
+                  java.util.stream.LongStream.class,
+                  java.util.stream.LongStream.of(1L)))
+          .isInstanceOfSatisfying(
+              java.util.stream.LongStream.class, stream -> assertThat(stream.count()).isZero());
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY,
+                  java.util.stream.DoubleStream.class,
+                  java.util.stream.DoubleStream.of(1d)))
+          .isInstanceOfSatisfying(
+              java.util.stream.DoubleStream.class, stream -> assertThat(stream.count()).isZero());
+    }
   }
 
   @Nested
@@ -134,6 +223,74 @@ class ReturnValueCorruptorTest {
     void returnsLongMinForLong() {
       assertThat(corrupt(ChaosEffect.ReturnValueStrategy.BOUNDARY_MIN, long.class, 5L))
           .isEqualTo(Long.MIN_VALUE);
+    }
+  }
+
+  @Nested
+  @DisplayName("EMPTY always returns a value assignable to the declared type")
+  class EmptyAssignability {
+
+    @ParameterizedTest
+    @ValueSource(
+        classes = {
+          List.class,
+          Collection.class,
+          Set.class,
+          Map.class,
+          Queue.class,
+          Deque.class,
+          ArrayList.class,
+          PriorityQueue.class,
+          BlockingQueue.class,
+          BlockingDeque.class,
+          ConcurrentNavigableMap.class,
+          ConcurrentMap.class,
+          NavigableSet.class,
+          SortedMap.class,
+          Iterable.class
+        })
+    void emptyContainerFitsDeclaredType(final Class<?> declared) {
+      final Object empty = corrupt(ChaosEffect.ReturnValueStrategy.EMPTY, declared, new Object());
+
+      assertThat(empty).isNotNull();
+      assertThat(declared.isInstance(empty))
+          .as("%s is assignable to %s", empty.getClass().getName(), declared.getName())
+          .isTrue();
+      assertThat(
+              empty instanceof Collection<?> collection
+                  ? collection.isEmpty()
+                  : ((Map<?, ?>) empty).isEmpty())
+          .isTrue();
+    }
+
+    @Test
+    @DisplayName("a concrete subtype with no fitting empty value falls back to null")
+    void concreteSubtypeFallsBack() {
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY, AttributeList.class, new AttributeList()))
+          .as("a plain ArrayList would fail the checkcast to AttributeList")
+          .isNull();
+    }
+  }
+
+  @Nested
+  @DisplayName("fallbacks")
+  class Fallbacks {
+
+    @Test
+    @DisplayName("an unknown return type passes the value through unchanged")
+    void unknownReturnTypePassesThrough() {
+      assertThat(corrupt(ChaosEffect.ReturnValueStrategy.NULL, null, "hello")).isEqualTo("hello");
+    }
+
+    @Test
+    @DisplayName("a boundary strategy without a boundary for the type falls back to ZERO")
+    void boundaryFallsBackToZero() {
+      assertThat(corrupt(ChaosEffect.ReturnValueStrategy.BOUNDARY_MAX, boolean.class, true))
+          .isEqualTo(Boolean.FALSE);
+      assertThat(corrupt(ChaosEffect.ReturnValueStrategy.BOUNDARY_MIN, boolean.class, true))
+          .isEqualTo(Boolean.FALSE);
     }
   }
 

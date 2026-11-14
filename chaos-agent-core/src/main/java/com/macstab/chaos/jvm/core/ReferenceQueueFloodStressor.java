@@ -7,7 +7,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.logging.Logger;
+import java.util.function.Consumer;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Floods the JVM's {@code ReferenceHandler} thread by creating a large batch of {@link
@@ -23,70 +24,118 @@ import java.util.logging.Logger;
  * simultaneously.
  *
  * <p>The stressor runs on a daemon thread that repeats the flood cycle every {@code floodInterval}.
- * {@link #close()} stops the thread and drains the reference queue.
+ * After each cycle it drains the references the collector has enqueued so far, so the queue holds
+ * at most about one cycle's references and the stressor does not exhaust the heap itself; a
+ * reference enqueued late is drained in the next cycle. {@link #close()} stops the thread and
+ * drains what is left.
  */
 final class ReferenceQueueFloodStressor implements ManagedStressor {
 
-  private static final Logger LOGGER =
-      Logger.getLogger(ReferenceQueueFloodStressor.class.getName());
+  private static final AgentLog LOGGER =
+      AgentLog.named(ReferenceQueueFloodStressor.class.getName());
 
   private final AtomicBoolean running = new AtomicBoolean(true);
   private final AtomicLong floodCycleCount = new AtomicLong();
+  private final AtomicLong drainedCount = new AtomicLong();
   private final ReferenceQueue<byte[]> queue = new ReferenceQueue<>();
   private final Thread floodThread;
 
   ReferenceQueueFloodStressor(final ChaosEffect.ReferenceQueueFloodEffect effect) {
+    this(effect, NO_END);
+  }
+
+  /**
+   * Creates and starts the flood thread, which ends the scenario through {@code onEnd} if it fails.
+   *
+   * @param effect the effect parameters
+   * @param onEnd the scenario's end callback, told when the flood thread fails
+   */
+  ReferenceQueueFloodStressor(
+      final ChaosEffect.ReferenceQueueFloodEffect effect, final Consumer<String> onEnd) {
+    this(effect, onEnd, null);
+  }
+
+  /**
+   * Creates the stressor with {@code cycle} run in place of each flood cycle (test seam, U-72 c8):
+   * a cycle that throws stands for one that runs out of memory.
+   *
+   * @param effect the effect parameters
+   * @param onEnd the scenario's end callback, told when the flood thread fails
+   * @param cycle runs in place of a flood and drain; {@code null} floods and drains
+   */
+  ReferenceQueueFloodStressor(
+      final ChaosEffect.ReferenceQueueFloodEffect effect,
+      final Consumer<String> onEnd,
+      final @Nullable Runnable cycle) {
     final int referenceCount = effect.referenceCount();
-    final long intervalMillis = effect.floodInterval().toMillis();
+    // Slept as a Duration: one too large for milliseconds lasts until close().
+    final java.time.Duration interval = effect.floodInterval();
+    final Runnable floodCycle =
+        cycle != null
+            ? cycle
+            : () -> {
+              flood(referenceCount);
+              drain();
+            };
 
     floodThread =
-        new Thread(
+        AgentThreads.start(
+            "macstab-chaos-refqueue-flood",
+            true,
             () -> {
               while (running.get()) {
-                flood(referenceCount);
+                floodCycle.run();
                 floodCycleCount.incrementAndGet();
                 if (!running.get()) {
                   break;
                 }
                 try {
-                  Thread.sleep(intervalMillis);
+                  Thread.sleep(interval);
                 } catch (final InterruptedException interruptedException) {
                   Thread.currentThread().interrupt();
+                  ManagedStressor.interrupted(onEnd, "ReferenceQueueFlood", !running.get());
                   break;
                 }
               }
             },
-            "macstab-chaos-refqueue-flood");
-    floodThread.setDaemon(true);
-    floodThread.start();
+            ManagedStressor.failure(onEnd, "ReferenceQueueFlood"));
     LOGGER.fine(
-        "ReferenceQueueFloodStressor started; referenceCount="
-            + referenceCount
-            + ", floodInterval="
-            + intervalMillis
-            + "ms");
+        () ->
+            "[chaos-agent] ReferenceQueueFloodStressor started; referenceCount="
+                + referenceCount
+                + ", floodInterval="
+                + interval);
   }
 
   @Override
   public void close() {
     running.set(false);
-    floodThread.interrupt();
-    try {
-      floodThread.join(5_000L);
-    } catch (final InterruptedException interruptedException) {
-      Thread.currentThread().interrupt();
-    }
-    // Drain the queue so we do not leave the ReferenceHandler with a large backlog.
-    while (queue.poll() != null) {
-      // drain
-    }
+    AgentThreads.stopAll(List.of(floodThread), 5_000L);
+    drain();
     LOGGER.fine(
-        "ReferenceQueueFloodStressor stopped after " + floodCycleCount.get() + " flood cycles");
+        () ->
+            "[chaos-agent] ReferenceQueueFloodStressor stopped after "
+                + floodCycleCount.get()
+                + " flood cycles");
   }
 
   /** Returns the number of completed flood cycles so far. */
   long floodCycleCount() {
     return floodCycleCount.get();
+  }
+
+  /** Returns the number of enqueued references drained from the queue so far. */
+  long drainedCount() {
+    return drainedCount.get();
+  }
+
+  /** Removes every reference enqueued so far, so the queue does not retain them. */
+  private void drain() {
+    long drained = 0;
+    while (queue.poll() != null) {
+      drained++;
+    }
+    drainedCount.addAndGet(drained);
   }
 
   private void flood(final int count) {
@@ -97,15 +146,19 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
     // in a local list that survives System.gc(), then drop the list so the referents become
     // unreachable while the References themselves remain live for enqueueing.
     final List<WeakReference<byte[]>> anchors = new ArrayList<>(count);
-    for (int i = 0; i < count; i++) {
-      anchors.add(new WeakReference<>(new byte[1024], queue));
+    try {
+      for (int i = 0; i < count; i++) {
+        anchors.add(new WeakReference<>(new byte[1024], queue));
+      }
+      // Suggest GC to enqueue the newly-unreachable referents. The `anchors` list keeps each
+      // WeakReference strongly reachable during and after this call so that enqueueing can
+      // happen.
+      System.gc();
+    } finally {
+      // Reachability fence: the JVM must not hoist `anchors` unreachable before System.gc()
+      // observes the References. Without this, escape analysis + scalar replacement could let
+      // the References be collected before they are ever enqueued.
+      java.lang.ref.Reference.reachabilityFence(anchors);
     }
-    // Suggest GC to enqueue the newly-unreachable referents. The `anchors` list keeps each
-    // WeakReference strongly reachable during and after this call so that enqueueing can happen.
-    System.gc();
-    // Reachability fence: the JVM must not hoist `anchors` unreachable before System.gc()
-    // observes the References. Without this, escape analysis + scalar replacement could
-    // resurrect the original bug.
-    java.lang.ref.Reference.reachabilityFence(anchors);
   }
 }

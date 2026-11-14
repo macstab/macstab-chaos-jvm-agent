@@ -37,6 +37,59 @@ class ChaosActuatorEndpointTest {
   }
 
   @Test
+  @DisplayName("without Spring Security the endpoint is created with one WARNING to protect it")
+  void warnsWithoutSecurity() {
+    final java.util.logging.Logger logger =
+        java.util.logging.Logger.getLogger(ChaosAutoConfiguration.class.getName());
+    final List<java.util.logging.LogRecord> records =
+        new java.util.concurrent.CopyOnWriteArrayList<>();
+    final java.util.logging.Handler handler =
+        new java.util.logging.Handler() {
+          @Override
+          public void publish(final java.util.logging.LogRecord record) {
+            records.add(record);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    logger.addHandler(handler);
+    try {
+      runner
+          .withPropertyValues("macstab.chaos.enabled=true", "macstab.chaos.actuator.enabled=true")
+          .run(context -> assertThat(context).hasSingleBean(ChaosActuatorEndpoint.class));
+    } finally {
+      logger.removeHandler(handler);
+    }
+
+    assertThat(records)
+        .filteredOn(
+            record -> record.getMessage().contains("Spring Security is not on the classpath"))
+        .singleElement()
+        .satisfies(
+            record -> assertThat(record.getLevel()).isEqualTo(java.util.logging.Level.WARNING));
+  }
+
+  @Test
+  @DisplayName("endpoint bean is absent when actuator.enabled=true comes from an untrusted source")
+  void endpointAbsentWhenSwitchUntrusted() {
+    runner
+        .withPropertyValues("macstab.chaos.enabled=true")
+        .withInitializer(
+            context ->
+                context
+                    .getEnvironment()
+                    .getPropertySources()
+                    .addFirst(
+                        new org.springframework.core.env.MapPropertySource(
+                            "configserver:app", Map.of("macstab.chaos.actuator.enabled", "true"))))
+        .run(context -> assertThat(context).doesNotHaveBean(ChaosActuatorEndpoint.class));
+  }
+
+  @Test
   @DisplayName("endpoint bean is absent when macstab.chaos.actuator.enabled is default")
   void endpointAbsentByDefault() {
     runner
@@ -68,16 +121,17 @@ class ChaosActuatorEndpointTest {
   }
 
   @Test
-  @DisplayName("stop() reports not-found for an unknown scenario ID")
+  @DisplayName("stop() answers 404 not-found for an unknown id")
   void stopReportsNotFoundForUnknownScenario() {
     runner
         .withPropertyValues("macstab.chaos.enabled=true", "macstab.chaos.actuator.enabled=true")
         .run(
             context -> {
               final ChaosActuatorEndpoint endpoint = context.getBean(ChaosActuatorEndpoint.class);
-              final ChaosActuatorEndpoint.StopResponse response = endpoint.stop("unknown-id");
-              assertThat(response.status()).isEqualTo("not-found");
-              assertThat(response.scenarioId()).isEqualTo("unknown-id");
+              final var response = endpoint.stop("unknown-id");
+              assertThat(response.getStatus()).isEqualTo(404);
+              assertThat(response.getBody().status()).isEqualTo("not-found");
+              assertThat(response.getBody().scenarioId()).isEqualTo("unknown-id");
             });
   }
 
@@ -89,7 +143,7 @@ class ChaosActuatorEndpointTest {
         .run(
             context -> {
               final ChaosActuatorEndpoint endpoint = context.getBean(ChaosActuatorEndpoint.class);
-              final ChaosActuatorEndpoint.StopAllResponse response = endpoint.stopAll();
+              final var response = endpoint.stopAll();
               assertThat(response.stoppedCount()).isZero();
             });
   }
@@ -149,6 +203,17 @@ class ChaosActuatorEndpointTest {
     public void addEventListener(final ChaosEventListener listener) {}
 
     @Override
+    public boolean removeEventListener(final ChaosEventListener listener) {
+
+      return false;
+    }
+
+    @Override
     public void close() {}
+
+    @Override
+    public ChaosSession.ScopeBinding bindSession(final String sessionId) {
+      return () -> {};
+    }
   }
 }

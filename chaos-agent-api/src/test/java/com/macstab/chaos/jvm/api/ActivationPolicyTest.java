@@ -89,8 +89,8 @@ class ActivationPolicyTest {
     @Test
     @DisplayName("probability 0.0 throws IllegalArgumentException pointing at omit-activation")
     void probabilityZeroRejected() {
-      // Silent normalisation of 0.0 → 1.0 was the opposite of what a user who typed 0 meant.
-      // The policy now rejects it explicitly so the ambiguity surfaces at construction time.
+      // Silently normalising 0.0 to 1.0 would be the opposite of what a user who types 0 means.
+      // The policy rejects it explicitly so the ambiguity surfaces at construction time.
       assertThatThrownBy(
               () ->
                   new ActivationPolicy(

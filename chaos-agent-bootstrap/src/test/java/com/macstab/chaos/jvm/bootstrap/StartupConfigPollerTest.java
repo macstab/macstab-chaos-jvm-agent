@@ -1,11 +1,14 @@
 package com.macstab.chaos.jvm.bootstrap;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
@@ -15,6 +18,7 @@ import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
+import com.macstab.chaos.jvm.startup.AgentSettings;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -31,8 +35,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.ResourceLock;
 
 @DisplayName("StartupConfigPoller")
+@ResourceLock("System.err")
 class StartupConfigPollerTest {
 
   @TempDir Path tempDir;
@@ -60,7 +66,7 @@ class StartupConfigPollerTest {
       final Path config = tempDir.resolve("plan.json");
       Files.writeString(config, "{}");
       final Optional<StartupConfigPoller> result =
-          StartupConfigPoller.createIfEnabled(null, Map.of(), config, runtime);
+          StartupConfigPoller.createIfEnabled(AgentSettings.of(null, Map.of()), config, runtime);
       assertThat(result).isEmpty();
     }
 
@@ -70,7 +76,8 @@ class StartupConfigPollerTest {
       final Path config = tempDir.resolve("plan.json");
       Files.writeString(config, "{}");
       final Optional<StartupConfigPoller> result =
-          StartupConfigPoller.createIfEnabled("configWatchInterval=0", Map.of(), config, runtime);
+          StartupConfigPoller.createIfEnabled(
+              AgentSettings.of("configWatchInterval=0", Map.of()), config, runtime);
       assertThat(result).isEmpty();
     }
 
@@ -80,9 +87,9 @@ class StartupConfigPollerTest {
       final Path config = tempDir.resolve("plan.json");
       Files.writeString(config, "{}");
       final Optional<StartupConfigPoller> result =
-          StartupConfigPoller.createIfEnabled("configWatchInterval=500", Map.of(), config, runtime);
+          StartupConfigPoller.createIfEnabled(
+              AgentSettings.of("configWatchInterval=500", Map.of()), config, runtime);
       assertThat(result).isPresent();
-      assertThat(result.get().intervalMs()).isEqualTo(500L);
       result.get().close();
     }
 
@@ -93,25 +100,10 @@ class StartupConfigPollerTest {
       Files.writeString(config, "{}");
       final Optional<StartupConfigPoller> result =
           StartupConfigPoller.createIfEnabled(
-              null, Map.of(StartupConfigPoller.ENV_WATCH_INTERVAL, "1000"), config, runtime);
-      assertThat(result).isPresent();
-      assertThat(result.get().intervalMs()).isEqualTo(1000L);
-      result.get().close();
-    }
-
-    @Test
-    @DisplayName("agent arg takes precedence over env var")
-    void agentArgTakesPrecedenceOverEnvVar() throws IOException {
-      final Path config = tempDir.resolve("plan.json");
-      Files.writeString(config, "{}");
-      final Optional<StartupConfigPoller> result =
-          StartupConfigPoller.createIfEnabled(
-              "configWatchInterval=200",
-              Map.of(StartupConfigPoller.ENV_WATCH_INTERVAL, "9999"),
+              AgentSettings.of(null, Map.of(StartupConfigPoller.ENV_WATCH_INTERVAL, "1000")),
               config,
               runtime);
       assertThat(result).isPresent();
-      assertThat(result.get().intervalMs()).isEqualTo(200L);
       result.get().close();
     }
   }
@@ -125,7 +117,8 @@ class StartupConfigPollerTest {
     @Test
     @DisplayName("returns 0 when both sources are absent")
     void zeroWhenAbsent() {
-      assertThat(StartupConfigPoller.resolveInterval(null, Map.of())).isEqualTo(0L);
+      assertThat(StartupConfigPoller.resolveInterval(AgentSettings.of(null, Map.of())))
+          .isEqualTo(0L);
     }
 
     @Test
@@ -133,7 +126,8 @@ class StartupConfigPollerTest {
     void zeroWhenEnvVarNonNumeric() {
       assertThat(
               StartupConfigPoller.resolveInterval(
-                  null, Map.of(StartupConfigPoller.ENV_WATCH_INTERVAL, "notanumber")))
+                  AgentSettings.of(
+                      null, Map.of(StartupConfigPoller.ENV_WATCH_INTERVAL, "notanumber"))))
           .isEqualTo(0L);
     }
 
@@ -142,8 +136,19 @@ class StartupConfigPollerTest {
     void envVarWhenArgAbsent() {
       assertThat(
               StartupConfigPoller.resolveInterval(
-                  null, Map.of(StartupConfigPoller.ENV_WATCH_INTERVAL, "750")))
+                  AgentSettings.of(null, Map.of(StartupConfigPoller.ENV_WATCH_INTERVAL, "750"))))
           .isEqualTo(750L);
+    }
+
+    @Test
+    @DisplayName("an agent arg of 0 turns watching off over the env var")
+    void zeroArgOverridesEnvVar() {
+      assertThat(
+              StartupConfigPoller.resolveInterval(
+                  AgentSettings.of(
+                      "configWatchInterval=0",
+                      Map.of(StartupConfigPoller.ENV_WATCH_INTERVAL, "500"))))
+          .isEqualTo(0L);
     }
 
     @Test
@@ -151,9 +156,77 @@ class StartupConfigPollerTest {
     void argOverridesEnvVar() {
       assertThat(
               StartupConfigPoller.resolveInterval(
-                  "configWatchInterval=300",
-                  Map.of(StartupConfigPoller.ENV_WATCH_INTERVAL, "9999")))
+                  AgentSettings.of(
+                      "configWatchInterval=300",
+                      Map.of(StartupConfigPoller.ENV_WATCH_INTERVAL, "9999"))))
           .isEqualTo(300L);
+    }
+
+    @Test
+    @DisplayName("the system property is read when the agent arg is absent")
+    void systemProperty() {
+      System.setProperty("macstab.chaos.configWatchInterval", "100");
+      try {
+        assertThat(StartupConfigPoller.resolveInterval(AgentSettings.of(null, Map.of())))
+            .isEqualTo(100L);
+      } finally {
+        System.clearProperty("macstab.chaos.configWatchInterval");
+      }
+    }
+
+    @Test
+    @DisplayName("MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL is read")
+    void newEnvironmentName() {
+      assertThat(
+              StartupConfigPoller.resolveInterval(
+                  AgentSettings.of(null, Map.of("MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL", "100"))))
+          .isEqualTo(100L);
+    }
+
+    @Test
+    @DisplayName("an unparsable interval turns watching off with one line naming the value")
+    void unparsableIsReported() {
+      final java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
+      final java.io.PrintStream original = System.err;
+      final long interval;
+      System.setErr(
+          new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
+      try {
+        interval =
+            StartupConfigPoller.resolveInterval(
+                AgentSettings.of(null, Map.of(StartupConfigPoller.ENV_WATCH_INTERVAL, "abc")));
+      } finally {
+        System.setErr(original);
+      }
+
+      assertThat(interval).isZero();
+      assertThat(captured.toString(java.nio.charset.StandardCharsets.UTF_8).lines())
+          .singleElement(org.assertj.core.api.InstanceOfAssertFactories.STRING)
+          .startsWith("[chaos-agent]")
+          .contains(StartupConfigPoller.ENV_WATCH_INTERVAL, "'abc'");
+    }
+
+    @Test
+    @DisplayName("a negative interval turns watching off with one line naming the value")
+    void negativeIsReported() {
+      final java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
+      final java.io.PrintStream original = System.err;
+      final long interval;
+      System.setErr(
+          new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
+      try {
+        interval =
+            StartupConfigPoller.resolveInterval(
+                AgentSettings.of("configWatchInterval=-500", Map.of()));
+      } finally {
+        System.setErr(original);
+      }
+
+      assertThat(interval).isZero();
+      assertThat(captured.toString(java.nio.charset.StandardCharsets.UTF_8).lines())
+          .singleElement(org.assertj.core.api.InstanceOfAssertFactories.STRING)
+          .startsWith("[chaos-agent]")
+          .contains("'-500'", "negative");
     }
   }
 
@@ -171,7 +244,7 @@ class StartupConfigPollerTest {
       Files.writeString(config, "{}");
       poller =
           StartupConfigPoller.createIfEnabled(
-                  "configWatchInterval=60000", Map.of(), config, runtime)
+                  AgentSettings.of("configWatchInterval=60000", Map.of()), config, runtime)
               .orElseThrow();
     }
 
@@ -228,6 +301,35 @@ class StartupConfigPollerTest {
     }
 
     @Test
+    @DisplayName("a changed scenario that fails to activate restores the previous version")
+    void failedChangeRestoresPreviousVersion() {
+      final ChaosScenario v1 = scenarioWithMaxApplications("x", 1);
+      final ChaosScenario v2 = scenarioWithMaxApplications("x", 2);
+      final ChaosActivationHandle restored = mock(ChaosActivationHandle.class);
+      when(runtime.activate(v1)).thenReturn(handle1, restored);
+      when(runtime.activate(v2)).thenThrow(new IllegalArgumentException("invalid v2"));
+      poller.applyDiff(List.of(v1));
+
+      assertThatThrownBy(() -> poller.applyDiff(List.of(v2)))
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessageContaining("previous scenarios kept");
+
+      verify(runtime, times(2)).activate(v1);
+    }
+
+    @Test
+    @DisplayName("a plan with one failing scenario activates none of its new scenarios")
+    void failingPlanActivatesNothing() {
+      when(runtime.activate(scenario("a"))).thenReturn(handle1);
+      when(runtime.activate(scenario("b"))).thenThrow(new IllegalArgumentException("invalid b"));
+
+      assertThatThrownBy(() -> poller.applyDiff(List.of(scenario("a"), scenario("b"))))
+          .isInstanceOf(IllegalStateException.class);
+
+      verify(handle1).stop();
+    }
+
+    @Test
     @DisplayName("new scenario is activated without touching existing ones")
     void newScenarioActivatedAlongsideExisting() {
       when(runtime.activate(scenario("a"))).thenReturn(handle1);
@@ -257,7 +359,7 @@ class StartupConfigPollerTest {
       Files.writeString(config, "{\"scenarios\":[]}");
       poller =
           StartupConfigPoller.createIfEnabled(
-                  "configWatchInterval=60000", Map.of(), config, runtime)
+                  AgentSettings.of("configWatchInterval=60000", Map.of()), config, runtime)
               .orElseThrow();
       // First pollOnce seeds lastModified; empty plan → no activate calls.
       poller.pollOnce();
@@ -272,6 +374,27 @@ class StartupConfigPollerTest {
     }
 
     @Test
+    @DisplayName("a touch of an applied plan reloads nothing and calls the runtime no more")
+    void touchCallsNothing() throws Exception {
+      Files.writeString(
+          config,
+          ChaosPlanMapper.write(
+              new com.macstab.chaos.jvm.api.ChaosPlan(null, null, List.of(scenario("s1")))));
+      Files.setLastModifiedTime(config, FileTime.from(Instant.now().minusSeconds(30)));
+      when(runtime.activate(any(ChaosScenario.class))).thenReturn(handle1);
+      poller.pollOnce();
+      verify(runtime).activate(scenario("s1"));
+      clearInvocations(runtime);
+
+      // Same content, a newer modification time.
+      Files.setLastModifiedTime(config, FileTime.from(Instant.now().minusSeconds(20)));
+      final String stderr = StderrCapture.of(poller::pollOnce);
+
+      assertThat(stderr).doesNotContain("config reloaded");
+      verifyNoMoreInteractions(runtime);
+    }
+
+    @Test
     @DisplayName("applies diff when file modification time changes")
     void applyDiffWhenFileChanges() throws IOException {
       final com.macstab.chaos.jvm.api.ChaosPlan updated =
@@ -283,6 +406,18 @@ class StartupConfigPollerTest {
       poller.pollOnce();
 
       verify(runtime).activate(any(ChaosScenario.class));
+    }
+
+    @Test
+    @DisplayName("a file holding an array of scenarios is applied like a plan")
+    void appliesAnArrayOfScenarios() throws IOException {
+      Files.writeString(config, "[" + ChaosPlanMapper.toJson(scenario("s1")) + "]");
+      Files.setLastModifiedTime(config, FileTime.from(Instant.now().plusSeconds(2)));
+
+      when(runtime.activate(any(ChaosScenario.class))).thenReturn(handle1);
+      poller.pollOnce();
+
+      verify(runtime).activate(scenario("s1"));
     }
   }
 
@@ -300,7 +435,7 @@ class StartupConfigPollerTest {
 
       final StartupConfigPoller poller =
           StartupConfigPoller.createIfEnabled(
-                  "configWatchInterval=60000", Map.of(), config, runtime)
+                  AgentSettings.of("configWatchInterval=60000", Map.of()), config, runtime)
               .orElseThrow();
 
       when(runtime.activate(scenario("a"))).thenReturn(handle1);
@@ -321,11 +456,15 @@ class StartupConfigPollerTest {
 
       final StartupConfigPoller poller =
           StartupConfigPoller.createIfEnabled(
-                  "configWatchInterval=60000", Map.of(), config, runtime)
+                  AgentSettings.of("configWatchInterval=60000", Map.of()), config, runtime)
               .orElseThrow();
 
       poller.close();
       poller.close();
+
+      // A closed poller applies no plan any more: a tick still in flight changes nothing.
+      poller.applyDiff(List.of(scenario("late")));
+      verify(runtime, never()).activate(any(ChaosScenario.class));
     }
   }
 

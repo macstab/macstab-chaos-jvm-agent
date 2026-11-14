@@ -1,0 +1,61 @@
+public final class com/macstab/chaos/jvm/testkit/ChaosAgentExtension implements org/junit/jupiter/api/extension/AfterEachCallback, org/junit/jupiter/api/extension/AfterTestExecutionCallback, org/junit/jupiter/api/extension/BeforeEachCallback, org/junit/jupiter/api/extension/BeforeTestExecutionCallback, org/junit/jupiter/api/extension/InvocationInterceptor, org/junit/jupiter/api/extension/ParameterResolver
+  public method <init>()V
+  public method afterEach(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method afterTestExecution(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method beforeEach(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method beforeTestExecution(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method interceptDynamicTest(Lorg/junit/jupiter/api/extension/InvocationInterceptor$Invocation;Lorg/junit/jupiter/api/extension/DynamicTestInvocationContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method interceptTestFactoryMethod(Lorg/junit/jupiter/api/extension/InvocationInterceptor$Invocation;Lorg/junit/jupiter/api/extension/ReflectiveInvocationContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)Ljava/lang/Object;
+  public method interceptTestMethod(Lorg/junit/jupiter/api/extension/InvocationInterceptor$Invocation;Lorg/junit/jupiter/api/extension/ReflectiveInvocationContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method interceptTestTemplateMethod(Lorg/junit/jupiter/api/extension/InvocationInterceptor$Invocation;Lorg/junit/jupiter/api/extension/ReflectiveInvocationContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method resolveParameter(Lorg/junit/jupiter/api/extension/ParameterContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)Ljava/lang/Object;
+  public method supportsParameter(Lorg/junit/jupiter/api/extension/ParameterContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)Z
+
+public final class com/macstab/chaos/jvm/testkit/ChaosAssertions
+  public static method assertThat(Lcom/macstab/chaos/jvm/api/ChaosActivationHandle;)Lcom/macstab/chaos/jvm/testkit/ChaosAssertions$ScenarioAssert;
+  public static method assertThat(Lcom/macstab/chaos/jvm/api/ChaosDiagnostics;)Lcom/macstab/chaos/jvm/testkit/ChaosAssertions$DiagnosticsAssert;
+
+public static final class com/macstab/chaos/jvm/testkit/ChaosAssertions$CountAssert
+  public method atLeast(J)V
+  public method atMost(J)V
+  public method exactly(J)V
+  public method never()V
+  public method within(Ljava/time/Duration;)Lcom/macstab/chaos/jvm/testkit/ChaosAssertions$CountAssert;
+
+public static final class com/macstab/chaos/jvm/testkit/ChaosAssertions$DiagnosticsAssert
+  public method hasNoFailures()Lcom/macstab/chaos/jvm/testkit/ChaosAssertions$DiagnosticsAssert;
+  public method hasNoFailuresFor(Ljava/lang/String;[Ljava/lang/String;)Lcom/macstab/chaos/jvm/testkit/ChaosAssertions$DiagnosticsAssert;
+  public method scenario(Ljava/lang/String;)Lcom/macstab/chaos/jvm/testkit/ChaosAssertions$ScenarioAssert;
+
+public static final class com/macstab/chaos/jvm/testkit/ChaosAssertions$ScenarioAssert
+  public method applied()Lcom/macstab/chaos/jvm/testkit/ChaosAssertions$CountAssert;
+  public method hasState(Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$ScenarioState;)Lcom/macstab/chaos/jvm/testkit/ChaosAssertions$ScenarioAssert;
+  public method matched()Lcom/macstab/chaos/jvm/testkit/ChaosAssertions$CountAssert;
+
+public final class com/macstab/chaos/jvm/testkit/ChaosTestKit
+  public static method install()Lcom/macstab/chaos/jvm/api/ChaosControlPlane;
+  public static method openSession(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosSession;
+
+public final class com/macstab/chaos/jvm/testkit/TrackingChaosControlPlane implements com/macstab/chaos/jvm/api/ChaosControlPlane
+  public method <init>(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;)V
+  public method <init>(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;Z)V
+  public method activate(Lcom/macstab/chaos/jvm/api/ChaosPlan;)Lcom/macstab/chaos/jvm/api/ChaosActivationHandle;
+  public method activate(Lcom/macstab/chaos/jvm/api/ChaosScenario;)Lcom/macstab/chaos/jvm/api/ChaosActivationHandle;
+  public method addEventListener(Lcom/macstab/chaos/jvm/api/ChaosEventListener;)V
+  public method bindSession(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosSession$ScopeBinding;
+  public method close()V
+  public method diagnostics()Lcom/macstab/chaos/jvm/api/ChaosDiagnostics;
+  public method openSession(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosSession;
+  public method removeEventListener(Lcom/macstab/chaos/jvm/api/ChaosEventListener;)Z
+  public method stopTracked()V
+
+public @interface com/macstab/chaos/jvm/testkit/WithChaos implements java/lang/annotation/Annotation
+  public abstract method resource()Ljava/lang/String;
+  public abstract method value()Ljava/lang/String;
+
+public static @interface com/macstab/chaos/jvm/testkit/WithChaos$List implements java/lang/annotation/Annotation
+  public abstract method value()[Lcom/macstab/chaos/jvm/testkit/WithChaos;
+
+public final class com/macstab/chaos/jvm/testkit/WithChaosSupport
+  public static method activate(Ljava/lang/reflect/AnnotatedElement;Lcom/macstab/chaos/jvm/api/ChaosControlPlane;Lcom/macstab/chaos/jvm/api/ChaosSession;)Ljava/util/List;
+  public static method close(Ljava/util/List;)V

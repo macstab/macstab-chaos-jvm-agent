@@ -1,12 +1,11 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
-import java.lang.ref.Cleaner;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Simulates native direct memory exhaustion by allocating off-heap {@link ByteBuffer}s without
@@ -19,11 +18,9 @@ import java.util.logging.Logger;
  *   <li>{@code registerCleaner=false} (the default leak mode): strong references are kept in this
  *       stressor. No Cleaner is registered, so native memory is not freed until {@link #close()} is
  *       called or the JVM exits.
- *   <li>{@code registerCleaner=true}: a {@link Cleaner} action is registered whose referent is
- *       <em>this stressor</em>, so the cleaner fires only when this stressor instance becomes
- *       phantom-reachable (i.e., the stressor has been released by the agent). The direct buffer is
- *       also strongly retained so that it survives until explicit {@link #close()} or GC of the
- *       stressor itself.
+ *   <li>{@code registerCleaner=true}: each buffer is allocated and dropped, so the JDK's own
+ *       cleaner frees it when a collection finds it unreachable: the pressure lasts until the next
+ *       GC, like a burst of short-lived buffers.
  * </ul>
  *
  * <p>{@link #close()} attempts to release native memory immediately via reflection on the internal
@@ -32,26 +29,42 @@ import java.util.logging.Logger;
  */
 final class DirectBufferPressureStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
-  private static final Cleaner CLEANER = Cleaner.create();
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   /** Cached reflection handle for {@code sun.nio.ch.DirectBuffer.cleaner()}, or {@code null}. */
-  private static final Method DIRECT_BUFFER_CLEANER = resolveCleanerMethod();
+  private static final @Nullable Method DIRECT_BUFFER_CLEANER = resolveCleanerMethod();
 
   /** Cached reflection handle for {@code sun.misc.Cleaner.clean()}, or {@code null}. */
-  private static final Method CLEANER_CLEAN = resolveCleanerCleanMethod();
+  private static final @Nullable Method CLEANER_CLEAN = resolveCleanerCleanMethod();
 
-  private static Method resolveCleanerMethod() {
+  /**
+   * Resolves {@code cleaner()} on the {@code sun.nio.ch.DirectBuffer} interface, whose package the
+   * agent opens (manifest {@code Add-Opens} and {@code redefineModule}). The buffer's own class,
+   * {@code java.nio.DirectByteBuffer}, is package-private in the unopened {@code java.nio} package:
+   * looked up there, {@code setAccessible} always fails, the handle is {@code null}, and {@link
+   * #close()} cannot free native memory eagerly — it is released only whenever a GC happens to
+   * collect the buffers. That is logged once as a WARNING.
+   */
+  private static @Nullable Method resolveCleanerMethod() {
     try {
-      final Method m = ByteBuffer.allocateDirect(1).getClass().getMethod("cleaner");
+      final Method m = Class.forName("sun.nio.ch.DirectBuffer").getMethod("cleaner");
       m.setAccessible(true);
       return m;
-    } catch (final Exception ignored) {
+    } catch (final Exception | LinkageError inaccessible) {
+      warnNoEagerRelease(inaccessible);
       return null;
     }
   }
 
-  private static Method resolveCleanerCleanMethod() {
+  private static void warnNoEagerRelease(final Throwable cause) {
+    LOGGER.warning(
+        () ->
+            "[chaos-agent] DirectBufferPressure: the direct buffer cleaner is out of reach ("
+                + cause
+                + "); a stopped stressor's memory is freed only by a later GC");
+  }
+
+  private static @Nullable Method resolveCleanerCleanMethod() {
     if (DIRECT_BUFFER_CLEANER == null) {
       return null;
     }
@@ -63,7 +76,8 @@ final class DirectBufferPressureStressor implements ManagedStressor {
       final Method m = cleaner.getClass().getMethod("clean");
       m.setAccessible(true);
       return m;
-    } catch (final Exception ignored) {
+    } catch (final Exception inaccessible) {
+      warnNoEagerRelease(inaccessible);
       return null;
     }
   }
@@ -72,25 +86,31 @@ final class DirectBufferPressureStressor implements ManagedStressor {
 
   DirectBufferPressureStressor(final ChaosEffect.DirectBufferPressureEffect effect) {
     final List<ByteBuffer> buffers = new ArrayList<>();
+    try {
+      allocate(effect, buffers);
+    } catch (final OutOfMemoryError exhausted) {
+      // Out of direct memory (memory reserved elsewhere makes the activation-time limit check no
+      // guarantee): free what this stressor took, so the failed start leaves nothing behind.
+      for (final ByteBuffer buffer : buffers) {
+        freeDirectBuffer(buffer);
+      }
+      throw exhausted;
+    }
+    this.retainedBuffers = List.copyOf(buffers);
+  }
+
+  private void allocate(
+      final ChaosEffect.DirectBufferPressureEffect effect, final List<ByteBuffer> buffers) {
     long remaining = effect.totalBytes();
     while (remaining > 0) {
       final int size = (int) Math.min(effect.bufferSizeBytes(), remaining);
       final ByteBuffer buffer = ByteBuffer.allocateDirect(size);
-      // Always retain a strong reference so the buffer survives until close() or until this
-      // stressor instance becomes phantom-reachable. Without this retention, registerCleaner=true
-      // previously used a throwaway local referent that became unreachable at loop-iteration
-      // end, so GC could reclaim the buffer immediately and the stressor produced zero
-      // sustained pressure.
-      buffers.add(buffer);
-      if (effect.registerCleaner()) {
-        // Referent = this stressor. The cleaner fires only when the stressor is
-        // phantom-reachable (e.g., dereferenced without explicit close()); freeDirectBuffer
-        // is safely idempotent, so close()+GC doesn't double-free in a harmful way.
-        CLEANER.register(this, () -> freeDirectBuffer(buffer));
+      if (!effect.registerCleaner()) {
+        buffers.add(buffer);
       }
+      // else dropped: the JDK's cleaner frees it once a collection finds it unreachable
       remaining -= size;
     }
-    this.retainedBuffers = List.copyOf(buffers);
   }
 
   @Override
@@ -104,7 +124,7 @@ final class DirectBufferPressureStressor implements ManagedStressor {
     }
   }
 
-  /** Returns the number of directly-retained buffers (registerCleaner=false only). */
+  /** Returns the number of retained buffers: none with registerCleaner=true, or after close(). */
   int retainedBufferCount() {
     final List<ByteBuffer> snapshot = retainedBuffers;
     return snapshot == null ? 0 : snapshot.size();
@@ -120,7 +140,10 @@ final class DirectBufferPressureStressor implements ManagedStressor {
         CLEANER_CLEAN.invoke(cleaner);
       }
     } catch (final Exception e) {
-      LOGGER.fine(() -> "DirectBufferPressureStressor: could not eagerly free direct buffer: " + e);
+      LOGGER.fine(
+          () ->
+              "[chaos-agent] DirectBufferPressureStressor: could not eagerly free direct buffer: "
+                  + e);
     }
   }
 }

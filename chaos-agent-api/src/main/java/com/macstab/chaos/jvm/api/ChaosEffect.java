@@ -1,8 +1,7 @@
 package com.macstab.chaos.jvm.api;
 
-import com.fasterxml.jackson.annotation.JsonSubTypes;
-import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import java.time.Duration;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Describes the chaos behavior applied when a scenario matches an invocation.
@@ -19,50 +18,6 @@ import java.time.Duration;
  * <p>Valid selector ↔ effect combinations are enforced by the runtime validator at activation time,
  * not by the type system.
  */
-@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
-@JsonSubTypes({
-  // ── Interceptor effects ────────────────────────────────────────────────────
-  @JsonSubTypes.Type(value = ChaosEffect.DelayEffect.class, name = "delay"),
-  @JsonSubTypes.Type(value = ChaosEffect.GateEffect.class, name = "gate"),
-  @JsonSubTypes.Type(value = ChaosEffect.RejectEffect.class, name = "reject"),
-  @JsonSubTypes.Type(value = ChaosEffect.SuppressEffect.class, name = "suppress"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.ExceptionalCompletionEffect.class,
-      name = "exceptionalCompletion"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.ExceptionInjectionEffect.class,
-      name = "exceptionInjection"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.ReturnValueCorruptionEffect.class,
-      name = "returnValueCorruption"),
-  @JsonSubTypes.Type(value = ChaosEffect.ClockSkewEffect.class, name = "clockSkew"),
-
-  // ── Stressor effects ───────────────────────────────────────────────────────
-  @JsonSubTypes.Type(value = ChaosEffect.HeapPressureEffect.class, name = "heapPressure"),
-  @JsonSubTypes.Type(value = ChaosEffect.KeepAliveEffect.class, name = "keepAlive"),
-  @JsonSubTypes.Type(value = ChaosEffect.MetaspacePressureEffect.class, name = "metaspacePressure"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.DirectBufferPressureEffect.class,
-      name = "directBufferPressure"),
-  @JsonSubTypes.Type(value = ChaosEffect.GcPressureEffect.class, name = "gcPressure"),
-  @JsonSubTypes.Type(value = ChaosEffect.FinalizerBacklogEffect.class, name = "finalizerBacklog"),
-  @JsonSubTypes.Type(value = ChaosEffect.DeadlockEffect.class, name = "deadlock"),
-  @JsonSubTypes.Type(value = ChaosEffect.ThreadLeakEffect.class, name = "threadLeak"),
-  @JsonSubTypes.Type(value = ChaosEffect.ThreadLocalLeakEffect.class, name = "threadLocalLeak"),
-  @JsonSubTypes.Type(value = ChaosEffect.MonitorContentionEffect.class, name = "monitorContention"),
-  @JsonSubTypes.Type(value = ChaosEffect.SpuriousWakeupEffect.class, name = "spuriousWakeup"),
-  @JsonSubTypes.Type(value = ChaosEffect.CodeCachePressureEffect.class, name = "codeCachePressure"),
-  @JsonSubTypes.Type(value = ChaosEffect.SafepointStormEffect.class, name = "safepointStorm"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.StringInternPressureEffect.class,
-      name = "stringInternPressure"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.ReferenceQueueFloodEffect.class,
-      name = "referenceQueueFlood"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.VirtualThreadCarrierPinningEffect.class,
-      name = "virtualThreadCarrierPinning"),
-})
 public sealed interface ChaosEffect
     permits ChaosEffect.DelayEffect,
         ChaosEffect.GateEffect,
@@ -73,6 +28,15 @@ public sealed interface ChaosEffect
         ChaosEffect.ReturnValueCorruptionEffect,
         ChaosEffect.ClockSkewEffect,
         ChaosEffect.SpuriousWakeupEffect,
+        ChaosEffect.ErrnoEffect,
+        ChaosEffect.ConnectionResetEffect,
+        ChaosEffect.TrickleEffect,
+        ChaosEffect.CorruptReadEffect,
+        ChaosEffect.TimeoutEffect,
+        ChaosEffect.TornWriteEffect,
+        ChaosEffect.DnsAnswerEffect,
+        ChaosEffect.DnsRewriteEffect,
+        ChaosEffect.RedirectEffect,
         ChaosEffect.HeapPressureEffect,
         ChaosEffect.KeepAliveEffect,
         ChaosEffect.MetaspacePressureEffect,
@@ -118,16 +82,175 @@ public sealed interface ChaosEffect
    * Returns a gate effect that blocks the matched operation until {@link
    * ChaosActivationHandle#release()} is called or {@code maxBlock} elapses.
    *
+   * <p>Only the handle releases the gate, so a plan read from JSON (a plan file, HTTP, JMX or
+   * {@code @WithChaos}) must set {@code maxBlock}: the plan reader refuses a gate without one.
+   *
    * @param maxBlock maximum time to block; {@code null} blocks indefinitely
    * @return a GateEffect that blocks for up to maxBlock
    */
-  static GateEffect gate(final Duration maxBlock) {
+  static GateEffect gate(final @Nullable Duration maxBlock) {
     return new GateEffect(maxBlock);
   }
 
   /**
-   * Returns a reject effect that throws an appropriate exception for the matched operation type
-   * (e.g., {@link java.util.concurrent.RejectedExecutionException} for executor submissions).
+   * Returns an effect that fails the operation the way the operating system reports {@code errno}:
+   * the native library's {@code ERRNO} effect, expressed as the Java exception callers catch.
+   *
+   * @param errno the error
+   * @return a new {@link ErrnoEffect}
+   */
+  static ErrnoEffect errno(final Errno errno) {
+    return new ErrnoEffect(errno);
+  }
+
+  /**
+   * Returns an effect that closes the socket abortively ({@code SO_LINGER} 0), so the peer sees a
+   * connection reset instead of an orderly close: the native library's {@code RESET}. Valid for
+   * {@link OperationType#SOCKET_CLOSE}.
+   *
+   * @return a new {@link ConnectionResetEffect}
+   */
+  static ConnectionResetEffect connectionReset() {
+    return new ConnectionResetEffect();
+  }
+
+  /**
+   * Returns an effect that lets each socket read return at most {@code maxBytes} bytes: the native
+   * library's {@code TRICKLE}. Valid for {@link OperationType#SOCKET_READ}.
+   *
+   * @param maxBytes the most bytes a read returns; {@code >= 1}
+   * @return a new {@link TrickleEffect}
+   */
+  static TrickleEffect trickle(final int maxBytes) {
+    return new TrickleEffect(maxBytes);
+  }
+
+  /**
+   * Returns an effect that flips one bit in the bytes a read returned: the native library's {@code
+   * CORRUPT}. Valid for {@link OperationType#SOCKET_READ} and {@link OperationType#FILE_IO_READ}.
+   *
+   * @return a new {@link CorruptReadEffect}
+   */
+  static CorruptReadEffect corruptRead() {
+    return new CorruptReadEffect();
+  }
+
+  /**
+   * Returns an effect that lets the call time out: it waits for the socket's own timeout ({@code
+   * SO_TIMEOUT} on a read, the connect timeout on a connect) and then throws {@link
+   * java.net.SocketTimeoutException}. It never fires when the timeout is infinite (0), like the
+   * native library's {@code TIMEOUT}. Valid for {@link OperationType#SOCKET_READ} and {@link
+   * OperationType#SOCKET_CONNECT}.
+   *
+   * @return a new {@link TimeoutEffect}
+   */
+  static TimeoutEffect timeout() {
+    return new TimeoutEffect();
+  }
+
+  /**
+   * Returns an effect that tears a write: a {@code FileChannel} or {@code SocketChannel} write
+   * writes a random 1 to n-1 of the n bytes and returns that count, which callers must loop on; a
+   * socket stream write sends that prefix and then resets the connection. The native library's
+   * {@code TORN}. Valid for {@link OperationType#FILE_IO_WRITE}, {@link OperationType#SOCKET_WRITE}
+   * and {@link OperationType#NIO_CHANNEL_WRITE}; a file stream write ({@code FileOutputStream},
+   * {@code RandomAccessFile}) either completes or throws, so a match there does nothing and counts
+   * no application.
+   *
+   * @return a new {@link TornWriteEffect}
+   */
+  static TornWriteEffect tornWrite() {
+    return new TornWriteEffect();
+  }
+
+  /**
+   * Returns an effect that answers DNS lookups with {@code address} and {@code moreAddresses}
+   * instead of the resolver's answer — even when the real lookup failed: the native library's
+   * {@code OVERRIDE}. Valid for {@link OperationType#DNS_ANSWER}.
+   *
+   * @param address an IPv4 or IPv6 literal: the first address of the answer
+   * @param moreAddresses further literals, in answer order
+   * @return a new {@link DnsAnswerEffect}
+   */
+  static DnsAnswerEffect dnsOverride(final String address, final String... moreAddresses) {
+    final java.util.List<String> addresses = new java.util.ArrayList<>(1 + moreAddresses.length);
+    addresses.add(address);
+    addresses.addAll(java.util.Arrays.asList(moreAddresses));
+    return new DnsAnswerEffect(addresses, null, false, null);
+  }
+
+  /**
+   * Returns an effect that keeps only the addresses of {@code family} in a DNS answer; an answer
+   * left empty fails with {@link java.net.UnknownHostException}: the native library's {@code
+   * FILTER_FAMILY}. Valid for {@link OperationType#DNS_ANSWER}.
+   *
+   * @param family the family to keep
+   * @return a new {@link DnsAnswerEffect}
+   */
+  static DnsAnswerEffect dnsFamily(final AddressFamily family) {
+    return new DnsAnswerEffect(null, family, false, null);
+  }
+
+  /**
+   * Returns an effect that shuffles the addresses of a DNS answer: the native library's {@code
+   * SHUFFLE}. Valid for {@link OperationType#DNS_ANSWER}.
+   *
+   * @return a new {@link DnsAnswerEffect}
+   */
+  static DnsAnswerEffect dnsShuffle() {
+    return new DnsAnswerEffect(null, null, true, null);
+  }
+
+  /**
+   * Returns an effect that keeps at most {@code count} addresses of a DNS answer: the native
+   * library's {@code LIMIT}. Valid for {@link OperationType#DNS_ANSWER}.
+   *
+   * @param count the most addresses to keep; {@code >= 1}
+   * @return a new {@link DnsAnswerEffect}
+   */
+  static DnsAnswerEffect dnsLimit(final int count) {
+    return new DnsAnswerEffect(null, null, false, count);
+  }
+
+  /**
+   * Returns an effect that looks up {@code host} instead of the name the application asked for: the
+   * native library's {@code REWRITE}. Valid for {@link OperationType#DNS_RESOLVE}.
+   *
+   * @param host the name to resolve instead
+   * @return a new {@link DnsRewriteEffect}
+   */
+  static DnsRewriteEffect dnsRewrite(final String host) {
+    return new DnsRewriteEffect(host);
+  }
+
+  /**
+   * Returns an effect that connects to {@code host:port} instead of the endpoint the application
+   * asked for: a failover target, a black hole, a slow proxy in front of the real service. Valid
+   * for {@link OperationType#SOCKET_CONNECT}.
+   *
+   * @param host the host to connect to instead; resolved when the connect is redirected
+   * @param port the port to connect to instead, {@code 1..65535}
+   * @return a new {@link RedirectEffect}
+   */
+  static RedirectEffect redirect(final String host, final int port) {
+    return new RedirectEffect(host, port);
+  }
+
+  /**
+   * Returns an effect that connects to {@code host} on the port the application asked for.
+   *
+   * @param host the host to connect to instead
+   * @return a new {@link RedirectEffect}
+   */
+  static RedirectEffect redirect(final String host) {
+    return new RedirectEffect(host, null);
+  }
+
+  /**
+   * Returns a reject effect that fails the call with the exception the real call raises (e.g.,
+   * {@link java.util.concurrent.RejectedExecutionException} for executor submissions, {@link
+   * java.net.UnknownHostException} for lookups), its stack trace starting at the intercepted
+   * method.
    *
    * @param message the exception message; must be non-blank
    * @return a RejectEffect with the given message
@@ -137,8 +260,12 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Returns a suppress effect that silently discards the matched operation. Callers receive {@code
-   * null} or {@code false} depending on operation semantics.
+   * Returns a suppress effect that skips the matched operation. Where the call can be skipped the
+   * caller sees no exception and receives {@code null}, {@code false}, {@code 0} or nothing,
+   * depending on the operation. Where skipping cannot be expressed the call fails instead: a thread
+   * start ({@code THREAD_START}, {@code VIRTUAL_THREAD_START}) throws {@link
+   * java.util.concurrent.RejectedExecutionException} and {@code SYSTEM_EXIT_REQUEST} throws {@link
+   * SecurityException}.
    *
    * @return a SuppressEffect
    */
@@ -165,13 +292,16 @@ public sealed interface ChaosEffect
    * the entry of matched methods, before the method body executes. Only valid with {@link
    * ChaosSelector.MethodSelector} and {@link OperationType#METHOD_ENTER}.
    *
-   * <p>The exception is instantiated via reflection. Both checked exceptions and {@link Error}
-   * subclasses are supported — the runtime uses {@code Unsafe.throwException} to bypass the
-   * compiler's checked-exception enforcement.
+   * <p>The class must be in a {@code java.} or {@code javax.} package ({@link
+   * IllegalArgumentException} here) and is resolved at activation ({@link ChaosValidationException}
+   * for a class the agent cannot load or build); see {@link ExceptionInjectionEffect}. The
+   * exception is instantiated via reflection for each call. Both checked exceptions and {@link
+   * Error} subclasses are thrown as they are, by a sneaky throw that the compiler cannot check.
    *
-   * <p>With stack trace enabled (the default here), the exception carries a full stack trace. Use
-   * {@link ExceptionInjectionEffect#ExceptionInjectionEffect(String, String, boolean)} directly
-   * with {@code withStackTrace=false} to suppress it for lower-overhead fault injection.
+   * <p>With stack trace enabled (the default here), the exception carries a stack trace starting at
+   * the intercepted method. Use {@link ExceptionInjectionEffect#ExceptionInjectionEffect(String,
+   * String, boolean)} directly with {@code withStackTrace=false} to throw it with an empty stack
+   * trace (the constructor still fills it; it is cleared before the throw).
    *
    * @param exceptionClassName binary class name of the exception type (e.g., {@code
    *     "java.io.IOException"}); must be a valid binary class name
@@ -208,7 +338,8 @@ public sealed interface ChaosEffect
    * other processes.
    *
    * @param skewAmount the clock offset to apply; positive = future, negative = past; must not be
-   *     zero
+   *     zero, except for {@code FREEZE}, where zero stops the clock at the moment the scenario
+   *     starts
    * @param mode how the skew evolves over time
    * @return a ClockSkewEffect
    */
@@ -222,7 +353,7 @@ public sealed interface ChaosEffect
    * in poorly-written NIO event loops.
    *
    * <p>Only valid with {@link ChaosSelector.NioSelector} and {@link
-   * OperationType#NIO_SELECTOR_SELECT}.
+   * OperationType#NIO_SELECTOR_SELECT} as its only operation.
    *
    * @return a SpuriousWakeupEffect
    */
@@ -274,8 +405,8 @@ public sealed interface ChaosEffect
    * ChaosSelector.StressTarget#METASPACE}.
    *
    * @param generatedClassCount number of synthetic classes to generate; must be &gt; 0
-   * @param fieldsPerClass static fields per class (controls per-class metaspace footprint); must be
-   *     &gt;= 0
+   * @param fieldsPerClass instance fields per class (controls per-class metaspace footprint); must
+   *     be &gt;= 0
    * @return a MetaspacePressureEffect
    */
   static MetaspacePressureEffect metaspacePressure(
@@ -285,9 +416,8 @@ public sealed interface ChaosEffect
 
   /**
    * Returns a direct buffer pressure stressor that allocates off-heap {@link
-   * java.nio.ByteBuffer#allocateDirect direct ByteBuffers} without registering a Cleaner,
-   * simulating NIO/Netty buffer leaks. The buffers are intentionally not cleaned up until the JVM
-   * exits.
+   * java.nio.ByteBuffer#allocateDirect direct ByteBuffers} and retains them, simulating NIO/Netty
+   * buffer leaks. The buffers are held until the scenario stops, which releases them.
    *
    * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
    * ChaosSelector.StressTarget#DIRECT_BUFFER}.
@@ -372,14 +502,16 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Returns a ThreadLocal leak stressor that plants {@code entriesPerThread} ThreadLocal entries of
-   * {@code valueSizeBytes} each in threads from the common pool, simulating large request-scoped
-   * objects retained across requests in a pool thread.
+   * Returns a ThreadLocal leak stressor that plants {@code entriesPerThread} × the common pool's
+   * parallelism ThreadLocal entries of {@code valueSizeBytes} each in threads from the common pool,
+   * simulating large request-scoped objects retained across requests in a pool thread. The pool
+   * spreads the entries over its workers.
    *
    * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
    * ChaosSelector.StressTarget#THREAD_LOCAL_LEAK}.
    *
-   * @param entriesPerThread number of ThreadLocal entries per pool thread; must be &gt; 0
+   * @param entriesPerThread ThreadLocal entries planted per unit of the pool's parallelism; must be
+   *     &gt; 0
    * @param valueSizeBytes size of each entry's byte-array value; must be &gt; 0
    * @return a ThreadLocalLeakEffect
    */
@@ -441,8 +573,8 @@ public sealed interface ChaosEffect
 
   /**
    * Returns a string intern pressure stressor that calls {@link String#intern()} on {@code
-   * internCount} unique strings of {@code stringLengthBytes} bytes each, exhausting the JVM's
-   * native string table in Metaspace.
+   * internCount} unique strings of {@code stringLengthBytes} bytes each, growing the JVM's string
+   * table. The strings live on the heap and are retained until the scenario stops.
    *
    * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
    * ChaosSelector.StressTarget#STRING_INTERN_PRESSURE}.
@@ -474,9 +606,11 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Returns a virtual-thread carrier pinning stressor that spawns {@code pinnedThreadCount}
-   * platform daemon threads, each of which sits inside a {@code synchronized} block in a loop
-   * sleeping for {@code pinDuration} per cycle.
+   * Returns a virtual-thread carrier pinning stressor that starts {@code pinnedThreadCount} virtual
+   * threads, each of which holds its carrier for {@code pinDuration} per cycle: on JDK 21–23 by
+   * sleeping inside a {@code synchronized} block (true pinning, no CPU), on JDK 24 and later, where
+   * {@code synchronized} no longer pins (JEP 491), by spin-waiting (one CPU per held carrier).
+   * Without {@code allowDestructiveEffects} it leaves one carrier free.
    *
    * <p>When a virtual thread is mounted on a carrier platform thread and that carrier enters a
    * {@code synchronized} block, the JVM (JDK 21) "pins" the virtual thread to its carrier: the
@@ -538,8 +672,10 @@ public sealed interface ChaosEffect
     /** Return zero or false. For numeric types: 0. For boolean: false. */
     ZERO,
     /**
-     * Return an empty collection, Optional, or String. Applicable to Collection, Map, Optional, and
-     * String return types.
+     * Return an empty value: an empty collection or map, an empty {@code Optional}, {@code
+     * OptionalInt}, {@code OptionalLong} or {@code OptionalDouble}, {@code ""} for {@code String}
+     * and {@code CharSequence}, a zero-length array, or an empty {@code Stream}, {@code IntStream},
+     * {@code LongStream} or {@code DoubleStream}.
      */
     EMPTY,
     /**
@@ -557,20 +693,33 @@ public sealed interface ChaosEffect
   /** Mode for {@link ClockSkewEffect}. Controls how the skew evolves over time. */
   enum ClockSkewMode {
     /**
-     * Apply a constant fixed offset to every clock read. System.currentTimeMillis() returns real +
-     * skewAmount.toMillis().
+     * Apply a constant fixed offset to every clock read. Wall-clock reads ({@code
+     * System.currentTimeMillis()}, {@code Instant} and the other {@code java.time} reads) move by
+     * {@code skewAmount} floored to the millisecond, so a millisecond read and an {@code Instant}
+     * read of the same moment agree; {@code System.nanoTime()} moves to the nanosecond.
      */
     FIXED,
     /**
      * Increase the skew monotonically with each read, simulating clock drift. Each call adds
-     * skewAmount to the accumulated offset.
+     * skewAmount to the accumulated offset, kept in nanoseconds: a drift below a millisecond per
+     * read moves the wall clock once it has added up to one.
      */
     DRIFT,
     /**
-     * Freeze the clock. Every call returns the same timestamp captured at activation. Simulates a
+     * Freeze the clock. Every call returns the same timestamp, plus {@code skewAmount}: the moment
+     * the scenario becomes active, which is its {@code activeFrom} when that is later than the
+     * activation. The wall clock and {@code System.nanoTime()} stop at the same moment. Simulates a
      * hung NTP daemon or failed clock source.
      */
     FREEZE,
+    /**
+     * Step the clock back once by {@code skewAmount} and keep it there, the native library's {@code
+     * REGRESS}. The first read after activation (inside the policy's time bounds) is returned
+     * unchanged and arms the scenario; the next read jumps back by {@code skewAmount}, and every
+     * later read stays shifted. Time visibly runs backwards once: what deadline, lease and ordering
+     * logic must survive after an NTP step. {@code skewAmount} must be positive.
+     */
+    REGRESS,
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -614,12 +763,13 @@ public sealed interface ChaosEffect
 
   /**
    * Blocks the matched operation on a manual gate until the gate is opened or maxBlock elapses. A
-   * null maxBlock blocks indefinitely.
+   * null maxBlock blocks indefinitely; a plan read from JSON refuses it, since nothing there can
+   * open the gate.
    *
    * @param maxBlock maximum time the operation blocks before unblocking; {@code null} means no
    *     timeout
    */
-  record GateEffect(Duration maxBlock) implements ChaosEffect {
+  record GateEffect(@Nullable Duration maxBlock) implements ChaosEffect {
     /** Validates the gate parameters. */
     public GateEffect {
       if (maxBlock != null && (maxBlock.isZero() || maxBlock.isNegative())) {
@@ -629,8 +779,13 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Rejects the matched operation by throwing an appropriate exception. The exception type is
-   * inferred from the OperationType by the runtime.
+   * Rejects the matched operation the way the real call fails: by throwing the exception that call
+   * throws, inferred from the OperationType by the runtime ({@code FailureFactory}). Where the real
+   * call reports a failure by its result instead, the result says so: {@link
+   * OperationType#QUEUE_OFFER} returns {@code false}, {@link OperationType#ASYNC_COMPLETE} and
+   * {@link OperationType#ASYNC_COMPLETE_EXCEPTIONALLY} return {@code false} without completing the
+   * future, and {@link OperationType#RESOURCE_LOAD} finds no resource ({@code null}). Operations
+   * whose real call never fails refuse a reject at activation.
    *
    * @param message non-blank message carried by the thrown exception
    */
@@ -644,8 +799,299 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Suppresses the matched operation silently. Callers receive a null return or false boolean
-   * depending on operation semantics.
+   * Fails the operation the way the operating system reports {@code errno}, as the Java exception
+   * an application catches for it — the native library's {@code ERRNO} effect. Each error applies
+   * to the calls the kernel reports it for (network errors to socket and NIO channel operations;
+   * {@code ENOENT} to opens, deletes and moves but never to a read); a mismatch is rejected at
+   * activation.
+   *
+   * <p>A read, write, truncate, map or close of an open file fails with {@link java.io.IOException}
+   * and the system's text; an open, delete or move names the file's path ({@link
+   * java.nio.file.FileSystemException#getFile()}).
+   *
+   * @param errno the error to raise
+   */
+  record ErrnoEffect(Errno errno) implements ChaosEffect {
+    /** Validates the ErrnoEffect parameters. */
+    public ErrnoEffect {
+      if (errno == null) {
+        throw new IllegalArgumentException("errno must not be null");
+      }
+    }
+  }
+
+  /** Closes the socket abortively ({@code SO_LINGER} 0): the peer sees a connection reset. */
+  record ConnectionResetEffect() implements ChaosEffect {}
+
+  /**
+   * Lets each socket read return at most {@code maxBytes} bytes.
+   *
+   * @param maxBytes the most bytes a read returns; {@code >= 1}
+   */
+  record TrickleEffect(int maxBytes) implements ChaosEffect {
+    /** Validates the TrickleEffect parameters. */
+    public TrickleEffect {
+      if (maxBytes < 1) {
+        throw new IllegalArgumentException("maxBytes must be >= 1, got " + maxBytes);
+      }
+    }
+  }
+
+  /** Flips exactly one bit in the bytes a successful read returned. */
+  record CorruptReadEffect() implements ChaosEffect {}
+
+  /**
+   * Waits for the socket's own timeout, then throws {@link java.net.SocketTimeoutException}; never
+   * fires when the timeout is infinite.
+   */
+  record TimeoutEffect() implements ChaosEffect {}
+
+  /** The address family a {@link DnsAnswerEffect} keeps. */
+  enum AddressFamily {
+    /** IPv4 addresses. */
+    IPV4,
+    /** IPv6 addresses. */
+    IPV6
+  }
+
+  /**
+   * Reshapes a DNS answer: replaces it ({@code override}, IP literals; applied even when the real
+   * lookup failed), keeps one address family, shuffles it and limits its size, in that order. Every
+   * field is optional, but at least one must be set.
+   *
+   * @param override the addresses to answer with instead; {@code null} to keep the real answer
+   * @param family the family to keep; {@code null} to keep both
+   * @param shuffle whether to shuffle the addresses
+   * @param limit the most addresses to keep; {@code null} for no limit
+   */
+  record DnsAnswerEffect(
+      java.util.@Nullable List<String> override,
+      @Nullable AddressFamily family,
+      boolean shuffle,
+      @Nullable Integer limit)
+      implements ChaosEffect {
+    /** Validates the DnsAnswerEffect parameters. */
+    public DnsAnswerEffect {
+      if (override != null) {
+        if (override.isEmpty()) {
+          throw new IllegalArgumentException("override must name at least one address");
+        }
+        override = java.util.List.copyOf(override);
+        for (final String address : override) {
+          CidrBlock.parseAddress(address);
+        }
+      }
+      if (limit != null && limit < 1) {
+        throw new IllegalArgumentException("limit must be >= 1, got " + limit);
+      }
+      if (override == null && family == null && !shuffle && limit == null) {
+        throw new IllegalArgumentException(
+            "DnsAnswerEffect needs override, family, shuffle or limit");
+      }
+    }
+  }
+
+  /**
+   * Resolves {@code host} instead of the name the application asked for.
+   *
+   * @param host the name to resolve instead; non-blank
+   */
+  record DnsRewriteEffect(String host) implements ChaosEffect {
+    /** Validates the DnsRewriteEffect parameters. */
+    public DnsRewriteEffect {
+      if (host == null || host.isBlank()) {
+        throw new IllegalArgumentException("host must be non-blank");
+      }
+    }
+  }
+
+  /**
+   * Connects to another endpoint than the one the application asked for. A Unix-domain connect is
+   * not redirected (a TCP endpoint cannot replace it) and counts no application.
+   *
+   * @param host the host to connect to instead; non-blank
+   * @param port the port to connect to instead, {@code 1..65535}; {@code null} keeps the requested
+   *     port
+   */
+  record RedirectEffect(String host, @Nullable Integer port) implements ChaosEffect {
+    /** Validates the RedirectEffect parameters. */
+    public RedirectEffect {
+      if (host == null || host.isBlank()) {
+        throw new IllegalArgumentException("host must be non-blank");
+      }
+      if (port != null && (port < 1 || port > 65_535)) {
+        throw new IllegalArgumentException("port must be in 1..65535, got " + port);
+      }
+    }
+  }
+
+  /** Tears a write: a channel write succeeds short, a socket stream write is cut and reset. */
+  record TornWriteEffect() implements ChaosEffect {}
+
+  /** The errors an {@link ErrnoEffect} can raise, with the Java exception each becomes. */
+  enum Errno {
+    /**
+     * Connection refused: {@link java.net.ConnectException}; {@link
+     * java.net.PortUnreachableException} on a datagram, {@link java.net.SocketException} on a read
+     * or write.
+     */
+    ECONNREFUSED(Family.NETWORK, 111, 61, "Connection refused"),
+    /**
+     * Timed out: {@link java.net.ConnectException} on a connect, else {@link
+     * java.net.SocketException}: the kernel gave up on the connection. A read that waits out {@code
+     * SO_TIMEOUT} is {@link ChaosEffect#timeout()}.
+     */
+    ETIMEDOUT(Family.NETWORK, 110, 60, "Connection timed out"),
+    /** Connection reset by peer: {@link java.net.SocketException}. */
+    ECONNRESET(Family.NETWORK, 104, 54, "Connection reset"),
+    /**
+     * No route to host: {@link java.net.NoRouteToHostException}; {@link java.net.SocketException}
+     * on a read or write.
+     */
+    EHOSTUNREACH(Family.NETWORK, 113, 65, "No route to host"),
+    /** Network is unreachable: {@link java.net.SocketException}. */
+    ENETUNREACH(Family.NETWORK, 101, 51, "Network is unreachable"),
+    /** Broken pipe (write to a closed connection): {@link java.net.SocketException}. */
+    EPIPE(Family.NETWORK, 32, 32, "Broken pipe"),
+    /** Address already in use: {@link java.net.BindException}. */
+    EADDRINUSE(Family.NETWORK, 98, 48, "Address already in use"),
+    /** Cannot assign the requested (local) address: {@link java.net.BindException}. */
+    EADDRNOTAVAIL(Family.NETWORK, 99, 49, "Cannot assign requested address"),
+    /** The socket is not connected: {@link java.net.SocketException}. */
+    ENOTCONN(Family.NETWORK, 107, 57, "Transport endpoint is not connected"),
+    /** No buffer space available (kernel socket buffers): {@link java.net.SocketException}. */
+    ENOBUFS(Family.NETWORK, 105, 55, "No buffer space available"),
+    /** Invalid argument: {@link java.net.SocketException}. */
+    EINVAL(Family.NETWORK, 22, 22, "Invalid argument"),
+    /** Operation not supported on the socket: {@link java.net.SocketException}. */
+    EOPNOTSUPP(Family.NETWORK, 95, 102, "Operation not supported"),
+    /** Address family not supported: {@link java.net.SocketException}. */
+    EAFNOSUPPORT(Family.NETWORK, 97, 47, "Address family not supported by protocol"),
+    /** Protocol not supported: {@link java.net.SocketException}. */
+    EPROTONOSUPPORT(Family.NETWORK, 93, 43, "Protocol not supported"),
+    /**
+     * No space left on device: {@link java.io.IOException} on a write, sync or close, {@link
+     * java.nio.file.FileSystemException} on an open.
+     */
+    ENOSPC(Family.FILE, 28, 28, "No space left on device"),
+    /** Disk quota exceeded: as {@link #ENOSPC}. */
+    EDQUOT(Family.FILE, 122, 69, "Disk quota exceeded"),
+    /**
+     * Read-only file system: {@link java.nio.file.FileSystemException} on an open, delete or move.
+     */
+    EROFS(Family.FILE, 30, 30, "Read-only file system"),
+    /**
+     * Permission denied: {@link java.nio.file.AccessDeniedException} on a {@code java.nio} open,
+     * delete or move ({@link java.io.FileNotFoundException} on a {@code java.io} open); {@link
+     * java.io.IOException} on a map wider than the file's open mode; {@link java.net.BindException}
+     * on {@link OperationType#SOCKET_BIND} (a privileged port); on {@link
+     * OperationType#PROCESS_START}, {@code IOException: Cannot run program}.
+     */
+    EACCES(Family.FILE, 13, 13, "Permission denied"),
+    /**
+     * No such file or directory: {@link java.nio.file.NoSuchFileException} on an open, delete or
+     * move.
+     */
+    ENOENT(Family.FILE, 2, 2, "No such file or directory"),
+    /**
+     * Input/output error (a failing disk): {@link java.io.IOException} on a call on an open file,
+     * {@link java.nio.file.FileSystemException} on a delete or move.
+     */
+    EIO(Family.FILE, 5, 5, "Input/output error"),
+    /**
+     * Too many open files (the process limit): {@link java.nio.file.FileSystemException} on an
+     * open; also on socket connects and accepts, which open a descriptor.
+     */
+    EMFILE(Family.FILE, 24, 24, "Too many open files"),
+    /** Too many open files in the system (the system limit): as {@link #EMFILE}. */
+    ENFILE(Family.FILE, 23, 23, "Too many open files in system"),
+    /**
+     * Resource temporarily unavailable (the process or thread limit): on {@link
+     * OperationType#PROCESS_START}, {@code IOException: Cannot run program}; on {@link
+     * OperationType#THREAD_START}, the JDK's {@code OutOfMemoryError: unable to create native
+     * thread}.
+     */
+    EAGAIN(Family.PROCESS, 11, 35, "Resource temporarily unavailable"),
+    /**
+     * Cannot allocate memory: on {@link OperationType#PROCESS_START} and {@link
+     * OperationType#THREAD_START}, as {@link #EAGAIN}; on {@link OperationType#FILE_IO_MAP}, the
+     * JDK's {@code IOException: Map failed} with an {@code OutOfMemoryError} cause.
+     */
+    ENOMEM(Family.PROCESS, 12, 12, "Cannot allocate memory");
+
+    /** Which operations an error belongs to. */
+    public enum Family {
+      /** Socket and NIO channel operations. */
+      NETWORK,
+      /** File operations; also process starts, which fail on the program file. */
+      FILE,
+      /**
+       * Resource limits of the process: process and platform thread starts ({@link #EAGAIN}, {@link
+       * #ENOMEM}), and for {@link #ENOMEM} also file maps.
+       */
+      PROCESS
+    }
+
+    private static final boolean MACOS =
+        System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).startsWith("mac");
+
+    private final Family family;
+    private final int linuxCode;
+    private final int macosCode;
+    private final String reason;
+
+    Errno(final Family family, final int linuxCode, final int macosCode, final String reason) {
+      this.family = family;
+      this.linuxCode = linuxCode;
+      this.macosCode = macosCode;
+      this.reason = reason;
+    }
+
+    /**
+     * Returns the error's number on this operating system (Linux numbering elsewhere), as the JDK
+     * prints it in {@code error=N}: {@code EAGAIN} is 11 on Linux and 35 on macOS.
+     *
+     * @return the errno value
+     */
+    public int code() {
+      return MACOS ? macosCode : linuxCode;
+    }
+
+    /**
+     * Returns the error's number on Linux, whatever the current operating system.
+     *
+     * @return the Linux errno value
+     */
+    public int linuxCode() {
+      return linuxCode;
+    }
+
+    /**
+     * Returns the operations this error belongs to.
+     *
+     * @return the family
+     */
+    public Family family() {
+      return family;
+    }
+
+    /**
+     * Returns the operating system's text for this error, used as the exception reason.
+     *
+     * @return the reason
+     */
+    public String reason() {
+      return reason;
+    }
+  }
+
+  /**
+   * Skips the matched operation. Where the call can be skipped the caller sees no exception and
+   * receives a {@code null}, {@code false} or {@code 0} return, or the call returns without doing
+   * its work. Where skipping cannot be expressed the call fails instead: a thread start ({@code
+   * THREAD_START}, {@code VIRTUAL_THREAD_START}) throws {@link
+   * java.util.concurrent.RejectedExecutionException} and {@code SYSTEM_EXIT_REQUEST} throws {@link
+   * SecurityException} (the exit is vetoed).
    */
   record SuppressEffect() implements ChaosEffect {}
 
@@ -673,13 +1119,16 @@ public sealed interface ChaosEffect
    * Injects an exception at the entry of a matched method, before the method body executes. Only
    * valid with {@link ChaosSelector.MethodSelector} using {@link OperationType#METHOD_ENTER}.
    *
-   * <p>The exception is instantiated via reflection using a (String) constructor when available, or
-   * the no-arg constructor otherwise. Both checked exceptions and Error subclasses
-   * (StackOverflowError, OutOfMemoryError) are supported — the runtime uses Unsafe.throwException
-   * to bypass compiler checked-exception enforcement.
+   * <p>The class must be in a {@code java.} or {@code javax.} package (checked here, {@link
+   * IllegalArgumentException}), and a public, non-abstract {@link Throwable} with a public {@code
+   * (String)} or no-argument constructor that the agent's class loader can see (checked at
+   * activation, {@link ChaosValidationException}). It is loaded without being initialised. The
+   * {@code (String)} constructor receives the message; with only a no-argument constructor the
+   * message becomes the cause. Checked exceptions and errors ({@code StackOverflowError}, {@code
+   * OutOfMemoryError}) are thrown as they are (a sneaky throw, which the compiler cannot check).
    *
-   * <p>When withStackTrace is false the exception is constructed without a stack trace, which is
-   * faster and not detectable by callers inspecting the stack trace.
+   * <p>When withStackTrace is false the exception's stack trace, filled by its constructor, is
+   * cleared before it is thrown.
    *
    * @param exceptionClassName binary name of the exception class to instantiate
    * @param message non-blank message passed to the exception constructor
@@ -688,14 +1137,11 @@ public sealed interface ChaosEffect
   record ExceptionInjectionEffect(String exceptionClassName, String message, boolean withStackTrace)
       implements ChaosEffect {
     /**
-     * Package prefixes permitted for injected exception classes. Restricting to JDK and project
-     * packages removes {@code Class.forName} as a class-loading gadget: a malicious config file
-     * cannot coerce the runtime into initialising an arbitrary class under the attacker's control
-     * (e.g. one with a static initialiser performing a side effect). Extending the list is a
-     * deliberate decision — add only classes that are known to be safe to load.
+     * Package prefixes permitted for injected exception classes: the JDK's. A plan can name no
+     * application or library class, so no plan makes the agent load one.
      */
     private static final java.util.List<String> ALLOWED_PACKAGE_PREFIXES =
-        java.util.List.of("java.", "javax.", "jakarta.", "com.macstab.chaos.jvm.");
+        java.util.List.of("java.", "javax.");
 
     /**
      * Compiled binary class-name validator. Using a pre-compiled {@link java.util.regex.Pattern}
@@ -716,12 +1162,22 @@ public sealed interface ChaosEffect
       }
       if (!isAllowedPackage(exceptionClassName)) {
         throw new IllegalArgumentException(
-            "exceptionClassName is not in an allowed package (java., javax., jakarta., com.macstab.chaos.jvm.): "
+            "exceptionClassName is not in an allowed package (java., javax.): "
                 + exceptionClassName);
       }
       if (message == null || message.isBlank()) {
         throw new IllegalArgumentException("message must be non-blank");
       }
+    }
+
+    /** The JSON creator: an omitted {@code withStackTrace} is {@code true}. */
+    @SuppressWarnings(
+        "UnusedMethod") // bound by the JSON mix-in in chaos-agent-startup-config (ApiJsonMixins)
+    private ExceptionInjectionEffect(
+        final String exceptionClassName,
+        final String message,
+        final @Nullable Boolean withStackTrace) {
+      this(exceptionClassName, message, withStackTrace == null || withStackTrace);
     }
 
     private static boolean isValidBinaryClassName(final String name) {
@@ -765,8 +1221,10 @@ public sealed interface ChaosEffect
    * violates its monotonicity contract — this is intentional as it simulates a defective or
    * replaced clock source.
    *
-   * @param skewAmount amount to shift the observed clock; non-zero, positive or negative
-   * @param mode strategy used to apply the skew (jump, drift, or freeze)
+   * @param skewAmount amount to shift the observed clock; positive or negative, and non-zero except
+   *     for {@code FREEZE}, where zero stops the clock at the moment the scenario starts
+   * @param mode strategy used to apply the skew ({@code FIXED}, {@code DRIFT}, {@code FREEZE} or
+   *     {@code REGRESS})
    */
   record ClockSkewEffect(Duration skewAmount, ClockSkewMode mode) implements ChaosEffect {
     /** Validates the clock skew parameters. */
@@ -774,19 +1232,21 @@ public sealed interface ChaosEffect
       if (skewAmount == null) {
         throw new IllegalArgumentException("skewAmount must not be null");
       }
-      if (skewAmount.isZero()) {
-        throw new IllegalArgumentException("skewAmount must not be zero");
-      }
       if (mode == null) {
         throw new IllegalArgumentException("mode must not be null");
       }
-      // Duration.toNanos() overflows (ArithmeticException) past ~±292 years. Letting that escape
-      // at scenario-start time leaves the controller half-initialised — started=true is written
-      // before the ClockSkewState constructor runs — and the scenario remains ACTIVE with a null
-      // ClockSkewState, silently applying no skew while diagnostics claim it is live. Fail at
-      // plan-build time instead, where the caller can react.
+      // A zero skew changes nothing, except under FREEZE, where it stops the clock where it is.
+      if (skewAmount.isZero() && mode != ClockSkewMode.FREEZE) {
+        throw new IllegalArgumentException("skewAmount must not be zero");
+      }
+      if (mode == ClockSkewMode.REGRESS && skewAmount.isNegative()) {
+        throw new IllegalArgumentException(
+            "REGRESS steps the clock back by skewAmount; skewAmount must be positive");
+      }
+      // Duration.toNanos() overflows (ArithmeticException) past ~±292 years: reject such a skew
+      // when the plan is built, where the caller can react, not when the scenario starts.
       try {
-        skewAmount.toNanos();
+        final long unused = skewAmount.toNanos();
       } catch (final ArithmeticException overflow) {
         throw new IllegalArgumentException(
             "skewAmount out of range (must fit in Long nanos: ~±292 years): " + skewAmount,
@@ -867,7 +1327,9 @@ public sealed interface ChaosEffect
    * metaspace exhaustion.
    *
    * <p>When retain is true, strong references to the generated classes are kept to prevent
-   * unloading during GC — the realistic scenario for a classloader leak.
+   * unloading during GC — the realistic scenario for a classloader leak. When retain is false the
+   * classes and their loader are dropped right after loading: a transient spike that the next
+   * collection that unloads classes reclaims.
    *
    * @param generatedClassCount number of synthetic classes to generate; must be {@code > 0}
    * @param fieldsPerClass fields synthesised per generated class; must be {@code >= 0}
@@ -884,19 +1346,28 @@ public sealed interface ChaosEffect
         throw new IllegalArgumentException("fieldsPerClass must be >= 0");
       }
     }
+
+    /** The JSON creator: an omitted {@code retain} is {@code true}. */
+    @SuppressWarnings(
+        "UnusedMethod") // bound by the JSON mix-in in chaos-agent-startup-config (ApiJsonMixins)
+    private MetaspacePressureEffect(
+        final int generatedClassCount, final int fieldsPerClass, final @Nullable Boolean retain) {
+      this(generatedClassCount, fieldsPerClass, retain == null || retain);
+    }
   }
 
   /**
    * Allocates off-heap direct ByteBuffers to exhaust native direct memory. Simulates direct buffer
    * leaks common in NIO-heavy applications (Netty, Kafka clients).
    *
-   * <p>When registerCleaner is false the buffers are intentionally leaked — no Cleaner is
-   * registered. When true a Cleaner is registered but the reference is dropped, so the buffer is
-   * cleaned only when GC runs.
+   * <p>When registerCleaner is false the buffers are retained until the scenario stops. When true
+   * each buffer is allocated and dropped, so the JDK's cleaner frees it at the next GC: a burst of
+   * short-lived buffers.
    *
    * @param totalBytes total direct memory to retain; must be {@code > 0}
    * @param bufferSizeBytes size of each buffer; {@code <= totalBytes}
-   * @param registerCleaner whether a Cleaner is registered for each buffer
+   * @param registerCleaner {@code false} to retain the buffers until the scenario stops, {@code
+   *     true} to drop each one for the next GC to free
    */
   record DirectBufferPressureEffect(long totalBytes, int bufferSizeBytes, boolean registerCleaner)
       implements ChaosEffect {
@@ -952,6 +1423,23 @@ public sealed interface ChaosEffect
         throw new IllegalArgumentException("duration must be positive");
       }
     }
+
+    /**
+     * The JSON creator: an omitted {@code objectSizeBytes} is {@value #DEFAULT_OBJECT_SIZE_BYTES}.
+     */
+    @SuppressWarnings(
+        "UnusedMethod") // bound by the JSON mix-in in chaos-agent-startup-config (ApiJsonMixins)
+    private GcPressureEffect(
+        final long allocationRateBytesPerSecond,
+        final @Nullable Integer objectSizeBytes,
+        final boolean promoteToOldGen,
+        final Duration duration) {
+      this(
+          allocationRateBytesPerSecond,
+          objectSizeBytes == null ? DEFAULT_OBJECT_SIZE_BYTES : objectSizeBytes,
+          promoteToOldGen,
+          duration);
+    }
   }
 
   /**
@@ -968,10 +1456,10 @@ public sealed interface ChaosEffect
   record FinalizerBacklogEffect(int objectCount, Duration finalizerDelay) implements ChaosEffect {
     /**
      * Upper bound on {@code objectCount}. The stressor constructor allocates and retains every
-     * object simultaneously; pathological values like {@link Integer#MAX_VALUE} previously passed
-     * validation and then triggered {@link OutOfMemoryError} mid-loop, which unwinds through {@code
-     * ScenarioController.start()} and leaves the already-registered controller orphaned. Failing
-     * plan validation is far cheaper than explaining a partially-activated scenario.
+     * object simultaneously; a pathological value like {@link Integer#MAX_VALUE} would trigger
+     * {@link OutOfMemoryError} mid-loop, which unwinds through {@code ScenarioController.start()}
+     * and leaves the already-registered controller orphaned. Failing plan validation is far cheaper
+     * than explaining a partially-activated scenario.
      */
     public static final int MAX_OBJECT_COUNT = 50_000_000;
 
@@ -1040,6 +1528,19 @@ public sealed interface ChaosEffect
         throw new IllegalArgumentException("acquisitionDelay must be >= 0");
       }
     }
+
+    /**
+     * The JSON creator: an omitted {@code acquisitionDelay} is {@link #DEFAULT_ACQUISITION_DELAY};
+     * an omitted {@code participantCount} is refused as {@code 0}.
+     */
+    @SuppressWarnings(
+        "UnusedMethod") // bound by the JSON mix-in in chaos-agent-startup-config (ApiJsonMixins)
+    private DeadlockEffect(
+        final @Nullable Integer participantCount, final @Nullable Duration acquisitionDelay) {
+      this(
+          participantCount == null ? 0 : participantCount,
+          acquisitionDelay == null ? DEFAULT_ACQUISITION_DELAY : acquisitionDelay);
+    }
   }
 
   /**
@@ -1057,7 +1558,8 @@ public sealed interface ChaosEffect
    * @param daemon whether leaked threads run as daemons
    * @param lifespan maximum lifetime per leaked thread; {@code null} means no limit
    */
-  record ThreadLeakEffect(int threadCount, String namePrefix, boolean daemon, Duration lifespan)
+  record ThreadLeakEffect(
+      int threadCount, String namePrefix, boolean daemon, @Nullable Duration lifespan)
       implements ChaosEffect {
     /**
      * Upper bound on {@code threadCount}. Each leaked thread consumes ~1 MiB of native stack plus a
@@ -1097,9 +1599,11 @@ public sealed interface ChaosEffect
    * common form of ThreadLocal memory leak in production: pool threads retaining large
    * request-scoped objects across requests.
    *
-   * <p>Planted entries are removed when the activation handle is closed.
+   * <p>The pool spreads the entries over its workers. Closing the activation handle releases the
+   * planted values, whichever worker holds them.
    *
-   * @param entriesPerThread number of ThreadLocal entries planted per pool thread; {@code > 0}
+   * @param entriesPerThread ThreadLocal entries planted per unit of the common pool's parallelism;
+   *     {@code > 0}
    * @param valueSizeBytes retained size per planted value; must be {@code > 0}
    */
   record ThreadLocalLeakEffect(int entriesPerThread, int valueSizeBytes) implements ChaosEffect {
@@ -1115,8 +1619,8 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Creates high contention on a shared monitor by spawning threads that repeatedly acquire and
-   * hold a single lock, simulating lock convoy conditions.
+   * Creates high contention on one shared {@link java.util.concurrent.locks.ReentrantLock} by
+   * spawning threads that repeatedly acquire and hold it, simulating lock convoy conditions.
    *
    * <p>When unfair is true the underlying lock does not guarantee FIFO ordering, increasing the
    * likelihood of thread starvation — the more destructive and realistic scenario.
@@ -1161,7 +1665,7 @@ public sealed interface ChaosEffect
   /**
    * Causes {@link java.nio.channels.Selector#select()} to return 0 immediately with no ready keys,
    * simulating a spurious wakeup. Only valid with {@link ChaosSelector.NioSelector} and {@link
-   * OperationType#NIO_SELECTOR_SELECT}.
+   * OperationType#NIO_SELECTOR_SELECT} as its only operation.
    */
   record SpuriousWakeupEffect() implements ChaosEffect {}
 
@@ -1217,9 +1721,9 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Interns a large number of unique strings into the JVM's native string table (Metaspace),
-   * creating memory pressure distinct from heap and class-loading pressure. Interned strings are
-   * not eligible for GC until the classloader that owns them is collected.
+   * Interns a large number of unique strings, growing the JVM's string table: a long table slows
+   * every {@code intern()} of the application. The strings live on the heap and are retained until
+   * the scenario stops; the next collection after that removes them from the table.
    *
    * @param internCount number of unique strings to intern; must be {@code > 0}
    * @param stringLengthBytes byte length of each interned string; must be {@code > 0}
@@ -1259,18 +1763,17 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Pins JDK 21+ virtual-thread carrier platform threads by keeping them inside {@code
-   * synchronized} blocks for {@code pinDuration} each cycle.
-   *
-   * <p>In JDK 21, a virtual thread mounted on a carrier that enters a {@code synchronized} block
-   * cannot be unmounted (pinned). This stressor simulates that condition by explicitly occupying
-   * {@code pinnedThreadCount} platform threads inside synchronized monitors, reducing the effective
-   * carrier pool available for virtual-thread scheduling and causing starvation under load.
+   * Starts {@code pinnedThreadCount} virtual threads, each of which holds its carrier for {@code
+   * pinDuration} per cycle: on JDK 21–23 by sleeping inside a {@code synchronized} block (true
+   * pinning, no CPU), on JDK 24 and later, where {@code synchronized} no longer pins (JEP 491), by
+   * spin-waiting (one CPU per held carrier). The held carriers are unavailable to other virtual
+   * threads, which queue for a carrier under load. Without {@code allowDestructiveEffects} it
+   * leaves one carrier free.
    *
    * <p>Cleanup: all pinning threads are interrupted and the monitor is released when the activation
    * handle is closed.
    *
-   * @param pinnedThreadCount number of carrier platform threads to pin; must be {@code > 0}
+   * @param pinnedThreadCount number of carrier threads to hold; must be {@code > 0}
    * @param pinDuration how long each pin is held per cycle; must be positive
    */
   record VirtualThreadCarrierPinningEffect(int pinnedThreadCount, Duration pinDuration)

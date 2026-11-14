@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.NamePattern.MatchMode;
+import java.util.SplittableRandom;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -181,9 +183,9 @@ class NamePatternTest {
     @Test
     @DisplayName("regex metacharacters '[' ']' '{' '}' in glob are literal, not regex syntax")
     void globEscapesCharacterClassAndRepetitionMetacharacters() {
-      // Before the escape was added these chars were passed through verbatim to the regex
-      // compiler, so "class[0-9]*" would behave like the regex "class[0-9].*" \u2014 matching
-      // "class4", which is wrong for a literal glob containing '[' and ']'.
+      // Passed through verbatim to the regex compiler, these chars would make "class[0-9]*"
+      // behave like the regex "class[0-9].*" \u2014 matching "class4",
+      // which is wrong for a literal glob containing '[' and ']'.
       assertThat(NamePattern.glob("class[0-9]*").matches("class[0-9]foo")).isTrue();
       assertThat(NamePattern.glob("class[0-9]*").matches("class4")).isFalse();
       assertThat(NamePattern.glob("count{1,3}").matches("count{1,3}")).isTrue();
@@ -310,6 +312,40 @@ class NamePatternTest {
     }
 
     @Test
+    @DisplayName("ANY keeps '*' and a blank value, as the singleton and written plans carry them")
+    void anyModeAcceptsStar() {
+      assertThat(new NamePattern(MatchMode.ANY, "*")).isEqualTo(NamePattern.any());
+      assertThat(new NamePattern(MatchMode.ANY, null)).isEqualTo(NamePattern.any());
+      assertThat(new NamePattern(MatchMode.ANY, "")).isEqualTo(NamePattern.any());
+    }
+
+    @Test
+    @DisplayName("ANY refuses any other value instead of dropping it")
+    void anyModeRefusesValue() {
+      assertThatThrownBy(() -> new NamePattern(MatchMode.ANY, "x"))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("a value without a mode is refused instead of matching everything")
+    void valueWithoutMode() {
+      assertThatThrownBy(() -> new NamePattern(null, "com.example.*"))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("a mode without a value is refused instead of matching everything")
+    void modeWithoutValue() {
+      assertThatThrownBy(() -> NamePattern.glob(null)).isInstanceOf(IllegalArgumentException.class);
+      assertThatThrownBy(() -> NamePattern.exact(null))
+          .isInstanceOf(IllegalArgumentException.class);
+      assertThatThrownBy(() -> NamePattern.prefix(null))
+          .isInstanceOf(IllegalArgumentException.class);
+      assertThatThrownBy(() -> NamePattern.regex(null))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     @DisplayName("non-ANY mode rejects blank value")
     void nonAnyModeRejectsBlankValue() {
       assertThatThrownBy(() -> new NamePattern(MatchMode.EXACT, "   "))
@@ -320,6 +356,87 @@ class NamePatternTest {
           .isInstanceOf(IllegalArgumentException.class);
       assertThatThrownBy(() -> new NamePattern(MatchMode.REGEX, ""))
           .isInstanceOf(IllegalArgumentException.class);
+    }
+  }
+
+  @Nested
+  @DisplayName("GLOB matching without regex")
+  class GlobEquivalence {
+
+    @Test
+    @DisplayName("agrees with the regex the glob compiles to on random globs and candidates")
+    void agreesWithRegex() {
+      final SplittableRandom random = new SplittableRandom(42L);
+      for (int round = 0; round < 20_000; round++) {
+        final String glob = randomString(random, "ab.*?\\", 1 + random.nextInt(7));
+        if (glob.isBlank()) {
+          continue;
+        }
+        final String candidate = randomString(random, "ab.x\\\n\u2028", random.nextInt(9));
+        assertThat(NamePattern.glob(glob).matches(candidate))
+            .as("glob %s against %s", glob, candidate)
+            .isEqualTo(referenceRegex(glob).matcher(candidate).matches());
+      }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"a\nb", "a\rb", "a\u2028b", "a\uD83D\uDE00b", "\uD83D"})
+    @DisplayName(
+        "'*' and '?' match line terminators; '?' matches a surrogate pair as one character")
+    void specialCandidates(final String candidate) {
+      for (final String glob : new String[] {"a*b", "a?b", "*", "?", "a*", "*b"}) {
+        assertThat(NamePattern.glob(glob).matches(candidate))
+            .as("glob %s against %s", glob, candidate)
+            .isEqualTo(referenceRegex(glob).matcher(candidate).matches());
+      }
+    }
+
+    private static String randomString(
+        final SplittableRandom random, final String alphabet, final int length) {
+      final StringBuilder builder = new StringBuilder(length);
+      for (int i = 0; i < length; i++) {
+        builder.append(alphabet.charAt(random.nextInt(alphabet.length())));
+      }
+      return builder.toString();
+    }
+
+    /**
+     * The definition of the GLOB semantics: the DOTALL regex in which '*' is {@code .*} and '?' is
+     * {@code .}, which Java reads as one code point.
+     */
+    private static Pattern referenceRegex(final String glob) {
+      final StringBuilder builder = new StringBuilder("^");
+      for (int i = 0; i < glob.length(); i++) {
+        final char c = glob.charAt(i);
+        switch (c) {
+          case '*' -> builder.append(".*");
+          case '?' -> builder.append('.');
+          default -> builder.append(Pattern.quote(String.valueOf(c)));
+        }
+      }
+      return Pattern.compile(builder.append('$').toString(), Pattern.DOTALL);
+    }
+  }
+
+  @Nested
+  @DisplayName("regex cache")
+  class RegexCache {
+
+    @Test
+    @DisplayName("is cleared when full, then caches the new expression")
+    void clearedWhenFull() {
+      // A test-owned cache filled to the capacity of the JVM-wide one (1024).
+      final java.util.Map<String, java.util.regex.Pattern> cache =
+          new java.util.concurrent.ConcurrentHashMap<>();
+      for (int i = 0; i < 1024; i++) {
+        cache.put("filler-" + i, java.util.regex.Pattern.compile("filler-" + i));
+      }
+
+      final java.util.regex.Pattern first = NamePattern.cachedCompile(cache, "new.*", "new.*");
+      final java.util.regex.Pattern second = NamePattern.cachedCompile(cache, "new.*", "new.*");
+
+      assertThat(second).isSameAs(first);
+      assertThat(cache).hasSize(1);
     }
   }
 }

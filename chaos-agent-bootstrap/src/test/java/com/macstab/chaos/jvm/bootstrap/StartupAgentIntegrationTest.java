@@ -1,6 +1,8 @@
 package com.macstab.chaos.jvm.bootstrap;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosEffect;
@@ -10,24 +12,24 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 @DisplayName("StartupAgent integration")
 class StartupAgentIntegrationTest {
 
   private static final long DELAY_MS = 70L;
-  private static final long DELAY_MIN_MS = (long) (DELAY_MS * 0.8);
 
   @TempDir Path tempDir;
 
@@ -55,15 +57,33 @@ class StartupAgentIntegrationTest {
                       .activationPolicy(ActivationPolicy.always())
                       .build()));
 
-      final String output = runProbe(plan, "executor");
-      final long elapsed =
-          Long.parseLong(
-              output
-                  .substring(output.indexOf("elapsedMillis=") + "elapsedMillis=".length())
-                  .trim());
-      assertThat(elapsed)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      final ChildJvmProbe.ProbeResult result = runProbe(plan, "executor");
+      assertThat(result.longValue("applied.startup-delay")).isEqualTo(1L);
+      assertThat(result.longValue("elapsedMillis"))
+          .as("the submission takes the whole configured %d ms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+    }
+
+    @Test
+    @DisplayName("weaves without making the JDK warn about sun.misc.Unsafe")
+    void weavingPrintsNoUnsafeWarning() throws Exception {
+      final ChaosPlan plan =
+          new ChaosPlan(
+              new ChaosPlan.Metadata("startup-quiet", ""),
+              null,
+              List.of(
+                  ChaosScenario.builder("quiet-delay")
+                      .scope(ChaosScenario.ScenarioScope.JVM)
+                      .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                      .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                      .activationPolicy(ActivationPolicy.always())
+                      .build()));
+
+      final ChildJvmProbe.ProbeResult result = runProbe(plan, "executor");
+
+      assertThat(result.longValue("applied.quiet-delay")).isEqualTo(1L);
+      // JDK 24 and later print this on the first sun.misc.Unsafe memory access (JEP 498).
+      assertThat(result.output()).doesNotContain("sun.misc.Unsafe");
     }
   }
 
@@ -89,7 +109,7 @@ class StartupAgentIntegrationTest {
                       .activationPolicy(ActivationPolicy.always())
                       .build()));
 
-      final String output = runProbe(plan, "resource");
+      final String output = runProbe(plan, "resource").output();
       assertThat(output).contains("resource=missing");
     }
   }
@@ -118,8 +138,95 @@ class StartupAgentIntegrationTest {
                       .activationPolicy(ActivationPolicy.always())
                       .build()));
 
-      final String output = runProbe(plan, "thread");
+      final String output = runProbe(plan, "thread").output();
       assertThat(output).contains("thread=rejected");
+    }
+
+    @Test
+    @DisplayName("a reject without a name filter leaves premain's own thread start alone")
+    void unfilteredRejectReachesMain() throws Exception {
+      final String output = runProbe(threadStartReject(NamePattern.any()), "thread").output();
+
+      assertThat(output).contains("thread=rejected");
+    }
+
+    @Test
+    @DisplayName("a reject on the agent's macstab- thread names leaves premain alone")
+    void agentNamePrefixRejectReachesMain() throws Exception {
+      final String output =
+          runProbe(threadStartReject(NamePattern.prefix("macstab-")), "thread").output();
+
+      assertThat(output).contains("thread=started");
+    }
+
+    @Test
+    @DisplayName(
+        "a reject on the agent's macstab- thread names still lets every application shutdown hook"
+            + " run: the JDK starts the agent's own hooks too")
+    void agentHooksLeaveTheApplicationHooksAlone() throws Exception {
+      final ChildJvmProbe.BoundedRun run =
+          runAgent(
+              threadStartReject(NamePattern.prefix("macstab-")),
+              "app-hooks",
+              ";reports=on;reportsDir=" + tempDir.resolve("reports"),
+              List.of());
+
+      assertThat(run.exitValue()).as("probe JVM exit value: " + run.output()).isZero();
+      assertThat(run.output().lines().filter("app-hook=ran"::equals).count())
+          .as("application hooks that ran: %s", run.output())
+          .isEqualTo(AgentProcessProbeMain.APP_HOOKS);
+    }
+
+    private ChaosPlan threadStartReject(final NamePattern threadName) {
+      return new ChaosPlan(
+          new ChaosPlan.Metadata("startup-thread-any", ""),
+          null,
+          List.of(
+              ChaosScenario.builder("thread-reject-any")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(
+                      new ChaosSelector.ThreadSelector(
+                          Set.of(OperationType.THREAD_START),
+                          ChaosSelector.ThreadKind.ANY,
+                          threadName,
+                          null))
+                  .effect(ChaosEffect.reject("chaos-thread-rejection"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build()));
+    }
+  }
+
+  @Nested
+  @DisplayName("reflection invoke rejection")
+  class ReflectionInvokeRejection {
+
+    @Test
+    @DisplayName(
+        "a reject without a filter, applied once, leaves premain's own reflection alone and"
+            + " rejects the application's first call")
+    void unfilteredRejectSkipsPremainReflection() throws Exception {
+      final ChaosPlan plan =
+          new ChaosPlan(
+              new ChaosPlan.Metadata("startup-reflection", ""),
+              null,
+              List.of(
+                  ChaosScenario.builder("reflection-reject")
+                      .scope(ChaosScenario.ScenarioScope.JVM)
+                      .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.REFLECTION_INVOKE)))
+                      .effect(ChaosEffect.reject("chaos-reflection-rejection"))
+                      .activationPolicy(ActivationPolicy.count(1L))
+                      .build()));
+
+      final ChildJvmProbe.ProbeResult result = runProbe(plan, "reflection-first");
+
+      assertThat(result.longValue("before.matched.reflection-reject"))
+          .as("matches before the application reflects: %s", result.output())
+          .isZero();
+      assertThat(result.output())
+          .as("the deferred start follows the application's JUL initialisation, not the 30 s limit")
+          .contains("mbeanRegistered=true");
+      assertThat(result.output()).contains("reflection=rejected");
+      assertThat(result.longValue("applied.reflection-reject")).isEqualTo(1L);
     }
   }
 
@@ -145,7 +252,7 @@ class StartupAgentIntegrationTest {
                       .activationPolicy(ActivationPolicy.always())
                       .build()));
 
-      final String output = runProbe(plan, "classload");
+      final String output = runProbe(plan, "classload").output();
       assertThat(output).contains("classload=rejected");
     }
   }
@@ -169,8 +276,27 @@ class StartupAgentIntegrationTest {
                       .activationPolicy(ActivationPolicy.always())
                       .build()));
 
-      final String output = runProbe(plan, "gc");
-      assertThat(output).contains("gc=returned");
+      final ChildJvmProbe.ProbeResult result = runProbe(plan, "gc");
+      assertThat(result.longValue("applied.gc-suppress")).isPositive();
+      assertThat(result.longValue("gcCollections")).as("System.gc() collected nothing").isZero();
+    }
+
+    @Test
+    @DisplayName("without a GC scenario System.gc() collects")
+    void systemGcCollectsWithoutScenario() throws Exception {
+      final ChaosPlan plan =
+          new ChaosPlan(
+              new ChaosPlan.Metadata("startup-no-gc", ""),
+              null,
+              List.of(
+                  ChaosScenario.builder("exit-suppress")
+                      .scope(ChaosScenario.ScenarioScope.JVM)
+                      .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_EXIT_REQUEST)))
+                      .effect(ChaosEffect.suppress())
+                      .activationPolicy(ActivationPolicy.always())
+                      .build()));
+
+      assertThat(runProbe(plan, "gc").longValue("gcCollections")).isPositive();
     }
   }
 
@@ -193,32 +319,223 @@ class StartupAgentIntegrationTest {
                       .activationPolicy(ActivationPolicy.always())
                       .build()));
 
-      final String output = runProbe(plan, "exit");
+      final String output = runProbe(plan, "exit").output();
       assertThat(output).contains("exit=suppressed");
     }
   }
 
-  private String runProbe(final ChaosPlan plan, final String mode) throws Exception {
+  @Nested
+  @DisplayName("bridge directory")
+  class BridgeDirectory {
+
+    private final ChaosPlan plan =
+        new ChaosPlan(
+            new ChaosPlan.Metadata("bridge-dir", ""),
+            null,
+            List.of(
+                ChaosScenario.builder("bridge-delay")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build()));
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    @DisplayName("a read-only java.io.tmpdir puts the bridge jar in /dev/shm and chaos applies")
+    void readOnlyTmpDirFallsBackToSharedMemory() throws Exception {
+      // Root writes into a 0555 directory, so the row would pass without the fallback.
+      assumeFalse("root".equals(System.getProperty("user.name")), "test runs as root");
+      final Path readOnly = readOnlyDirectory("tmp-ro");
+
+      final ChildJvmProbe.BoundedRun run =
+          runAgent(plan, "executor", "", List.of("-Djava.io.tmpdir=" + readOnly));
+
+      assertThat(run.exitValue()).as("the agent starts: " + run.output()).isZero();
+      assertThat(run.result().longValue("applied.bridge-delay")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("bridgeDir takes the bridge jar when java.io.tmpdir is read-only")
+    void bridgeDirTakesTheJar() throws Exception {
+      assumeFalse("root".equals(System.getProperty("user.name")), "test runs as root");
+      final Path readOnly = readOnlyDirectory("tmp-ro");
+      final Path bridgeDir = Files.createDirectory(tempDir.resolve("bridge"));
+
+      final ChildJvmProbe.BoundedRun run =
+          runAgent(
+              plan, "executor", ";bridgeDir=" + bridgeDir, List.of("-Djava.io.tmpdir=" + readOnly));
+
+      assertThat(run.exitValue()).as("the agent starts: " + run.output()).isZero();
+      assertThat(run.result().longValue("applied.bridge-delay")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName(
+        "a world-writable bridgeDir without the sticky bit aborts the start with the reason")
+    void worldWritableBridgeDirRefused() throws Exception {
+      assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
+      final Path bridgeDir = Files.createDirectory(tempDir.resolve("open-bridge"));
+      Files.setPosixFilePermissions(bridgeDir, PosixFilePermissions.fromString("rwxrwxrwx"));
+
+      final ChildJvmProbe.BoundedRun run =
+          runAgent(plan, "executor", "", List.of("-Dmacstab.chaos.bridgeDir=" + bridgeDir));
+
+      assertThat(run.exitValue()).as("the start is aborted: " + run.output()).isNotZero();
+      assertThat(run.output())
+          .contains("bridgeDir " + bridgeDir + " is refused")
+          .contains("world-writable without the sticky bit");
+    }
+
+    private Path readOnlyDirectory(final String name) throws Exception {
+      final Path directory = Files.createDirectory(tempDir.resolve(name));
+      Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("r-xr-xr-x"));
+      return directory;
+    }
+  }
+
+  @Nested
+  @DisplayName("malformed inline plan")
+  class MalformedInlinePlan {
+
+    @Test
+    @DisplayName("aborts the start without printing the parser's excerpt of the plan")
+    void stderrCarriesNoInput() throws Exception {
+      // An unquoted token: Jackson's own message quotes it ("Unrecognized token 'SECRET123'").
+      final List<String> command =
+          List.of(
+              Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+              "-javaagent:"
+                  + System.getProperty("chaos.bootstrap.agentJar")
+                  + "=configJson={\"scenarios\":SECRET123}",
+              "-cp",
+              System.getProperty("java.class.path"),
+              AgentProcessProbeMain.class.getName(),
+              "gc");
+      final ChildJvmProbe.BoundedRun run =
+          ChildJvmProbe.runBounded(
+              command, tempDir.resolve("malformed.out"), Duration.ofSeconds(30));
+      assertThat(run.finished()).as("probe JVM should finish: " + run.output()).isTrue();
+
+      assertThat(run.exitValue()).as("the start is aborted: " + run.output()).isNotZero();
+      assertThat(run.output()).contains("malformed JSON").doesNotContain("SECRET123");
+    }
+  }
+
+  @Nested
+  @DisplayName("a class-path copy of the agent")
+  class ClassPathCopy {
+
+    @Test
+    @DisplayName("of another version shadows -javaagent: one warning names both jars")
+    void anotherVersionIsReported() throws Exception {
+      final Path copy = agentCopy("other-version.jar", "0.0.1-other");
+
+      final String output = runShadowed(copy);
+
+      assertThat(output)
+          .contains("[chaos-agent] agent copies of different versions are on the class path")
+          .contains(copy.toRealPath().toString())
+          .contains("0.0.1-other")
+          .contains(Path.of(System.getProperty("chaos.bootstrap.agentJar")).toRealPath().toString())
+          .contains(agentVersion());
+    }
+
+    @Test
+    @DisplayName("of the same version is not reported")
+    void sameVersionIsQuiet() throws Exception {
+      final Path copy = agentCopy("same-version.jar", agentVersion());
+
+      final String output = runShadowed(copy);
+
+      assertThat(output).doesNotContain("agent copies of different versions");
+    }
+
+    /** A jar with the agent's entry class and the given {@code Implementation-Version}. */
+    private Path agentCopy(final String name, final String version) throws Exception {
+      final java.util.jar.Manifest manifest = new java.util.jar.Manifest();
+      manifest.getMainAttributes().put(java.util.jar.Attributes.Name.MANIFEST_VERSION, "1.0");
+      manifest
+          .getMainAttributes()
+          .put(java.util.jar.Attributes.Name.IMPLEMENTATION_VERSION, version);
+      final Path jar = tempDir.resolve(name);
+      final String entry = ChaosAgentBootstrap.class.getName().replace('.', '/') + ".class";
+      try (java.util.jar.JarOutputStream out =
+              new java.util.jar.JarOutputStream(Files.newOutputStream(jar), manifest);
+          java.io.InputStream in = ClassLoader.getSystemResourceAsStream(entry)) {
+        out.putNextEntry(new java.util.jar.JarEntry(entry));
+        java.util.Objects.requireNonNull(in, entry).transferTo(out);
+        out.closeEntry();
+      }
+      return jar;
+    }
+
+    /** Runs the agent with {@code copy} in front of the class path; returns stdout and stderr. */
+    private String runShadowed(final Path copy) throws Exception {
+      final List<String> command =
+          List.of(
+              Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+              "-javaagent:" + System.getProperty("chaos.bootstrap.agentJar"),
+              "-cp",
+              copy + java.io.File.pathSeparator + System.getProperty("java.class.path"),
+              AgentProcessProbeMain.class.getName(),
+              "gc");
+      final ChildJvmProbe.BoundedRun run =
+          ChildJvmProbe.runBounded(
+              command, tempDir.resolve(copy.getFileName() + ".out"), Duration.ofSeconds(30));
+      assertThat(run.finished()).as("probe JVM should finish: " + run.output()).isTrue();
+      assertThat(run.exitValue()).as("probe JVM exit value: " + run.output()).isZero();
+      final String output = run.output();
+      return output;
+    }
+
+    private static String agentVersion() throws Exception {
+      try (java.util.jar.JarFile agent =
+          new java.util.jar.JarFile(System.getProperty("chaos.bootstrap.agentJar"))) {
+        return String.valueOf(
+            agent
+                .getManifest()
+                .getMainAttributes()
+                .getValue(java.util.jar.Attributes.Name.IMPLEMENTATION_VERSION));
+      }
+    }
+  }
+
+  private ChildJvmProbe.ProbeResult runProbe(final ChaosPlan plan, final String mode)
+      throws Exception {
+    final ChildJvmProbe.BoundedRun run = runAgent(plan, mode, "", List.of());
+    assertThat(run.exitValue()).as("probe JVM exit value: " + run.output()).isZero();
+    return run.result();
+  }
+
+  /**
+   * Runs {@link AgentProcessProbeMain} in {@code mode} under the agent with {@code plan}, extra
+   * agent options ({@code ;key=value...}) and JVM options; the run must finish.
+   */
+  private ChildJvmProbe.BoundedRun runAgent(
+      final ChaosPlan plan,
+      final String mode,
+      final String agentOptions,
+      final List<String> jvmOptions)
+      throws Exception {
     final Path configFile = tempDir.resolve(mode + "-plan.json");
     Files.writeString(configFile, ChaosPlanMapper.write(plan));
     final String agentJar = System.getProperty("chaos.bootstrap.agentJar");
-    final Process process =
-        new ProcessBuilder(
-                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                "-javaagent:" + agentJar + "=configFile=" + configFile,
-                "-cp",
-                System.getProperty("java.class.path"),
-                AgentProcessProbeMain.class.getName(),
-                mode)
-            .redirectErrorStream(true)
-            .start();
-    final boolean finished = process.waitFor(30, TimeUnit.SECONDS);
-    assertThat(finished).as("probe JVM should finish").isTrue();
-    try (final BufferedReader reader =
-        new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-      final String output = reader.lines().reduce("", (left, right) -> left + right);
-      assertThat(process.exitValue()).as("probe JVM exit value: " + output).isZero();
-      return output;
-    }
+    final java.util.List<String> command = new java.util.ArrayList<>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.addAll(jvmOptions);
+    // No coverage agent here: these plans reach every file write, thread start, class load, gc and
+    // exit of the JVM, the coverage agent's own dump at shutdown included.
+    command.add("-javaagent:" + agentJar + "=configFile=" + configFile + agentOptions);
+    command.add("-cp");
+    command.add(System.getProperty("java.class.path"));
+    command.add(AgentProcessProbeMain.class.getName());
+    command.add(mode);
+    final ChildJvmProbe.BoundedRun run =
+        ChildJvmProbe.runBounded(command, tempDir.resolve(mode + ".out"), Duration.ofSeconds(30));
+    assertThat(run.finished())
+        .as("probe JVM should finish: %s%nthreads:%n%s", run.output(), run.threads())
+        .isTrue();
+    return run;
   }
 }

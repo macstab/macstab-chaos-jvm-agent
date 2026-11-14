@@ -8,6 +8,7 @@ import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import jakarta.annotation.PreDestroy;
 import java.time.Duration;
+import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
@@ -19,7 +20,7 @@ public class ChaosStartupPlan implements ApplicationListener<ApplicationReadyEve
 
   private final ChaosControlPlane controlPlane;
   private final boolean contentionEnabled;
-  private volatile ChaosActivationHandle handle;
+  private volatile @Nullable ChaosActivationHandle handle;
 
   /**
    * Creates a new ChaosStartupPlan.
@@ -29,7 +30,7 @@ public class ChaosStartupPlan implements ApplicationListener<ApplicationReadyEve
    */
   public ChaosStartupPlan(
       final ChaosControlPlane controlPlane,
-      @Value("${macstab.chaos.contention.enabled:false}") final boolean contentionEnabled) {
+      @Value("${example.pinning.enabled:false}") final boolean contentionEnabled) {
     this.controlPlane = controlPlane;
     this.contentionEnabled = contentionEnabled;
   }
@@ -55,7 +56,9 @@ public class ChaosStartupPlan implements ApplicationListener<ApplicationReadyEve
                     + " requests reveal the observability of pinning in jfr/JDK Flight Recorder.")
             .selector(
                 ChaosSelector.stress(ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING))
-            .effect(ChaosEffect.virtualThreadCarrierPinning(4, Duration.ofMillis(25)))
+            // Two carriers: enough to slow the requests down on any machine. Holding every
+            // carrier would stop the server's virtual threads altogether.
+            .effect(ChaosEffect.virtualThreadCarrierPinning(2, Duration.ofMillis(25)))
             .activationPolicy(ActivationPolicy.always())
             .build();
     handle = controlPlane.activate(scenario);

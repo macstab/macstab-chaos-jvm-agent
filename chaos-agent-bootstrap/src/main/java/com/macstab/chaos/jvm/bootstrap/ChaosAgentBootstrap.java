@@ -1,17 +1,31 @@
 package com.macstab.chaos.jvm.bootstrap;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
+import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.bootstrap.jfr.JfrIntegration;
+import com.macstab.chaos.jvm.core.AgentHookThread;
+import com.macstab.chaos.jvm.core.AgentLog;
+import com.macstab.chaos.jvm.core.AgentThreads;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller;
+import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.startup.AgentArgs;
+import com.macstab.chaos.jvm.startup.AgentArgsParser;
+import com.macstab.chaos.jvm.startup.AgentSettings;
+import com.macstab.chaos.jvm.startup.ConfigLoadException;
+import com.macstab.chaos.jvm.startup.DirectoryTrust;
+import com.macstab.chaos.jvm.startup.LogText;
 import com.macstab.chaos.jvm.startup.StartupConfigLoader;
 import java.lang.instrument.Instrumentation;
-import java.lang.management.ManagementFactory;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
-import javax.management.ObjectName;
 import net.bytebuddy.agent.ByteBuddyAgent;
+import org.jspecify.annotations.Nullable;
 
 /**
  * JVM agent entry point and runtime bootstrap for the chaos testing agent.
@@ -35,10 +49,10 @@ import net.bytebuddy.agent.ByteBuddyAgent;
  *
  * <h2>Idempotency</h2>
  *
- * <p>{@link #initialize} is protected by a compare-and-set on the static {@link #RUNTIME}
- * reference. If two threads race during startup (e.g., concurrent dynamic-attach calls), only one
- * {@link ChaosRuntime} is ever created; the loser discards its newly constructed instance and
- * returns the winner's runtime.
+ * <p>{@link #initialize} claims the static {@link #INITIALIZATION} slot with a compare-and-set
+ * before installing anything. If two threads race during startup (e.g., concurrent dynamic-attach
+ * calls), only one installs; the other waits for its outcome and returns the same runtime (or the
+ * same failure).
  *
  * <h2>Post-initialization steps</h2>
  *
@@ -55,25 +69,61 @@ import net.bytebuddy.agent.ByteBuddyAgent;
  *
  * <h2>Thread safety</h2>
  *
- * <p>All public methods are thread-safe. {@link #RUNTIME} is an {@link AtomicReference}; the
- * initialization CAS in {@link #initialize} ensures that exactly one runtime is ever installed per
- * JVM lifetime.
+ * <p>All public methods are thread-safe. The initialization CAS in {@link #initialize} ensures that
+ * at most one runtime is installed at a time, and {@link #current()} only ever returns a runtime
+ * whose installation completed.
  */
+@Internal
 public final class ChaosAgentBootstrap {
   /**
-   * The single {@link ChaosRuntime} for this JVM. {@code null} until {@link #initialize} completes
-   * successfully. Written exactly once via compare-and-set; subsequent reads are non-blocking.
+   * Initialization of the single {@link ChaosRuntime} for this JVM. {@code null} until an
+   * initialization starts; the future completes with the runtime once instrumentation, the bridge,
+   * the MBean, JFR and the startup plan are installed. Claiming the slot with a future (instead of
+   * publishing the runtime itself) keeps a runtime that is still being installed — or that is
+   * rolled back after a failure — invisible to {@link #current()} and to concurrent initializers,
+   * which wait for the outcome instead.
    */
-  private static final AtomicReference<ChaosRuntime> RUNTIME = new AtomicReference<>();
+  private static final AtomicReference<@Nullable CompletableFuture<ChaosRuntime>> INITIALIZATION =
+      new AtomicReference<>();
+
+  /** Thread running the current initialization; detects re-entrant initialization. */
+  private static volatile @Nullable Thread initializingThread;
+
+  /** The agent args of the installed runtime, to name what a later attach asks for in vain. */
+  private static volatile @Nullable AgentArgs installedArgs;
+
+  private static final String MBEAN_NAME = "com.macstab.chaos.jvm:type=ChaosDiagnostics";
+
+  private static final AgentLog LOGGER = AgentLog.named(ChaosAgentBootstrap.class.getName());
+
+  /**
+   * ByteBuddy's switch for class files newer than it supports, as a user sets it. Built at run
+   * time: the agent jar relocates ByteBuddy, and with it every {@code "net.bytebuddy..."} literal.
+   */
+  private static final String BYTE_BUDDY_EXPERIMENTAL =
+      String.join(".", "net", "bytebuddy", "experimental");
+
+  /**
+   * The same switch as the agent's own ByteBuddy reads it: the literal is relocated with ByteBuddy
+   * (in the agent jar {@code com.macstab.chaos.jvm.shaded.net.bytebuddy.experimental}; unshaded it
+   * equals {@link #BYTE_BUDDY_EXPERIMENTAL}).
+   */
+  private static final String AGENT_BYTE_BUDDY_EXPERIMENTAL = "net.bytebuddy.experimental";
 
   /**
    * The active config-file poller, or {@code null} when watch mode is disabled or the plan was
    * loaded from an inline / base64 source (which has no backing file to watch).
    */
-  static final AtomicReference<StartupConfigPoller> POLLER = new AtomicReference<>();
+  static final AtomicReference<@Nullable StartupConfigPoller> POLLER = new AtomicReference<>();
 
   /** Serialises concurrent {@link #installForLocalTests} calls; see that method for rationale. */
   private static final Object INSTALL_LOCK = new Object();
+
+  /**
+   * The MBean registration {@link #premain} deferred until the application has initialised {@code
+   * java.util.logging}; {@code null} once run, or when nothing was deferred.
+   */
+  private static final AtomicReference<@Nullable Runnable> DEFERRED_MBEAN = new AtomicReference<>();
 
   /**
    * System property / env-var name that opts in to installing the agent via {@link #agentmain}
@@ -92,6 +142,58 @@ public final class ChaosAgentBootstrap {
    */
   static final String ALLOW_DYNAMIC_ATTACH_ENV = "MACSTAB_CHAOS_ALLOW_DYNAMIC_ATTACH";
 
+  /** Agent arg selecting the weaving mode ({@code eager} or the default on-demand weaving). */
+  static final String INSTRUMENTATION_ARG = "instrumentation";
+
+  /** System property equivalent of {@link #INSTRUMENTATION_ARG}. */
+  static final String INSTRUMENTATION_PROPERTY = "macstab.chaos.instrumentation";
+
+  /** Environment variable equivalent of {@link #INSTRUMENTATION_ARG}. */
+  static final String INSTRUMENTATION_ENV = "MACSTAB_CHAOS_INSTRUMENTATION";
+
+  /**
+   * Agent arg naming the package prefixes whose {@code System.currentTimeMillis()} and {@code
+   * nanoTime()} call sites are rewritten for clock skew, comma-separated.
+   */
+  static final String CLOCK_CALL_SITES_ARG = "clockCallSites";
+
+  /** System property equivalent of {@link #CLOCK_CALL_SITES_ARG}. */
+  static final String CLOCK_CALL_SITES_PROPERTY = "macstab.chaos.clockCallSites";
+
+  /** Environment variable equivalent of {@link #CLOCK_CALL_SITES_ARG}. */
+  static final String CLOCK_CALL_SITES_ENV = "MACSTAB_CHAOS_CLOCK_CALL_SITES";
+
+  /**
+   * Agent arg adding host globs that receive the {@code X-Chaos-Session} header besides internal
+   * hosts, comma-separated; {@code *} for every host.
+   */
+  static final String SESSION_HEADER_HOSTS_ARG = "sessionHeaderHosts";
+
+  /** System property equivalent of {@link #SESSION_HEADER_HOSTS_ARG}. */
+  static final String SESSION_HEADER_HOSTS_PROPERTY = "macstab.chaos.sessionHeaderHosts";
+
+  /** Environment variable equivalent of {@link #SESSION_HEADER_HOSTS_ARG}. */
+  static final String SESSION_HEADER_HOSTS_ENV = "MACSTAB_CHAOS_SESSION_HEADER_HOSTS";
+
+  /**
+   * Agent arg naming the directory the bootstrap bridge jar is written to, instead of {@code
+   * java.io.tmpdir} (then {@code /dev/shm}).
+   */
+  static final String BRIDGE_DIR_ARG = "bridgeDir";
+
+  /** System property equivalent of {@link #BRIDGE_DIR_ARG}. */
+  static final String BRIDGE_DIR_PROPERTY = "macstab.chaos.bridgeDir";
+
+  /** Environment variable equivalent of {@link #BRIDGE_DIR_ARG}. */
+  static final String BRIDGE_DIR_ENV = "MACSTAB_CHAOS_BRIDGE_DIR";
+
+  /** This class as a resource: there is one per agent copy on a class path. */
+  private static final String ENTRY_CLASS =
+      "com/macstab/chaos/jvm/bootstrap/ChaosAgentBootstrap.class";
+
+  /** Several jar paths fit: the shared cap of {@link LogText#MAX_LENGTH} is for one value. */
+  private static final int COPIES_LOG_LENGTH = 4096;
+
   private ChaosAgentBootstrap() {}
 
   /**
@@ -101,14 +203,175 @@ public final class ChaosAgentBootstrap {
    * <p>This method is invoked by the JVM infrastructure before the application's {@code main}
    * method, ensuring that all instrumentation is in place before any application class is loaded.
    *
+   * <p>Nothing here initialises {@code java.util.logging}: the application's {@code main} may still
+   * choose the {@code LogManager} ({@code java.util.logging.manager}, as WildFly and Quarkus do),
+   * and the first logger fixes it. The agent's log lines are held ({@link AgentLog#hold()}) and the
+   * platform MBean, whose server initialises the {@code LogManager} too, is not registered yet: an
+   * agent thread does both once the application has initialised {@code java.util.logging}, or after
+   * {@link LoggingStart#LIMIT} at the latest.
+   *
    * @param agentArgs the raw argument string from the {@code -javaagent} command-line option, e.g.
    *     {@code configFile=/etc/chaos/plan.json;debugDumpOnStart=true}. May be {@code null} or blank
    *     if no arguments were provided.
    * @param instrumentation the {@link Instrumentation} instance provided by the JVM; used to
    *     install class-file transformers for all interception points
    */
-  public static void premain(final String agentArgs, final Instrumentation instrumentation) {
-    initialize(agentArgs, instrumentation, System.getenv(), true);
+  public static void premain(
+      final @Nullable String agentArgs, final Instrumentation instrumentation) {
+    AgentLog.hold();
+    boolean installed = false;
+    try {
+      copyByteBuddyExperimental();
+      reportShadowingCopies(ClassLoader.getSystemClassLoader());
+      initialize(agentArgs, instrumentation, System.getenv(), true);
+      installed = true;
+    } finally {
+      if (!installed) {
+        // The JVM exits on a failed premain: the lines that explain it are written now.
+        AgentLog.release();
+      }
+    }
+    releaseHeldLinesAtExit();
+    LoggingStart.runAfter(
+        LoggingStart.logManagerInitialised(),
+        LoggingStart.LIMIT,
+        ChaosAgentBootstrap::finishDeferredStart);
+  }
+
+  /**
+   * Registers a shutdown hook that writes the lines still held when the JVM exits before the
+   * deferred start released them (a JVM that ran for less than {@link LoggingStart#LIMIT} without
+   * initialising JUL): straight to {@code System.err}, since JUL's own shutdown hook may already
+   * have closed its handlers. After a release it writes nothing. The registration, the hook's start
+   * by the JDK ({@link AgentHookThread}) and the hook's work are the agent's own (L3).
+   */
+  private static void releaseHeldLinesAtExit() {
+    final Thread hook = logReleaseHook();
+    BootstrapDispatcher.beginInternalCall();
+    try {
+      Runtime.getRuntime().addShutdownHook(hook);
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
+  }
+
+  /**
+   * The unstarted shutdown hook {@link #releaseHeldLinesAtExit()} registers; package-private as a
+   * test seam.
+   *
+   * @return the hook
+   */
+  static Thread logReleaseHook() {
+    // AgentThreads: a registered hook stays reachable until the JVM exits, so it keeps nothing of
+    // the thread that made it (its context class loader, inheritable thread-locals, access-control
+    // context).
+    return AgentThreads.shutdownHook(
+        "macstab-chaos-log-release",
+        () -> {
+          BootstrapDispatcher.beginInternalCall();
+          try {
+            AgentLog.releaseToStandardError();
+          } finally {
+            BootstrapDispatcher.endInternalCall();
+          }
+        });
+  }
+
+  /**
+   * The deferred part of {@link #premain}, run once the application has initialised {@code
+   * java.util.logging}: registers the MBean of the runtime premain installed, then writes the held
+   * log lines.
+   */
+  static void finishDeferredStart() {
+    final Runnable registration = DEFERRED_MBEAN.getAndSet(null);
+    try {
+      if (registration != null) {
+        registration.run();
+      }
+    } finally {
+      AgentLog.release();
+    }
+  }
+
+  /**
+   * Warns once when agent copies of different versions are on the class path. {@code -javaagent}
+   * appends its jar at the end of the system class path, so a copy earlier on it (an agent
+   * dependency of another version) is the one that runs, in place of the {@code -javaagent} jar.
+   * Copies of one {@code Implementation-Version} are interchangeable (logged at FINE only); a copy
+   * without one (a classes directory) is not compared. Never fails the start.
+   *
+   * @param loader the class loader whose copies are compared
+   */
+  static void reportShadowingCopies(final ClassLoader loader) {
+    final Map<String, String> versions = new java.util.LinkedHashMap<>();
+    try {
+      for (final java.net.URL copy : java.util.Collections.list(loader.getResources(ENTRY_CLASS))) {
+        if (copy.openConnection() instanceof java.net.JarURLConnection entry
+            && "file".equals(entry.getJarFileURL().getProtocol())) {
+          final java.nio.file.Path jar = java.nio.file.Path.of(entry.getJarFileURL().toURI());
+          try (java.util.jar.JarFile file = new java.util.jar.JarFile(jar.toFile())) {
+            final java.util.jar.Manifest manifest = file.getManifest();
+            final String version =
+                manifest == null
+                    ? null
+                    : manifest
+                        .getMainAttributes()
+                        .getValue(java.util.jar.Attributes.Name.IMPLEMENTATION_VERSION);
+            if (version != null) {
+              versions.put(jar.toString(), version);
+            }
+          }
+        }
+      }
+    } catch (final java.io.IOException
+        | java.net.URISyntaxException
+        | RuntimeException unreadable) {
+      LOGGER.fine(() -> "[chaos-agent] agent copies not compared: " + unreadable);
+      return;
+    }
+    if (new java.util.HashSet<>(versions.values()).size() > 1) {
+      final StringBuilder copies = new StringBuilder();
+      versions.forEach(
+          (jar, version) ->
+              copies
+                  .append(copies.length() == 0 ? "" : ", ")
+                  .append(jar)
+                  .append(" (")
+                  .append(version)
+                  .append(')'));
+      System.err.println(
+          "[chaos-agent] agent copies of different versions are on the class path; the first one"
+              + " runs, also in place of the -javaagent jar: "
+              + LogText.sanitize(copies.toString(), COPIES_LOG_LENGTH)
+              + ". Keep one agent version.");
+    } else if (versions.size() > 1) {
+      LOGGER.fine(() -> "[chaos-agent] agent copies of one version: " + versions.keySet());
+    }
+  }
+
+  /**
+   * Hands {@code -Dnet.bytebuddy.experimental} to the agent's relocated ByteBuddy, which reads its
+   * own relocated name. Runs first in every entry point: ByteBuddy reads the switch in static
+   * initialisers, so the copy must come before any ByteBuddy class initialises. A switch the user
+   * set under the relocated name wins.
+   */
+  private static void copyByteBuddyExperimental() {
+    copyProperty(BYTE_BUDDY_EXPERIMENTAL, AGENT_BYTE_BUDDY_EXPERIMENTAL);
+  }
+
+  /**
+   * Sets system property {@code to} to the value of {@code from} when {@code from} is set and
+   * {@code to} is not. Package-private as a test seam: unshaded, both ByteBuddy names are equal.
+   */
+  static void copyProperty(final String from, final String to) {
+    try {
+      final String value = System.getProperty(from);
+      if (value != null && System.getProperty(to) == null) {
+        System.setProperty(to, value);
+      }
+    } catch (final SecurityException denied) {
+      LOGGER.fine(() -> "[chaos-agent] cannot hand " + from + " on: " + denied);
+    }
   }
 
   /**
@@ -132,7 +395,9 @@ public final class ChaosAgentBootstrap {
    * @param agentArgs the raw argument string passed to the attach call; may be {@code null}
    * @param instrumentation the {@link Instrumentation} instance provided by the JVM
    */
-  public static void agentmain(final String agentArgs, final Instrumentation instrumentation) {
+  public static void agentmain(
+      final @Nullable String agentArgs, final Instrumentation instrumentation) {
+    copyByteBuddyExperimental();
     if (!dynamicAttachAllowed(System.getProperties(), System.getenv())) {
       System.err.println(
           "[chaos-agent] ignoring dynamic attach: set -D"
@@ -142,54 +407,61 @@ public final class ChaosAgentBootstrap {
               + "=true to opt in");
       return;
     }
-    initialize(agentArgs, instrumentation, System.getenv(), false);
+    initialize(agentArgs, instrumentation, System.getenv());
   }
 
-  private static boolean dynamicAttachAllowed(
+  static boolean dynamicAttachAllowed(
       final java.util.Properties systemProperties, final Map<String, String> environment) {
-    if (Boolean.parseBoolean(systemProperties.getProperty(ALLOW_DYNAMIC_ATTACH_PROPERTY))) {
-      return true;
-    }
-    final String envValue = environment.get(ALLOW_DYNAMIC_ATTACH_ENV);
-    return envValue != null && Boolean.parseBoolean(envValue);
+    return AgentArgs.parseBoolean(
+            ALLOW_DYNAMIC_ATTACH_PROPERTY,
+            systemProperties.getProperty(ALLOW_DYNAMIC_ATTACH_PROPERTY),
+            false)
+        || AgentArgs.parseBoolean(
+            ALLOW_DYNAMIC_ATTACH_ENV, environment.get(ALLOW_DYNAMIC_ATTACH_ENV), false);
   }
 
   /**
    * Installs the chaos agent into the current JVM using {@link ByteBuddyAgent#install()}, without
    * requiring the {@code -javaagent:} command-line flag.
    *
-   * <p>This method is intended exclusively for use in unit and integration test environments where
-   * adding {@code -javaagent:} to every test runner invocation is inconvenient. It performs a
-   * self-attach via the JVM Attach API, which may require the JVM to be started with {@code
-   * -Djdk.attach.allowAttachSelf=true} on some JDK versions.
+   * <p>Used by the test extensions and by the framework integrations when chaos is enabled without
+   * {@code -javaagent:} on the command line. It performs a self-attach via the JVM Attach API and
+   * needs no JVM flag: where the JVM does not allow a process to attach to itself, ByteBuddy
+   * attaches from a helper process. On JDK 21 and later the JVM prints the JEP 451 warning for the
+   * dynamically loaded agent; {@code -XX:+EnableDynamicAgentLoading} or {@code -javaagent:} avoid
+   * it.
    *
-   * <p>If the agent is already installed (i.e. {@link #RUNTIME} is non-null), the existing {@link
-   * ChaosControlPlane} is returned immediately without reinitializing.
+   * <p>If the agent is already installed, the existing {@link ChaosControlPlane} is returned
+   * immediately without reinitializing.
    *
    * @return the installed {@link ChaosControlPlane}; never null
-   * @throws IllegalStateException if dynamic self-attach is unavailable on this JVM (e.g., the JDK
-   *     tools JAR is missing or the security manager prevents attachment). In this case, run tests
-   *     with {@code -javaagent:chaos-agent.jar} instead.
+   * @throws IllegalStateException if dynamic self-attach is unavailable on this JVM (e.g., the
+   *     {@code jdk.attach} module is missing, or the JVM runs with {@code
+   *     -XX:-EnableDynamicAgentLoading} or {@code -XX:+DisableAttachMechanism}). In this case, run
+   *     tests with {@code -javaagent:chaos-agent.jar} instead.
    */
   public static ChaosControlPlane installForLocalTests() {
-    final ChaosRuntime existing = RUNTIME.get();
+    copyByteBuddyExperimental();
+    final ChaosRuntime existing = installedRuntime();
     if (existing != null) {
       return existing;
     }
     // Double-checked under INSTALL_LOCK so two test threads racing their first call do not
     // both perform the expensive self-attach. ByteBuddyAgent.install() caches internally, but
     // initialize() below has non-trivial side effects (bridge JAR materialisation, MBean
-    // registration attempts, JFR probe). The inner initialize() performs a CAS on RUNTIME so
-    // correctness doesn't depend on this lock, but serialising here avoids doing the attach
-    // work twice when the outcome is identical.
+    // registration attempts, JFR probe). The inner initialize() claims INITIALIZATION with a
+    // CAS so correctness doesn't depend on this lock, but serialising here avoids doing the
+    // attach work twice when the outcome is identical.
     synchronized (INSTALL_LOCK) {
-      final ChaosRuntime existingAfterLock = RUNTIME.get();
+      final ChaosRuntime existingAfterLock = installedRuntime();
       if (existingAfterLock != null) {
         return existingAfterLock;
       }
       try {
         final Instrumentation instrumentation = ByteBuddyAgent.install();
-        return initialize("", instrumentation, Map.of(), true);
+        // The process environment, as for -javaagent: the framework starters self-attach in
+        // production too, and the documented MACSTAB_CHAOS_* switches must apply there.
+        return initialize("", instrumentation, System.getenv());
       } catch (final RuntimeException runtimeException) {
         throw runtimeException;
       } catch (final Exception exception) {
@@ -210,25 +482,37 @@ public final class ChaosAgentBootstrap {
    * @throws IllegalStateException if the chaos agent has not yet been installed in this JVM
    */
   public static ChaosControlPlane current() {
-    final ChaosRuntime runtime = RUNTIME.get();
+    final ChaosRuntime runtime = installedRuntime();
     if (runtime == null) {
-      throw new IllegalStateException("chaos agent is not installed");
+      throw new IllegalStateException("the chaos agent is not installed");
     }
     return runtime;
+  }
+
+  /** Returns the fully installed runtime, or {@code null} when none is (yet) installed. */
+  static @Nullable ChaosRuntime installedRuntime() {
+    final CompletableFuture<ChaosRuntime> initialization = INITIALIZATION.get();
+    if (initialization == null
+        || !initialization.isDone()
+        || initialization.isCompletedExceptionally()) {
+      return null;
+    }
+    return initialization.join();
   }
 
   /**
    * Core initialization routine; creates, wires, and publishes a {@link ChaosRuntime} for this JVM.
    *
-   * <p>This method is idempotent: if {@link #RUNTIME} is already set when this method is entered,
-   * the existing runtime is returned immediately without performing any further work. If two
-   * threads race to initialize, only one will succeed in the compare-and-set; the other will
-   * discard its freshly constructed runtime and return the winner's instance.
+   * <p>This method is idempotent: if an initialization already completed, its runtime is returned
+   * without further work; if one is in progress on another thread, this call waits for it. If the
+   * initialization fails, everything it installed is rolled back and the slot is freed, so a later
+   * call can retry.
    *
    * <p>On successful initialization, this method:
    *
    * <ol>
-   *   <li>Creates a new {@link ChaosRuntime}.
+   *   <li>Creates a new {@link ChaosRuntime} and hands it the {@link Instrumentation}, which the
+   *       safepoint storm retransforms classes through.
    *   <li>Installs all JDK instrumentation via {@link
    *       com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller}.
    *   <li>Registers a {@link ChaosDiagnosticsMBean} with the platform MBean server.
@@ -236,7 +520,7 @@ public final class ChaosAgentBootstrap {
    *   <li>Loads a startup chaos plan from the agent args / environment (if configured) and
    *       activates it. If {@code debugDumpOnStart} is set, prints a diagnostics dump to {@code
    *       System.err}.
-   *   <li>Publishes the runtime via {@link AtomicReference#compareAndSet}.
+   *   <li>Completes the {@link #INITIALIZATION} future, which publishes the runtime.
    * </ol>
    *
    * @param agentArgs raw argument string from the {@code -javaagent} option or attach call; parsed
@@ -244,49 +528,48 @@ public final class ChaosAgentBootstrap {
    * @param instrumentation the JVM {@link Instrumentation} handle used to install transformers
    * @param environment a snapshot of the process environment variables (typically {@link
    *     System#getenv()}); used to resolve config sources such as {@code MACSTAB_CHAOS_CONFIG_FILE}
-   * @param premainMode {@code true} when called from {@link #premain} (static attach, before
-   *     application main); {@code false} when called from {@link #agentmain} or {@link
-   *     #installForLocalTests} (dynamic attach or test self-attach). The instrumentation installer
-   *     uses this flag to decide which retransformation strategies are safe.
    * @return the initialized (or already-initialized) {@link ChaosRuntime}; never null
    */
   static ChaosRuntime initialize(
-      final String agentArgs,
+      final @Nullable String agentArgs,
+      final Instrumentation instrumentation,
+      final Map<String, String> environment) {
+    return initialize(agentArgs, instrumentation, environment, false);
+  }
+
+  /**
+   * As {@link #initialize(String, Instrumentation, Map)}; with {@code deferMBean}, the MBean of the
+   * installed runtime is registered by {@link #finishDeferredStart} instead (premain).
+   */
+  private static ChaosRuntime initialize(
+      final @Nullable String agentArgs,
       final Instrumentation instrumentation,
       final Map<String, String> environment,
-      final boolean premainMode) {
-    final ChaosRuntime existing = RUNTIME.get();
+      final boolean deferMBean) {
+    final CompletableFuture<ChaosRuntime> claim = new CompletableFuture<>();
+    final CompletableFuture<ChaosRuntime> existing = INITIALIZATION.compareAndExchange(null, claim);
     if (existing != null) {
-      return existing;
+      final ChaosRuntime installed = awaitInitialization(existing);
+      reportIgnoredArgs(agentArgs);
+      return installed;
     }
-    // Claim the RUNTIME slot with a freshly constructed runtime *before* performing any
-    // side-effecting installation (instrumentation, MBean, JFR, config load). If we did the
-    // installation first and CAS'd after, a concurrent attach would run the whole install
-    // sequence twice against the same JVM — duplicate transformers, duplicate MBean
-    // registration attempts, a second StartupConfigPoller thread. Because installation is
-    // effectively unwindable once ByteBuddy has transformed bootstrap classes, we must decide
-    // who wins *first*. The loser simply discards its unused runtime object.
-    final ChaosRuntime runtime = new ChaosRuntime();
-    if (!RUNTIME.compareAndSet(null, runtime)) {
-      return RUNTIME.get();
-    }
-    // Rollback on installation failure. Without this, an IOException from injectBridge, a
-    // reflection error from installDelegate, or an unrecoverable startup-plan failure would leave
-    // RUNTIME permanently holding a half-initialised instance with a null BootstrapDispatcher
-    // delegate. Every later call to initialize() / installForLocalTests() short-circuits on
-    // RUNTIME.get() != null, so the JVM stays in a silently-broken state for its entire lifetime.
-    // CAS'ing back to null on failure lets a subsequent attach retry cleanly; re-throwing keeps
-    // the caller aware of the failure instead of hiding it behind the short-circuit path.
+    // This thread won the slot. Installation has JVM-wide side effects (transformers, the bridge
+    // delegate, the MBean), so exactly one initializer performs it; concurrent callers wait for
+    // the outcome above instead of seeing a half-installed runtime.
+    initializingThread = Thread.currentThread();
     try {
-      JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode);
-      registerMBean(runtime);
-      installJfrIntegration(runtime);
-      final Optional<StartupConfigLoader.LoadedPlan> loadedPlan =
-          StartupConfigLoader.load(agentArgs, environment);
-      loadedPlan.ifPresent(loaded -> activateLoadedPlan(loaded, agentArgs, environment, runtime));
+      // Resolved once: every setting reads these, and a parse warning is printed once.
+      final AgentSettings settings = AgentSettings.of(agentArgs, environment);
+      final ChaosRuntime runtime = installRuntime(settings, instrumentation, deferMBean);
+      installedArgs = settings.args();
+      // Shared by every caller from here on: closing it would end chaos for the whole JVM.
+      runtime.markJvmWide();
+      claim.complete(runtime);
       return runtime;
     } catch (final Throwable installFailure) {
-      RUNTIME.compareAndSet(runtime, null);
+      // Free the slot before failing the future so waiters that retry find it empty.
+      INITIALIZATION.compareAndSet(claim, null);
+      claim.completeExceptionally(installFailure);
       if (installFailure instanceof RuntimeException re) {
         throw re;
       }
@@ -294,45 +577,283 @@ public final class ChaosAgentBootstrap {
         throw error;
       }
       throw new IllegalStateException("agent initialization failed", installFailure);
+    } finally {
+      initializingThread = null;
     }
   }
 
-  private static void activateLoadedPlan(
+  /**
+   * A runtime is already installed, so the agent args of this attach are not applied: names, in one
+   * line, those that differ from the installed ones (keys only; a value can hold a plan).
+   */
+  private static void reportIgnoredArgs(final @Nullable String agentArgs) {
+    // Set before the runtime is published, so it is present for every caller that gets here.
+    final AgentArgs active = Objects.requireNonNull(installedArgs, "installedArgs");
+    String ignored;
+    try {
+      ignored =
+          String.join(
+              ", ",
+              AgentArgsParser.parse(agentArgs).values().entrySet().stream()
+                  .filter(entry -> !entry.getValue().equals(active.get(entry.getKey())))
+                  .map(Map.Entry::getKey)
+                  .sorted()
+                  .toList());
+    } catch (final IllegalArgumentException malformed) {
+      // Not the parser's message: it quotes the token, whose value can hold a plan.
+      ignored = "all (malformed)";
+    }
+    if (!ignored.isEmpty()) {
+      System.err.println(
+          "[chaos-agent] the agent is already installed; these agent args are ignored: "
+              + LogText.sanitize(ignored));
+    }
+  }
+
+  private static ChaosRuntime awaitInitialization(final CompletableFuture<ChaosRuntime> pending) {
+    if (initializingThread == Thread.currentThread()) {
+      throw new IllegalStateException(
+          "chaos agent initialization re-entered on the initializing thread");
+    }
+    try {
+      return pending.join();
+    } catch (final CompletionException failure) {
+      final Throwable cause = failure.getCause();
+      if (cause instanceof RuntimeException re) {
+        throw re;
+      }
+      if (cause instanceof Error error) {
+        throw error;
+      }
+      throw new IllegalStateException("agent initialization failed", cause);
+    }
+  }
+
+  /**
+   * Installs a new runtime: instrumentation, MBean, JFR and the startup plan. On failure every step
+   * that already ran is undone — the transformers and the bridge delegate are removed, the MBean is
+   * unregistered and the runtime (with its JFR listener) is closed — so a retry starts from a clean
+   * JVM. Clearing only the published reference is not enough: a retry would install a second set of
+   * transformers (advice runs twice) and the MBean would keep reporting the dead runtime.
+   */
+  private static ChaosRuntime installRuntime(
+      final AgentSettings settings,
+      final Instrumentation instrumentation,
+      final boolean deferMBean) {
+    final ChaosRuntime runtime = new ChaosRuntime();
+    // The safepoint storm retransforms classes through it; set before any plan activates.
+    runtime.setInstrumentation(instrumentation);
+    boolean instrumentationInstalled = false;
+    Object registeredMBean = null;
+    Optional<ChaosReports> reports = Optional.empty();
+    try {
+      JdkInstrumentationInstaller.install(
+          instrumentation,
+          runtime,
+          eagerInstrumentation(settings),
+          clockCallSites(settings),
+          listSetting(
+              settings,
+              SESSION_HEADER_HOSTS_ARG,
+              SESSION_HEADER_HOSTS_PROPERTY,
+              SESSION_HEADER_HOSTS_ENV),
+          bridgeDir(settings));
+      instrumentationInstalled = true;
+      final boolean control = jmxControl(settings);
+      if (!deferMBean) {
+        registeredMBean = registerMBean(runtime, control);
+      }
+      installJfrIntegration(runtime);
+      reports = ChaosReports.createIfEnabled(settings, runtime);
+      final Optional<ChaosReports> report = reports;
+      final Optional<StartupConfigLoader.LoadedPlan> loadedPlan;
+      try {
+        loadedPlan = StartupConfigLoader.load(settings);
+      } catch (final ConfigLoadException loadFailure) {
+        report.ifPresent(
+            r ->
+                r.statusError(
+                    loadFailure.getSource(),
+                    loadFailure.line(),
+                    loadFailure.column(),
+                    loadFailure.reason()));
+        // Without its cause: the JVM prints the cause chain of a failed premain, and Jackson's
+        // message in it quotes an excerpt of the plan, which can hold credentials.
+        throw new ConfigLoadException(
+            String.valueOf(loadFailure.getMessage()),
+            loadFailure.getSource(),
+            null,
+            loadFailure.line(),
+            loadFailure.column(),
+            loadFailure.reason());
+      }
+      loadedPlan.ifPresent(
+          loaded -> {
+            final boolean watched;
+            try {
+              watched = activateLoadedPlan(loaded, settings, runtime);
+            } catch (final RuntimeException activationFailure) {
+              report.ifPresent(
+                  r ->
+                      r.statusError(
+                          loaded.source(), 0, 0, ChaosReports.reasonOf(activationFailure)));
+              throw activationFailure;
+            }
+            // A watched plan is reported by its poller, before its first tick.
+            if (!watched) {
+              report.ifPresent(r -> r.statusOk(loaded.plan().scenarios().size(), loaded.source()));
+            }
+          });
+      if (deferMBean) {
+        DEFERRED_MBEAN.set(() -> registerMBean(runtime, control));
+      }
+      return runtime;
+    } catch (final Throwable installFailure) {
+      reports.ifPresent(ChaosReports::close);
+      rollBack(instrumentation, runtime, instrumentationInstalled, registeredMBean, installFailure);
+      throw installFailure;
+    }
+  }
+
+  /**
+   * Whether every hook group is woven at start instead of on demand: agent arg {@code
+   * instrumentation=eager}, system property {@value #INSTRUMENTATION_PROPERTY}{@code =eager} or
+   * environment variable {@value #INSTRUMENTATION_ENV}{@code =eager}. On demand is the default.
+   */
+  static boolean eagerInstrumentation(final AgentSettings settings) {
+    return "eager"
+        .equalsIgnoreCase(
+            settings.valueOrEmpty(
+                INSTRUMENTATION_ARG, INSTRUMENTATION_PROPERTY, INSTRUMENTATION_ENV));
+  }
+
+  /**
+   * The directory for the bootstrap bridge jar: agent arg {@code bridgeDir}, system property
+   * {@value #BRIDGE_DIR_PROPERTY} or environment variable {@value #BRIDGE_DIR_ENV}. The bootstrap
+   * class loader runs the code in that jar, so the directory must pass {@link DirectoryTrust}; a
+   * refused one aborts the start with the reason rather than fall back to another directory. The
+   * path is resolved once and checked there, and that real path is returned: the jar is created,
+   * written and opened through it, so a link on the configured path re-pointed after the check
+   * moves nothing.
+   *
+   * @return the directory's real path, or {@code null} when not set
+   * @throws IllegalStateException if the directory is refused
+   */
+  static java.nio.file.@Nullable Path bridgeDir(final AgentSettings settings) {
+    final String value = settings.valueOrEmpty(BRIDGE_DIR_ARG, BRIDGE_DIR_PROPERTY, BRIDGE_DIR_ENV);
+    if (value.isEmpty()) {
+      return null;
+    }
+    final java.nio.file.Path directory = java.nio.file.Path.of(value);
+    final java.nio.file.Path real;
+    try {
+      real = directory.toRealPath();
+    } catch (final java.io.IOException missing) {
+      throw new IllegalStateException(
+          "[chaos-agent] bridgeDir "
+              + directory
+              + " is refused: it cannot be resolved ("
+              + missing
+              + ")");
+    }
+    final Optional<String> refusal = DirectoryTrust.distrust(directory, real);
+    if (refusal.isPresent()) {
+      throw new IllegalStateException(
+          "[chaos-agent] bridgeDir " + directory + " is refused: " + refusal.get());
+    }
+    return real;
+  }
+
+  /**
+   * The package prefixes for clock call-site weaving: agent arg {@code clockCallSites}, system
+   * property {@value #CLOCK_CALL_SITES_PROPERTY} or environment variable {@value
+   * #CLOCK_CALL_SITES_ENV}, comma-separated. Off (empty) by default.
+   */
+  static List<String> clockCallSites(final AgentSettings settings) {
+    return listSetting(
+        settings, CLOCK_CALL_SITES_ARG, CLOCK_CALL_SITES_PROPERTY, CLOCK_CALL_SITES_ENV);
+  }
+
+  /** A comma-separated list setting: agent argument, then system property, then environment. */
+  static List<String> listSetting(
+      final AgentSettings settings, final String arg, final String property, final String env) {
+    final String value = settings.valueOrEmpty(arg, property, env);
+    return java.util.Arrays.stream(value.split(","))
+        .map(String::strip)
+        .filter(entry -> !entry.isEmpty())
+        .toList();
+  }
+
+  private static void rollBack(
+      final Instrumentation instrumentation,
+      final ChaosRuntime runtime,
+      final boolean instrumentationInstalled,
+      final @Nullable Object registeredMBean,
+      final Throwable installFailure) {
+    if (instrumentationInstalled) {
+      try {
+        JdkInstrumentationInstaller.uninstall(instrumentation);
+      } catch (final RuntimeException rollbackFailure) {
+        installFailure.addSuppressed(rollbackFailure);
+      }
+    }
+    if (registeredMBean != null) {
+      try {
+        DiagnosticsMBeanRegistration.unregister(registeredMBean);
+      } catch (final Exception rollbackFailure) {
+        installFailure.addSuppressed(rollbackFailure);
+      }
+    }
+    try {
+      runtime.close();
+    } catch (final RuntimeException rollbackFailure) {
+      installFailure.addSuppressed(rollbackFailure);
+    }
+  }
+
+  /**
+   * Activates the startup plan, through a poller when its file is watched.
+   *
+   * @return whether a poller watches the plan file
+   */
+  private static boolean activateLoadedPlan(
       final StartupConfigLoader.LoadedPlan loaded,
-      final String agentArgs,
-      final Map<String, String> environment,
+      final AgentSettings settings,
       final ChaosRuntime runtime) {
+    boolean watched = false;
     if (loaded.filePath() != null) {
       final Optional<StartupConfigPoller> poller =
-          StartupConfigPoller.createIfEnabled(agentArgs, environment, loaded.filePath(), runtime);
+          StartupConfigPoller.createIfEnabled(settings, loaded.filePath(), runtime);
       if (poller.isPresent()) {
-        startPollerWithInitialPlan(poller.get(), loaded, runtime);
+        startPollerWithInitialPlan(poller.get(), loaded);
+        watched = true;
       } else {
         runtime.activate(loaded.plan());
       }
     } else {
       runtime.activate(loaded.plan());
     }
-    if (loaded.debugDumpOnStart()) {
+    // runtime.activate(plan) prints the plan's own debugDumpOnStart; the poller path does not.
+    final boolean planDumps = loaded.plan().observability().debugDumpOnStart();
+    final boolean pollerActivated = POLLER.get() != null;
+    if ((loaded.debugDumpOnStart() && !planDumps) || (planDumps && pollerActivated)) {
       System.err.println(runtime.diagnostics().debugDump());
     }
+    return watched;
   }
 
   private static void startPollerWithInitialPlan(
-      final StartupConfigPoller poller,
-      final StartupConfigLoader.LoadedPlan loaded,
-      final ChaosRuntime runtime) {
+      final StartupConfigPoller poller, final StartupConfigLoader.LoadedPlan loaded) {
     POLLER.set(poller);
     try {
-      poller.startWithInitialPlan(loaded.plan().scenarios());
+      poller.startWithInitialPlan(loaded.plan(), loaded.planFile());
     } catch (final RuntimeException startFailure) {
       // startWithInitialPlan can throw after POLLER has been populated — e.g. an
       // activation failure on the initial plan, a scheduler rejection, or an I/O
       // hiccup reading the plan file. Without this, the poller scheduler daemon
       // thread is leaked for the JVM lifetime and POLLER holds a stray reference
-      // even though startup failed. The outer try/catch in initialize() will CAS the
-      // RUNTIME back to null so the agent looks cleanly uninstalled — but the
-      // poller thread would continue running, calling runtime.activate() on a
+      // even though startup failed. The rollback in installRuntime() uninstalls the agent —
+      // but the poller thread would continue running, calling runtime.activate() on a
       // runtime that is no longer published. Close it before propagating.
       try {
         poller.close();
@@ -352,15 +873,41 @@ public final class ChaosAgentBootstrap {
     }
   }
 
-  private static void registerMBean(final ChaosRuntime runtime) {
+  /**
+   * Whether the MBean's control operations are enabled: agent argument {@code jmxControl=true},
+   * system property {@code macstab.chaos.jmx.control=true} or environment variable {@code
+   * MACSTAB_CHAOS_JMX_CONTROL=true}. Off by default.
+   */
+  static boolean jmxControl(final AgentSettings settings) {
+    return AgentArgs.parseBoolean(
+        JMX_CONTROL_ARG,
+        settings.valueOrEmpty(JMX_CONTROL_ARG, JMX_CONTROL_PROPERTY, JMX_CONTROL_ENV),
+        false);
+  }
+
+  private static final String JMX_CONTROL_ARG = "jmxControl";
+  private static final String JMX_CONTROL_PROPERTY = "macstab.chaos.jmx.control";
+  private static final String JMX_CONTROL_ENV = "MACSTAB_CHAOS_JMX_CONTROL";
+
+  /**
+   * Registers the diagnostics MBean; on a runtime without {@code java.management} (a jlink image,
+   * {@code --limit-modules}) there is no MBean server, and the agent runs without the MBean.
+   *
+   * @return the registered {@code ObjectName}, or {@code null} when nothing was registered
+   */
+  private static @Nullable Object registerMBean(final ChaosRuntime runtime, final boolean control) {
     try {
-      final ObjectName objectName = new ObjectName("com.macstab.chaos.jvm:type=ChaosDiagnostics");
-      ManagementFactory.getPlatformMBeanServer()
-          .registerMBean(new ChaosDiagnosticsMBean(runtime.diagnostics()), objectName);
-    } catch (final javax.management.InstanceAlreadyExistsException ignored) {
-      // a concurrent registrant beat us; the existing MBean is functionally identical
-    } catch (final Exception exception) {
-      System.err.println("[chaos-agent] MBean registration skipped: " + exception.getMessage());
+      return DiagnosticsMBeanRegistration.register(MBEAN_NAME, runtime, control);
+    } catch (final LinkageError linkage) {
+      // Without branches: this runs only in a JVM that cannot record coverage of it.
+      System.err.println(
+          "[chaos-agent] MBean registration skipped: the diagnostics MBean could not be linked"
+              + " (java.management in the runtime: "
+              + ModuleLayer.boot().findModule("java.management").isPresent()
+              + ", "
+              + linkage
+              + ")");
+      return null;
     }
   }
 }

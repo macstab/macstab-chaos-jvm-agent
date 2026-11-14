@@ -1,0 +1,203 @@
+package com.macstab.chaos.jvm.startup;
+
+import com.macstab.chaos.jvm.api.Internal;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
+import org.jspecify.annotations.Nullable;
+
+/**
+ * The trust check of a directory the agent writes code into ({@code bridgeDir}): the directory must
+ * be neither world-writable without the sticky bit nor owned by another user than the JVM's (root
+ * excepted), no directory above it world-writable without the sticky bit or owned by another user,
+ * and no link on the configured path owned by another user. Any of them would let another local
+ * user replace what the agent writes there, or move it. The caller resolves the real path once and
+ * uses it for every file operation ({@link #distrust(Path, Path)}). The plan file follows only the
+ * mode rule, for the file and its own directory ({@link StartupConfigLoader}); the owner, ancestor
+ * and link rules apply to the directory the agent writes code into. Modes and owners are POSIX
+ * notions: on a file system without a {@code posix} view (Windows) only the existence of the
+ * directory is checked.
+ */
+@Internal
+public final class DirectoryTrust {
+
+  private static final int POSIX_STICKY_BIT = 01000;
+
+  private DirectoryTrust() {}
+
+  /**
+   * Test seam of {@link #distrust(Path, Path)} that resolves the real path itself: the file
+   * system's attribute views, the owner lookup and the JVM's user name are passed in.
+   *
+   * @param directory the directory, as configured
+   * @param supportedViews the attribute views of the directory's file system
+   * @param ownerOf the owner name of a path; throws {@link UncheckedIOException} or {@link
+   *     UnsupportedOperationException} where it is unavailable
+   * @param jvmUser the JVM's user name ({@code user.name})
+   * @return the reason, or empty when the directory is trusted
+   */
+  static Optional<String> distrust(
+      final Path directory,
+      final Set<String> supportedViews,
+      final Function<Path, String> ownerOf,
+      final String jvmUser) {
+    final Path real;
+    try {
+      real = directory.toRealPath();
+    } catch (final IOException missing) {
+      return Optional.of("it cannot be resolved (" + missing + ")");
+    }
+    return distrust(directory, real, supportedViews, ownerOf, jvmUser);
+  }
+
+  /**
+   * Returns why a directory is not trusted, checked at a real path the caller resolved once: the
+   * caller then uses that real path, never the configured one, for every file it creates, writes
+   * and opens there, so a link re-pointed after the check cannot move them.
+   *
+   * @param directory the directory, as configured
+   * @param real its real path ({@link Path#toRealPath})
+   * @return the reason, or empty when the directory is trusted
+   */
+  public static Optional<String> distrust(final Path directory, final Path real) {
+    return distrust(
+        directory,
+        real,
+        real.getFileSystem().supportedFileAttributeViews(),
+        DirectoryTrust::ownerName,
+        System.getProperty("user.name", ""));
+  }
+
+  private static Optional<String> distrust(
+      final Path directory,
+      final Path real,
+      final Set<String> supportedViews,
+      final Function<Path, String> ownerOf,
+      final String jvmUser) {
+    if (!Files.isDirectory(real, LinkOption.NOFOLLOW_LINKS)) {
+      return Optional.of("it is not a directory");
+    }
+    if (!supportedViews.contains("posix")) {
+      return Optional.empty();
+    }
+    try {
+      if (worldWritableWithoutSticky(real)) {
+        return Optional.of("it is world-writable without the sticky bit");
+      }
+      final Path parent = real.getParent();
+      if (parent != null && worldWritableWithoutSticky(parent)) {
+        return Optional.of(
+            "its parent directory " + parent + " is world-writable without the sticky bit");
+      }
+      // Whoever can write a directory higher up can rename the path below it away and put another
+      // in its place.
+      for (Path above = parent == null ? null : parent.getParent();
+          above != null;
+          above = above.getParent()) {
+        if (worldWritableWithoutSticky(above)) {
+          return Optional.of(
+              "the directory " + above + " on its path is world-writable without the sticky bit");
+        }
+      }
+    } catch (final IOException | UnsupportedOperationException unreadable) {
+      return Optional.of("its permissions cannot be read (" + unreadable + ")");
+    }
+    if (jvmUser.isBlank() || jvmUser.equals("?")) {
+      return Optional.empty();
+    }
+    final String owner = ownerOrNull(real, ownerOf);
+    if (owner != null && !trustedOwner(owner, jvmUser)) {
+      return Optional.of("it is owned by " + owner + ", not by the JVM's user " + jvmUser);
+    }
+    // The owner of a directory above it can rename the path away, the owner of a link on the
+    // configured path can re-point it: both choose where the caller's files land.
+    for (Path above = real.getParent(); above != null; above = above.getParent()) {
+      final String aboveOwner = ownerOrNull(above, ownerOf);
+      if (aboveOwner != null && !trustedOwner(aboveOwner, jvmUser)) {
+        return Optional.of(
+            "the directory "
+                + above
+                + " on its path is owned by "
+                + aboveOwner
+                + ", not by the JVM's user "
+                + jvmUser);
+      }
+    }
+    final Path configured = directory.toAbsolutePath();
+    final Path root = configured.getRoot();
+    Path prefix = root;
+    for (final Path name : configured) {
+      prefix = prefix == null ? name : prefix.resolve(name);
+      if (Files.isSymbolicLink(prefix)) {
+        final String linkOwner = ownerOrNull(prefix, ownerOf);
+        if (linkOwner != null && !trustedOwner(linkOwner, jvmUser)) {
+          return Optional.of(
+              "the link "
+                  + prefix
+                  + " on its path is owned by "
+                  + linkOwner
+                  + ", not by the JVM's user "
+                  + jvmUser);
+        }
+      }
+    }
+    return Optional.empty();
+  }
+
+  private static boolean trustedOwner(final String owner, final String jvmUser) {
+    return owner.equals(jvmUser) || owner.equals("root");
+  }
+
+  /** The owner of a path, or {@code null} when the file system cannot name it. */
+  private static @Nullable String ownerOrNull(
+      final Path path, final Function<Path, String> ownerOf) {
+    try {
+      return ownerOf.apply(path);
+    } catch (final UncheckedIOException | UnsupportedOperationException unavailable) {
+      return null;
+    }
+  }
+
+  /**
+   * Whether a directory (its real path) is world-writable without the sticky bit: any local user
+   * can then replace the entries in it by unlink and create, even a file of mode 0644. The sticky
+   * bit (as on {@code /tmp}) restricts unlink to the entry's owner.
+   *
+   * @throws IOException if the mode cannot be read
+   */
+  static boolean worldWritableWithoutSticky(final Path directory) throws IOException {
+    return Files.getPosixFilePermissions(directory, LinkOption.NOFOLLOW_LINKS)
+            .contains(PosixFilePermission.OTHERS_WRITE)
+        && !isStickyBitSet(directory);
+  }
+
+  private static boolean isStickyBitSet(final Path directory) {
+    // POSIX sticky bit is not exposed by Files.getPosixFilePermissions (only the nine rwxrwxrwx
+    // mode bits are). Use the Unix-specific "unix:mode" attribute view where available, which
+    // returns the full 16-bit mode including setuid/setgid/sticky in the high bits. On
+    // filesystems that don't expose it, assume sticky is NOT set — fail-closed.
+    try {
+      final Object mode = Files.getAttribute(directory, "unix:mode", LinkOption.NOFOLLOW_LINKS);
+      if (mode instanceof Integer modeValue) {
+        return (modeValue & POSIX_STICKY_BIT) != 0;
+      }
+    } catch (UnsupportedOperationException | IllegalArgumentException | IOException ignored) {
+      // Fall through to fail-closed.
+    }
+    return false;
+  }
+
+  private static String ownerName(final Path path) {
+    try {
+      return Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).getName();
+    } catch (final IOException unavailable) {
+      throw new UncheckedIOException(unavailable);
+    }
+  }
+}

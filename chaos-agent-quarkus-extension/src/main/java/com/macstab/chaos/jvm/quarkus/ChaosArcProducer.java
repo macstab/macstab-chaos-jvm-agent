@@ -3,9 +3,14 @@ package com.macstab.chaos.jvm.quarkus;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import io.quarkus.arc.DefaultBean;
-import io.quarkus.arc.properties.IfBuildProperty;
+import io.quarkus.runtime.LaunchMode;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Disposes;
 import jakarta.enterprise.inject.Produces;
+import java.lang.reflect.InvocationTargetException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * CDI producer that exposes the installed {@link ChaosControlPlane} as an application-scoped
@@ -15,16 +20,25 @@ import jakarta.enterprise.inject.Produces;
  * bean is marked {@link DefaultBean} so user code can override it by declaring a higher-priority
  * producer or a {@code @Priority}-annotated {@code @Produces} method.
  *
- * <h2>Build-time gate</h2>
+ * <h2>Run-time switch</h2>
  *
- * <p>The producer is gated by the {@code macstab.chaos.enabled} build-time property and is
- * <b>opt-in</b>: when the property is absent the producer is <i>not</i> registered and {@link
- * ChaosPlatform#installLocally()} is never invoked. Dropping the extension jar onto a production
- * classpath therefore does not silently self-attach a JVM-wide chaos plane; an operator must
- * explicitly set {@code macstab.chaos.enabled=true} at build time. This matches the default chosen
- * by the recorder side of the extension and the Spring Boot starter, so the behaviour across
- * frameworks is consistent: chaos is never active-by-default, only by affirmative build-time
- * opt-in.
+ * <p>The producer is always registered; whether it attaches the agent is decided at run time by
+ * {@code macstab.chaos.enabled}, honoured only from a launch-time local source (see {@link
+ * ChaosQuarkusRecorder}). Without the switch {@link ChaosPlatform#installLocally()} is never
+ * invoked, so dropping the extension jar onto a production classpath does not self-attach a
+ * JVM-wide chaos plane; injecting the bean then fails on first use unless an agent is already
+ * installed ({@code -javaagent:}, the test extension).
+ *
+ * <h2>In a Quarkus test</h2>
+ *
+ * <p>In {@link LaunchMode#TEST} the bean is the control plane tracked by {@link
+ * ChaosQuarkusExtension}: what a test activates through an injected {@code ChaosControlPlane} is
+ * stopped when the last running chaos test class ends, or when the application stops. The extension
+ * runs in the class loader JUnit loaded it from, the producer in Quarkus's, so the producer reaches
+ * it through the system class loader; the api is shared because it is a parent-first artifact. In a
+ * plain {@code @QuarkusTest} of a project without {@code chaos-agent-testkit} the bean is the
+ * untracked control plane, silently; where the testkit is there but the extension cannot be called,
+ * the bean is the untracked control plane and one warning says so.
  *
  * <h2>Usage</h2>
  *
@@ -46,26 +60,133 @@ import jakarta.enterprise.inject.Produces;
 @ApplicationScoped
 public class ChaosArcProducer {
 
+  private static final Logger LOGGER = Logger.getLogger(ChaosArcProducer.class.getName());
+
+  /** The JUnit extension that tracks the bean in a test, loaded by the system class loader. */
+  private static final String EXTENSION = "com.macstab.chaos.jvm.quarkus.ChaosQuarkusExtension";
+
+  /** A class of {@code chaos-agent-testkit}, which the test extension is built on. */
+  private static final String TESTKIT = "com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane";
+
   /** Default constructor required by CDI. */
   public ChaosArcProducer() {}
 
   /**
    * Produces the singleton {@link ChaosControlPlane}.
    *
-   * <p>Only registered when {@code macstab.chaos.enabled=true} is set at build time. When the
-   * property is unset or {@code false}, the producer is excluded from the CDI container and
-   * injection of {@link ChaosControlPlane} will fail with an unsatisfied-dependency error unless
-   * the application provides its own producer — exactly the behaviour we want so that merely
-   * shipping the extension on the classpath does not self-attach chaos in production.
+   * <p>The agent is attached only while {@code macstab.chaos.enabled} is true at run time.
+   * Otherwise the bean is an agent already installed ({@code -javaagent:}, the test extension), and
+   * using it without one fails with {@link IllegalStateException}.
    *
-   * @return the active {@link ChaosControlPlane}, installed on demand if the agent has not yet
-   *     attached
+   * <p>When the attach failed at runtime-init ({@code ChaosQuarkusRecorder} logs it and the
+   * application starts), creating this bean attaches again and fails with the same error: inject
+   * {@code Instance<ChaosControlPlane>} where the application must run without the agent.
+   *
+   * @return the active {@link ChaosControlPlane}
+   * @throws IllegalStateException when chaos is disabled at run time and no agent is installed
    */
   @Produces
   @ApplicationScoped
   @DefaultBean
-  @IfBuildProperty(name = "macstab.chaos.enabled", stringValue = "true", enableIfMissing = false)
   public ChaosControlPlane chaosControlPlane() {
-    return ChaosPlatform.installLocally();
+    final ChaosControlPlane plane =
+        ChaosQuarkusRecorder.chaosEnabled()
+            ? ChaosPlatform.installLocally()
+            : ChaosPlatform.current();
+    if (LaunchMode.current() != LaunchMode.TEST) {
+      return plane;
+    }
+    return callExtension("contextPlane", plane) instanceof ChaosControlPlane tracked
+        ? tracked
+        : plane;
+  }
+
+  /**
+   * Releases a test's control plane when the application stops: what it activated stops.
+   *
+   * @param plane the bean being destroyed
+   */
+  void release(@Disposes final ChaosControlPlane plane) {
+    if (LaunchMode.current() == LaunchMode.TEST) {
+      callExtension("releaseContextPlane", plane);
+    }
+  }
+
+  /**
+   * Calls a static method of the test run's {@link ChaosQuarkusExtension} with {@code plane};
+   * returns its result, or {@code null} when it cannot.
+   */
+  private static @Nullable Object callExtension(
+      final String method, final ChaosControlPlane plane) {
+    return callExtension(
+        method,
+        plane,
+        testkitLoader(
+            ClassLoader.getSystemClassLoader(),
+            Thread.currentThread().getContextClassLoader(),
+            ChaosArcProducer.class.getClassLoader()));
+  }
+
+  /**
+   * The first of {@code candidates} that sees {@code chaos-agent-testkit}, or the first candidate
+   * when none does. The system class loader comes first: a test run started by Gradle or Maven
+   * loads the JUnit extension there. Under Quarkus continuous testing the testkit is only on a
+   * loader of Quarkus's own, which the context class loader or this class's loader reaches.
+   */
+  static ClassLoader testkitLoader(final @Nullable ClassLoader... candidates) {
+    ClassLoader first = null;
+    for (final ClassLoader candidate : candidates) {
+      if (candidate == null) {
+        continue;
+      }
+      if (first == null) {
+        first = candidate;
+      }
+      try {
+        Class.forName(TESTKIT, false, candidate);
+        return candidate;
+      } catch (final ClassNotFoundException | LinkageError absent) {
+        // not on this one
+      }
+    }
+    return first == null ? ClassLoader.getSystemClassLoader() : first;
+  }
+
+  /**
+   * Calls a static method of {@code loader}'s {@link ChaosQuarkusExtension} with {@code plane};
+   * returns its result, or {@code null} when it cannot. Without {@code chaos-agent-testkit} on
+   * {@code loader} (a plain {@code @QuarkusTest} of a project that does not declare it) there is no
+   * test extension to call: {@code null}, logged at {@code FINE} only; otherwise one warning says
+   * why the extension could not be called.
+   */
+  static @Nullable Object callExtension(
+      final String method, final ChaosControlPlane plane, final ClassLoader loader) {
+    try {
+      Class.forName(TESTKIT, false, loader);
+    } catch (final ClassNotFoundException | LinkageError absent) {
+      LOGGER.fine(
+          () ->
+              "[chaos-agent] chaos-agent-testkit is not on the test class path; the injected"
+                  + " ChaosControlPlane is the untracked control plane");
+      return null;
+    }
+    try {
+      final Class<?> extension = Class.forName(EXTENSION, true, loader);
+      return extension.getMethod(method, ChaosControlPlane.class).invoke(null, plane);
+    } catch (final ClassNotFoundException
+        | NoSuchMethodException
+        | IllegalAccessException
+        | InvocationTargetException
+        | IllegalArgumentException
+        | LinkageError unreachable) {
+      LOGGER.log(
+          Level.WARNING,
+          unreachable,
+          () ->
+              "[chaos-agent] the test extension is not reachable from the test run's class loader;"
+                  + " what a test activates through the injected ChaosControlPlane is not stopped"
+                  + " after the test class");
+      return null;
+    }
   }
 }

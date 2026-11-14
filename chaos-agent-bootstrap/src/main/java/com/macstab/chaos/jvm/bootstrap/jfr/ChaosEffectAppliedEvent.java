@@ -1,11 +1,15 @@
 package com.macstab.chaos.jvm.bootstrap.jfr;
 
+import com.macstab.chaos.jvm.api.Internal;
 import jdk.jfr.Category;
+import jdk.jfr.Description;
 import jdk.jfr.Enabled;
 import jdk.jfr.Event;
 import jdk.jfr.Label;
 import jdk.jfr.Name;
 import jdk.jfr.StackTrace;
+import jdk.jfr.Timespan;
+import org.jspecify.annotations.Nullable;
 
 /**
  * JFR event emitted each time a chaos effect is applied to a matched JVM operation.
@@ -22,9 +26,11 @@ import jdk.jfr.StackTrace;
  * WHERE effectType = 'DelayEffect'
  * }</pre>
  */
+@Internal
 @Name("com.macstab.chaos.jvm.EffectApplied")
 @Category({"Chaos", "Application"})
 @Label("Chaos Effect Applied")
+@Description("A chaos effect applied to an intercepted call")
 @StackTrace(false)
 @Enabled(false)
 public final class ChaosEffectAppliedEvent extends Event {
@@ -34,21 +40,33 @@ public final class ChaosEffectAppliedEvent extends Event {
 
   /** ID of the chaos scenario that matched and triggered this effect. */
   @Label("Scenario ID")
-  public String scenarioId;
+  public @Nullable String scenarioId;
 
   /** Category of the intercepted operation, e.g. {@code HTTP_CLIENT}, {@code JDBC}. */
   @Label("Operation Type")
-  public String operationType;
+  public @Nullable String operationType;
 
   /** Simple class name of the applied effect, e.g. {@code DelayEffect}, {@code ExceptionEffect}. */
   @Label("Effect Type")
-  public String effectType;
+  public @Nullable String effectType;
 
-  /** Scope key used to match this operation against the scenario's target criteria. */
+  /** The scope the scenario runs in: {@code jvm}, or {@code session:<id>}. */
   @Label("Scope Key")
-  public String scopeKey;
+  @Description("jvm, or session:<id>")
+  public @Nullable String scopeKey;
 
   /** Null when the effect was applied at JVM scope (not session-scoped). */
   @Label("Session ID")
-  public String sessionId;
+  public @Nullable String sessionId;
+
+  /** The number of the call among the scenario's matches, from 1; 0 when unknown. */
+  @Label("Match")
+  @Description("The number of the call among the scenario's matches, from 1")
+  public long match;
+
+  /** The delay the effect applied, in nanoseconds; 0 for an effect without a delay. */
+  @Label("Delay")
+  @Description("The delay the effect applied; 0 for an effect without a delay")
+  @Timespan(Timespan.NANOSECONDS)
+  public long delayNanos;
 }

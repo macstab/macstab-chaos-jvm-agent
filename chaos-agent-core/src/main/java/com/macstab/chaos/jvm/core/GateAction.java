@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import java.time.Duration;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Describes a manual gate that should be acquired (blocking the intercepted thread) as part of a
@@ -16,4 +17,4 @@ import java.time.Duration;
  *     java.time.Duration#ZERO} or {@link java.time.Duration#ofMillis(long) ofMillis(0)} means block
  *     indefinitely
  */
-record GateAction(ManualGate gate, Duration maxBlock) {}
+record GateAction(ManualGate gate, @Nullable Duration maxBlock) {}

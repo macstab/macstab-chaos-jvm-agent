@@ -17,3 +17,6 @@ Thumbs.db
 
 # Claude
 .claude/
+
+# jqwik property-test state
+.jqwik-database
