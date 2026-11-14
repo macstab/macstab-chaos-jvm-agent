@@ -71,7 +71,7 @@ class RealPathIntegrationTest {
       assertThat(result.value("heldAfter300ms")).isEqualTo("true");
       assertThat(result.value("returned")).isEqualTo("true");
       assertThat(result.longValue("returnedAfterReleaseMillis")).isLessThan(1_000L);
-      assertThat(result.longValue("elapsedMillis")).isGreaterThanOrEqualTo(300L);
+      assertThat(result.value("returnedAfterRelease")).isEqualTo("true");
       assertThat(result.longValue("applied")).isEqualTo(1L);
     }
 
@@ -93,6 +93,7 @@ class RealPathIntegrationTest {
       assertThat(result.value("heldAfter300ms")).isEqualTo("true");
       assertThat(result.value("returned")).isEqualTo("true");
       assertThat(result.longValue("returnedAfterReleaseMillis")).isLessThan(1_000L);
+      assertThat(result.value("returnedAfterRelease")).isEqualTo("true");
     }
   }
 

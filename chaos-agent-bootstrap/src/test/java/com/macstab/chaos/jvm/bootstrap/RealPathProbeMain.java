@@ -148,6 +148,7 @@ public final class RealPathProbeMain {
                 .build());
     final CountDownLatch returned = new CountDownLatch(1);
     final long[] elapsed = new long[1];
+    final long[] returnedAt = new long[1];
     final Thread worker =
         new Thread(
             () -> {
@@ -157,7 +158,8 @@ public final class RealPathProbeMain {
               } catch (final InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
               }
-              elapsed[0] = (System.nanoTime() - start) / 1_000_000L;
+              returnedAt[0] = System.nanoTime();
+              elapsed[0] = (returnedAt[0] - start) / 1_000_000L;
               returned.countDown();
             },
             "gated-worker");
@@ -176,6 +178,9 @@ public final class RealPathProbeMain {
       System.out.println("returned=" + returned.await(10, TimeUnit.SECONDS));
       System.out.println(
           "returnedAfterReleaseMillis=" + (System.nanoTime() - released) / 1_000_000L);
+      // Measured on one clock: the worker starts its own only once it runs, which a loaded
+      // runner delays past the start of the 300 ms wait.
+      System.out.println("returnedAfterRelease=" + (returnedAt[0] - released >= 0));
     }
     worker.join(10_000L);
     System.out.println("elapsedMillis=" + elapsed[0]);
