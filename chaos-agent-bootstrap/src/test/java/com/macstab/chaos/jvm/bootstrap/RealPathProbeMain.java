@@ -229,6 +229,17 @@ public final class RealPathProbeMain {
       }
       default -> throw new IllegalArgumentException(policy);
     }
+    // Weaves the Thread.sleep hooks before the window is laid out: on a slow runner the weaving of
+    // the activation below took most of a window that starts now, and the first (delayed) call then
+    // ended with the window, before its delay was up.
+    plane
+        .activate(
+            ChaosScenario.builder("policy-weave")
+                .selector(sleeps())
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(ActivationPolicy.manual())
+                .build())
+        .close();
     final Instant now = Instant.now();
     switch (policy) {
       case "rate-limit" -> builder.rateLimit(5L, Duration.ofSeconds(1));
